@@ -91,3 +91,21 @@ v1 has no server or bank connection. Records are stored in IndexedDB in the brow
 - Recurring fixed obligations are budgeted automatically but do not yet have a separate Expected/Paid workflow.
 - Reconciliation records are in the data architecture, but the full guided bank-reconciliation screen is a next-step feature.
 - Goal-rule editing UI is limited; the underlying model already supports the current Emergency/Home Travel dependency.
+
+## Revision 1.1 — 2026-09-29
+
+This revision keeps the original local data model and adds the requested interface/reconciliation improvements:
+
+- Home now shows Core Wealth, Financial Net Worth, and Non-Core Funds.
+- Activity uses three structured action cards with consistent outline icons and explanations.
+- All six bottom tabs now use one monochrome SVG icon system.
+- Bottom navigation supports iPhone safe areas and rounded screen corners.
+- E.SUN has an Update Balance flow for recording the exact bank balance.
+- E.SUN has an explicit Add Adjustment flow for ledger corrections; adjustments never silently reassign virtual buckets.
+- E.SUN now displays bank balance, expected ledger balance, virtual allocation total, bank-vs-ledger difference, and unassigned balance.
+- IndexedDB schema upgraded from version 1 to version 2 to add the `adjustments` store. Existing local data is preserved during the upgrade.
+- Service worker cache upgraded and old caches are cleared on activation so GitHub Pages/PWA updates propagate more reliably.
+
+### Updating an existing GitHub Pages installation
+
+Replace the files in the repository root with the files from this revision, keeping the same folder structure (`js/`, `icons/`, etc.). Commit the changes to `main`. GitHub Pages will redeploy automatically. Because this PWA uses a service worker, the first launch after deployment may still show the previous version briefly; close and reopen the installed PWA after the new service worker activates.

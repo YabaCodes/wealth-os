@@ -1,8 +1,8 @@
 import { DEFAULTS } from './defaults.js';
 
 const DB_NAME='wealth-os-db';
-const DB_VERSION=1;
-const STORES=['accounts','buckets','categories','goals','periods','incomes','expenses','transfers','transferAllocations','investmentSnapshots','reconciliations','monthlyCloses','settings'];
+const DB_VERSION=2;
+const STORES=['accounts','buckets','categories','goals','periods','incomes','expenses','transfers','transferAllocations','investmentSnapshots','reconciliations','adjustments','monthlyCloses','settings'];
 let dbPromise;
 
 function openDb(){
@@ -81,8 +81,8 @@ export async function bucketBalances(){
 }
 
 export async function accountBalances(){
-  const [accounts,incomes,expenses,transfers,snaps,settings]=await Promise.all([
-    getAll('accounts'),getAll('incomes'),getAll('expenses'),getAll('transfers'),getAll('investmentSnapshots'),getOne('settings','app')
+  const [accounts,incomes,expenses,transfers,snaps,adjustments,settings]=await Promise.all([
+    getAll('accounts'),getAll('incomes'),getAll('expenses'),getAll('transfers'),getAll('investmentSnapshots'),getAll('adjustments'),getOne('settings','app')
   ]);
   const out={};
   accounts.forEach(a=>out[a.id]=Number(a.openingBalance||0));
@@ -91,6 +91,9 @@ export async function accountBalances(){
   for(const t of transfers.filter(t=>t.status==='completed')){
     out[t.fromAccountId]=(out[t.fromAccountId]||0)-Number(t.amount||0);
     out[t.toAccountId]=(out[t.toAccountId]||0)+Number(t.amount||0);
+  }
+  for(const a of adjustments){
+    if(!a.deletedAt) out[a.accountId]=(out[a.accountId]||0)+Number(a.amount||0);
   }
   // Brokerage is snapshot-driven, not cash-ledger-driven, because market movement changes its value.
   const ibkr=accounts.find(a=>a.role==='investment');

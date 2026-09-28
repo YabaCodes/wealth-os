@@ -14,7 +14,7 @@ const nextMonthId=(dateStr)=>{const d=new Date(`${dateStr}T12:00:00`);return `${
 
 async function load(){
   await seedIfNeeded();
-  const keys=['accounts','buckets','categories','goals','periods','incomes','expenses','transfers','transferAllocations','investmentSnapshots','reconciliations','monthlyCloses'];
+  const keys=['accounts','buckets','categories','goals','periods','incomes','expenses','transfers','transferAllocations','investmentSnapshots','reconciliations','adjustments','monthlyCloses'];
   const vals=await Promise.all(keys.map(getAll));
   keys.forEach((k,i)=>state[k]=vals[i]);
   state.settings=await getOne('settings','app');
@@ -56,17 +56,43 @@ function latestInvestmentTwd(){
   if(!snap)return 0;return Number(snap.value)*Number(snap.fxRate||state.settings.usdTwdRate||1);
 }
 function goalBal(g){return Number(state.bucketBalances[g.bucketId]||0);}
+function icon(name,extra=''){
+  const paths={
+    home:'<path d="M3 11.5 12 4l9 7.5"/><path d="M5.5 10.5V20h13v-9.5"/><path d="M9.5 20v-6h5v6"/>',
+    budget:'<circle cx="5" cy="6" r="1"/><circle cx="5" cy="12" r="1"/><circle cx="5" cy="18" r="1"/><path d="M9 6h11M9 12h11M9 18h11"/>',
+    activity:'<path d="M8 4v16M8 4 4.5 7.5M8 4l3.5 3.5M16 20V4M16 20l-3.5-3.5M16 20l3.5-3.5"/>',
+    goals:'<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5"/>',
+    wealth:'<ellipse cx="9" cy="7" rx="5" ry="2.5"/><path d="M4 7v4c0 1.4 2.2 2.5 5 2.5s5-1.1 5-2.5V7M4 11v4c0 1.4 2.2 2.5 5 2.5 1.3 0 2.5-.25 3.4-.65"/><ellipse cx="16.5" cy="14.5" rx="3.5" ry="2"/><path d="M13 14.5v4c0 1.1 1.6 2 3.5 2s3.5-.9 3.5-2v-4"/>',
+    forecast:'<path d="M3 18l6-6 4 4 7-9"/><path d="M16 7h4v4"/>',
+    expense:'<path d="M12 4v13M7.5 12.5 12 17l4.5-4.5"/><path d="M5 20h14"/>',
+    income:'<path d="M12 20V7M7.5 11.5 12 7l4.5 4.5"/><path d="M5 4h14"/>',
+    transfer:'<path d="M4 8h14M14 4l4 4-4 4M20 16H6M10 12l-4 4 4 4"/>',
+    settings:'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21h-4v-.1A1.7 1.7 0 0 0 8.6 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3v-4h.1A1.7 1.7 0 0 0 4.6 8.6a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3h4v.1A1.7 1.7 0 0 0 15.4 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9c.1.36.31.7.6 1 .3.29.66.5 1.1.6h.1v4h-.1c-.44.1-.8.31-1.1.6-.29.3-.5.64-.6 1z"/>'
+  };
+  return `<svg class="ui-icon ${extra}" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${paths[name]||''}</svg>`;
+}
+function latestReconciliation(accountId){return [...state.reconciliations].filter(r=>r.accountId===accountId).sort((a,b)=>`${a.date||''}${a.createdAt||''}`.localeCompare(`${b.date||''}${b.createdAt||''}`)).at(-1)||null;}
+function esunSnapshot(){
+  const expected=Number(state.accountBalances.esun||0);
+  const virtualTotal=state.buckets.filter(b=>b.accountId==='esun').reduce((sum,b)=>sum+Number(state.bucketBalances[b.id]||0),0);
+  const rec=latestReconciliation('esun');
+  const actual=rec?Number(rec.actualBalance||0):expected;
+  return {expected,actual,virtualTotal,difference:actual-expected,unassigned:actual-virtualTotal,verified:Boolean(rec),reconciliation:rec};
+}
 
 function shell(content){
-  const p=currentPeriod();
+  const footer=tab==='transactions'?'':'<p class="footer-note">Local-first financial planning. Transfers are not expenses; virtual buckets track purpose independently of bank balances.</p>';
   root.innerHTML=`<main class="shell">
-    <header class="topbar"><div class="brand"><h1>Wealth OS</h1><p>Budget deliberately. Build wealth automatically.</p></div><button class="btn ghost small" data-action="settings">⚙︎ Settings</button></header>
+    <header class="topbar"><div class="brand"><h1>Wealth OS</h1><p>Budget deliberately. Build wealth automatically.</p></div><button class="btn ghost small settings-btn" data-action="settings">${icon('settings')}<span>Settings</span></button></header>
     ${content}
-    <p class="footer-note">Local-first financial planning. Transfers are not expenses; virtual buckets track purpose independently of bank balances.</p>
+    ${footer}
   </main>${nav()}${modal?renderModal():''}`;
   bind();
 }
-function nav(){const items=[['home','⌂','Home'],['budget','▤','Budget'],['transactions','↕','Activity'],['goals','◎','Goals'],['wealth','◈','Wealth'],['forecast','⌁','Forecast']];return `<nav class="tabs"><div class="tabs-inner">${items.map(([id,ic,l])=>`<button class="tab ${tab===id?'active':''}" data-tab="${id}"><b>${ic}</b>${l}</button>`).join('')}</div></nav>`;}
+function nav(){
+  const items=[['home','home','Home'],['budget','budget','Budget'],['transactions','activity','Activity'],['goals','goals','Goals'],['wealth','wealth','Wealth'],['forecast','forecast','Forecast']];
+  return `<nav class="tabs"><div class="tabs-inner">${items.map(([id,ic,label])=>`<button class="tab ${tab===id?'active':''}" data-tab="${id}" aria-label="${label}"><span class="tab-icon">${icon(ic)}</span><span class="tab-label">${label}</span></button>`).join('')}</div></nav>`;
+}
 
 function periodSelector(){
   if(!state.periods.length) return '';
@@ -85,6 +111,7 @@ function render(){
 function homeView(){
   const p=currentPeriod();
   const active=activeGoal(state.goals,state.bucketBalances);
+  const nonCore=state.wealth.financialNetWorth-state.wealth.coreWealth;
   if(!p){return `<section class="card hero-action"><div class="metric-label">Start here</div><div class="metric">Create your first funding month</div><p class="sub">Enter the exact paycheck that lands in your account. Wealth OS will allocate it using your rules.</p><button class="btn" data-action="new-paycheck">Enter Paycheck</button></section>${wealthStrip()}`;}
   const plan=planFor(p.id), spent=totalExpenses(p.id), core=completedCoreWealth(p.id), goalFunding=completedGoalFunding(p.id);
   const expTotals=expenseTotals(p.id);const sweep=sweepInfo(p.id);
@@ -96,9 +123,10 @@ function homeView(){
   const food=plan.lines.find(x=>x.id==='food'), foodSpent=expTotals.food||0;
   const social=plan.lines.find(x=>x.id==='dating-social'), socialSpent=expTotals['dating-social']||0;
   return `<div class="split"><div><span class="tag">${monthLabel(p.id)}</span></div>${periodSelector()}</div>
-  <div class="grid g2" style="margin-top:12px">
-    <section class="card"><div class="metric-label">Core Wealth</div><div class="metric">${money(state.wealth.coreWealth)}</div><div class="sub">Emergency savings + investments</div></section>
-    <section class="card"><div class="metric-label">Financial Net Worth</div><div class="metric">${money(state.wealth.financialNetWorth)}</div><div class="sub">Tithe excluded</div></section>
+  <div class="grid g3 summary-grid" style="margin-top:12px">
+    <section class="card"><div class="metric-label">Core Wealth</div><div class="metric">${money(state.wealth.coreWealth)}</div><div class="sub">Long-term wealth base</div></section>
+    <section class="card"><div class="metric-label">Financial Net Worth</div><div class="metric">${money(state.wealth.financialNetWorth)}</div><div class="sub">All financial assets, tithe excluded</div></section>
+    <section class="card"><div class="metric-label">Non-Core Funds</div><div class="metric">${money(nonCore)}</div><div class="sub">Operating cash + planned-use funds</div></section>
   </div>
   <section class="card" style="margin-top:14px"><div class="split"><div><div class="metric-label">Emergency Fund</div><strong>${money(eb)} / ${money(em?.targetAmount||300000)}</strong></div><span class="tag">${pct(ep)}</span></div><div class="progress"><span style="width:${Math.min(100,ep*100)}%"></span></div><div class="sub">Current wealth priority: ${esc(active?.name||'No active goal')}</div></section>
   <div class="grid g3" style="margin-top:14px">
@@ -114,9 +142,14 @@ function homeView(){
     <div class="actions" style="margin-top:12px"><button class="btn secondary" data-action="add-income">Add Income</button><button class="btn secondary" data-action="month-close">Month-End Review</button></div>
   </section>`;
 }
+
 function budgetMini(name,budget,actual){const r=budget-actual;const u=budget?Math.min(1,actual/budget):0;return `<div class="row"><div style="flex:1"><strong>${name}</strong><div class="progress"><span style="width:${u*100}%"></span></div><div class="sub">${money(actual)} of ${money(budget)}</div></div><div class="amount ${r<0?'bad':''}">${money(r)} left</div></div>`;}
 function row(label,value){return `<div class="row"><span>${label}</span><span class="amount">${value}</span></div>`;}
-function wealthStrip(){return `<div class="grid g2" style="margin-top:14px"><section class="card"><div class="metric-label">Starting financial net worth</div><div class="metric">${money(state.wealth.financialNetWorth)}</div></section><section class="card"><div class="metric-label">IBKR</div><div class="metric">${money(latestInvestmentTwd())}</div><div class="sub">FX is editable in Settings</div></section></div>`;}
+function wealthStrip(){
+  const nonCore=state.wealth.financialNetWorth-state.wealth.coreWealth;
+  return `<div class="grid g3 summary-grid" style="margin-top:14px"><section class="card"><div class="metric-label">Core Wealth</div><div class="metric">${money(state.wealth.coreWealth)}</div><div class="sub">Long-term wealth base</div></section><section class="card"><div class="metric-label">Financial Net Worth</div><div class="metric">${money(state.wealth.financialNetWorth)}</div><div class="sub">Tithe excluded</div></section><section class="card"><div class="metric-label">Non-Core Funds</div><div class="metric">${money(nonCore)}</div><div class="sub">Operating cash + planned-use funds</div></section></div>`;
+}
+
 
 function budgetView(){
   const p=currentPeriod();if(!p)return `<section class="card empty">Create a paycheck first.</section>`;
@@ -129,19 +162,45 @@ function budgetGroup(group,lines){const xs=lines.filter(x=>x.group===group);if(!
 
 function transactionsView(){
   const list=[...state.expenses.map(x=>({...x,_kind:'expense',_date:x.date,_amount:-Number(x.amount),_title:category(x.categoryId)?.name||'Expense'})),...state.incomes.map(x=>({...x,_kind:'income',_date:x.dateReceived,_amount:Number(x.amount),_title:INCOME_TYPES.find(t=>t[0]===x.incomeType)?.[1]||'Income'})),...state.transfers.filter(x=>x.status==='completed').map(x=>({...x,_kind:'transfer',_date:x.completedDate||x.plannedDate,_amount:0,_title:`${physicalAccount(x.fromAccountId)?.name} → ${physicalAccount(x.toAccountId)?.name}`}))].filter(x=>!x.deletedAt).sort((a,b)=>String(b._date).localeCompare(String(a._date)));
-  return `<div class="split"><div><h2 style="margin:0">Activity</h2><div class="sub">Expenses, income and transfers</div></div><div class="actions"><button class="btn" data-action="add-expense">+ Expense</button><button class="btn secondary" data-action="add-income">+ Income</button><button class="btn secondary" data-action="manual-transfer">+ Transfer</button></div></div><section class="card" style="margin-top:14px">${list.length?list.slice(0,100).map(txLine).join(''):`<div class="empty">No activity yet.</div>`}</section>`;
+  return `<div><h2 style="margin:0">Activity</h2><div class="sub">Expenses, income and transfers</div></div>
+  <div class="activity-actions">
+    <button class="activity-action-card" data-action="add-expense"><span class="action-icon">${icon('expense')}</span><span class="action-copy"><strong>Add Expense</strong><span>Record money actually spent on goods, services or obligations.</span></span><span class="action-chevron">›</span></button>
+    <button class="activity-action-card" data-action="add-income"><span class="action-icon">${icon('income')}</span><span class="action-copy"><strong>Add Income</strong><span>Salary, bonus, reimbursement, asset sale or other money received.</span></span><span class="action-chevron">›</span></button>
+    <button class="activity-action-card" data-action="manual-transfer"><span class="action-icon">${icon('transfer')}</span><span class="action-copy"><strong>Add Transfer</strong><span>Move money between accounts or assign it to a virtual bucket.</span></span><span class="action-chevron">›</span></button>
+  </div>
+  <div class="section-title"><h2>Recent activity</h2></div>
+  <section class="card activity-list">${list.length?list.slice(0,100).map(txLine).join(''):`<div class="empty compact-empty"><strong>No activity yet.</strong><span>Your expenses, income and transfers will appear here.</span></div>`}</section>`;
 }
+
 function txLine(x){const meta=x._kind==='expense'?`${x.date} · ${x.description||''}`:x._kind==='income'?`${x.dateReceived} · ${x.description||''}`:`${x._date} · transfer`;return `<div class="tx"><div><div class="tx-title">${esc(x._title)}</div><div class="tx-meta">${esc(meta)}</div></div><div class="right"><div class="amount ${x._amount>0?'good':x._amount<0?'bad':''}">${x._kind==='transfer'?'Transfer':money(x._amount)}</div><span class="tag">${x._kind}</span>${x._kind==='expense'?`<button class="btn ghost small" style="margin-left:5px" data-action="delete-expense" data-id="${x.id}">Delete</button>`:''}</div></div>`;}
 
 function goalsView(){return `<div><h2 style="margin:0">Goals</h2><div class="sub">Permanent wealth and planned spending stay separate.</div></div><div class="grid g2" style="margin-top:14px">${[...state.goals].sort((a,b)=>a.priority-b.priority).map(g=>{const b=goalBal(g),p=Math.min(1,b/g.targetAmount);let status=g.status;if(g.prerequisiteGoalId){const pg=goal(g.prerequisiteGoalId);if(pg&&goalBal(pg)<g.prerequisiteAmount)status=`waiting for ${money(g.prerequisiteAmount)} emergency threshold`;}return `<section class="card"><div class="split"><strong>${esc(g.name)}</strong><span class="tag">${esc(status)}</span></div><div class="metric">${money(b)}</div><div class="sub">of ${money(g.targetAmount)}</div><div class="progress"><span style="width:${p*100}%"></span></div>${g.targetDate?`<div class="sub">Target ${g.targetDate}</div>`:''}${g.monthlyTarget?`<div class="sub">Monthly target ${money(g.monthlyTarget)}</div>`:''}</section>`;}).join('')}</div>`;}
 
 function wealthView(){
-  const fx=state.settings.usdTwdRate;return `<div><h2 style="margin:0">Wealth</h2><div class="sub">Physical accounts and virtual purpose ledgers</div></div>
+  const fx=state.settings.usdTwdRate;
+  const es=esunSnapshot();
+  const statusText=!es.verified?'Not checked yet':Math.abs(es.difference)<0.5?'Reconciled':'Needs reconciliation';
+  const statusClass=!es.verified?'':' '+(Math.abs(es.difference)<0.5?'good-tag':'warn-tag');
+  const otherAccounts=state.accounts.filter(a=>a.id!=='esun');
+  return `<div><h2 style="margin:0">Wealth</h2><div class="sub">Physical accounts and virtual purpose ledgers</div></div>
   <div class="grid g2" style="margin-top:14px"><section class="card"><div class="metric-label">Core Wealth</div><div class="metric">${money(state.wealth.coreWealth)}</div><div class="sub">Long-term capital only</div></section><section class="card"><div class="metric-label">Financial Net Worth</div><div class="metric">${money(state.wealth.financialNetWorth)}</div><div class="sub">Tithe excluded</div></section></div>
-  <div class="section-title"><h2>Accounts</h2></div><section class="card">${state.accounts.map(a=>{const bal=state.accountBalances[a.id]||0;return row(a.name,a.currency==='USD'?`${money(bal,'USD')} · ${money(bal*fx)}`:money(bal));}).join('')}</section>
-  <div class="section-title"><h2>E.SUN virtual composition</h2><span class="sub">Purpose ledger</span></div><section class="card">${state.buckets.filter(b=>b.accountId==='esun').map(b=>row(b.name,money(state.bucketBalances[b.id]||0))).join('')}<div class="row"><strong>Virtual total</strong><strong class="amount">${money(state.buckets.filter(b=>b.accountId==='esun').reduce((s,b)=>s+Number(state.bucketBalances[b.id]||0),0))}</strong></div></section>
+  <div class="section-title"><h2>Accounts</h2></div>
+  <section class="card">${otherAccounts.map(a=>{const bal=state.accountBalances[a.id]||0;return row(a.name,a.currency==='USD'?`${money(bal,'USD')} · ${money(bal*fx)}`:money(bal));}).join('')}</section>
+  <div class="section-title"><h2>E.SUN Reserved</h2><span class="tag${statusClass}">${statusText}</span></div>
+  <section class="card esun-card">
+    <div class="account-balance-head"><div><div class="metric-label">Latest bank balance</div><div class="metric">${money(es.actual)}</div>${es.verified?`<div class="sub">Checked ${esc(es.reconciliation.date||'')}</div>`:`<div class="sub">Using ledger balance until you confirm it</div>`}</div></div>
+    <div class="reconcile-grid">
+      <div><span class="sub">Ledger expected</span><strong>${money(es.expected)}</strong></div>
+      <div><span class="sub">Virtual allocated</span><strong>${money(es.virtualTotal)}</strong></div>
+      <div><span class="sub">Bank vs ledger</span><strong class="${Math.abs(es.difference)<0.5?'good':es.difference<0?'bad':'warn'}">${es.difference>0?'+':''}${money(es.difference)}</strong></div>
+      <div><span class="sub">Unassigned in E.SUN</span><strong class="${es.unassigned<0?'bad':''}">${es.unassigned>0?'+':''}${money(es.unassigned)}</strong></div>
+    </div>
+    <div class="actions account-actions"><button class="btn secondary" data-action="esun-reconcile">Update Balance</button><button class="btn ghost" data-action="esun-adjustment">Add Adjustment</button></div>
+  </section>
+  <div class="section-title"><h2>E.SUN virtual composition</h2><span class="sub">Purpose ledger</span></div><section class="card">${state.buckets.filter(b=>b.accountId==='esun').map(b=>row(b.name,money(state.bucketBalances[b.id]||0))).join('')}<div class="row"><strong>Virtual total</strong><strong class="amount">${money(es.virtualTotal)}</strong></div></section>
   <div class="section-title"><h2>Investments</h2></div><section class="card">${row('IBKR current value',money(latestInvestmentTwd()))}${row('USD/TWD rate',Number(fx).toFixed(2))}<div class="actions" style="margin-top:12px"><button class="btn secondary" data-action="investment-snapshot">Update IBKR Value</button></div></section>`;
 }
+
 
 function forecastView(){
   const salary=Number(state.settings.forecastSalary||82500);const plan=buildBudgetPlan({income:salary,categories:state.categories,settings:state.settings});const monthly=Math.max(0,plan.immediateWealth);const start=state.wealth.coreWealth;const annual=.07;const targets=[1000000,3000000,5000000,10000000,30000000];
@@ -159,6 +218,8 @@ function renderModal(){
   if(modal.type==='close') return modalWrap('Month-End Review',monthCloseView());
   if(modal.type==='settings') return modalWrap('Settings',settingsView());
   if(modal.type==='investment') return modalWrap('Update IBKR Value',investmentForm());
+  if(modal.type==='esun-reconcile') return modalWrap('Update E.SUN Balance',esunReconciliationForm());
+  if(modal.type==='esun-adjustment') return modalWrap('Add E.SUN Adjustment',esunAdjustmentForm());
   return '';
 }
 function modalWrap(title,body){return `<div class="modal-backdrop" data-action="close-modal"><section class="modal" onclick="event.stopPropagation()"><div class="split"><h3>${title}</h3><button class="btn ghost small" data-action="close-modal">Close</button></div>${body}</section></div>`;}
@@ -171,6 +232,9 @@ function manualTransferForm(){const p=currentPeriod();return `<form id="manual-t
 function transferConfirm(id){const t=state.transfers.find(x=>x.id===id);if(!t)return'';const allocs=state.transferAllocations.filter(a=>a.transferId===id);return `<div class="notice">Confirm only after you actually moved the money in your banking app.</div><div class="section-title"><h2>${physicalAccount(t.fromAccountId)?.name} → ${physicalAccount(t.toAccountId)?.name}</h2></div><section class="card">${allocs.map(a=>row(bucket(a.bucketId)?.name||'Allocation',money(a.amount))).join('')}<div class="row"><strong>Total</strong><strong>${money(t.amount)}</strong></div></section><div class="actions" style="margin-top:14px"><button class="btn" data-action="confirm-transfer" data-id="${id}">Yes — Transfer Completed</button><button class="btn secondary" data-action="close-modal">Not Yet</button></div>`;}
 function monthCloseView(){const p=currentPeriod();if(!p)return'';const plan=planFor(p.id),totals=expenseTotals(p.id),sweep=sweepInfo(p.id);const pending=state.transfers.find(t=>t.budgetPeriodId===p.id&&t.status==='planned');return `<div class="grid g2"><section class="card"><div class="metric-label">Unused flexible + buffer</div><div class="metric">${money(sweep.grossUnused)}</div></section><section class="card"><div class="metric-label">Overspending deficits</div><div class="metric ${sweep.deficits?'bad':''}">${money(sweep.deficits)}</div></section></div><section class="card" style="margin-top:14px"><div class="metric-label">Available month-end sweep</div><div class="metric">${money(sweep.available)}</div><div class="sub">Calculated only from this budget period; a next-month paycheck is excluded.</div></section>${pending?`<div class="notice" style="margin-top:14px">Complete the existing planned transfer before creating a month-end sweep.</div>`:sweep.available>0?`<button class="btn" style="width:100%;margin-top:14px" data-action="create-sweep">Create Sweep Transfer</button>`:`<button class="btn" style="width:100%;margin-top:14px" data-action="close-period">Close Month</button>`}`;}
 function investmentForm(){const snap=[...state.investmentSnapshots].sort((a,b)=>String(a.date).localeCompare(String(b.date))).at(-1);return `<form id="investment-form"><div class="field"><label>IBKR portfolio value (USD)</label><input name="value" type="number" step="0.01" value="${snap?.value||3536}" required></div><div class="form-grid"><div class="field"><label>Date</label><input name="date" type="date" value="${today()}" required></div><div class="field"><label>USD/TWD rate</label><input name="fx" type="number" step="0.0001" value="${state.settings.usdTwdRate}" required></div></div><button class="btn" style="width:100%">Save Snapshot</button></form>`;}
+function esunReconciliationForm(){const es=esunSnapshot();return `<form id="esun-reconcile-form"><div class="notice">Enter the exact balance shown in your E.SUN banking app. This records what the bank says without silently changing any virtual bucket.</div><div class="field" style="margin-top:14px"><label>Actual E.SUN balance</label><input name="actualBalance" type="number" step="1" min="0" value="${Math.round(es.actual)}" required></div><div class="form-grid"><div class="field"><label>Date checked</label><input name="date" type="date" value="${today()}" required></div><div class="field"><label>Ledger expected</label><input type="text" value="${money(es.expected)}" disabled></div></div><div class="field"><label>Note (optional)</label><input name="note" placeholder="e.g. Checked in E.SUN app"></div><button class="btn" style="width:100%">Save Actual Balance</button></form>`;}
+function esunAdjustmentForm(){const es=esunSnapshot();const suggested=Math.round(es.difference);return `<form id="esun-adjustment-form"><div class="notice">Use an adjustment only for a real balance difference that is not an expense, income or transfer. It changes the physical-account ledger but never reallocates your virtual buckets.</div><div class="field" style="margin-top:14px"><label>Adjustment amount</label><input name="amount" type="number" step="1" value="${suggested||''}" placeholder="Use + to add or − to subtract" required></div><div class="form-grid"><div class="field"><label>Date</label><input name="date" type="date" value="${today()}" required></div><div class="field"><label>Current bank vs ledger</label><input type="text" value="${es.difference>0?'+':''}${money(es.difference)}" disabled></div></div><div class="field"><label>Reason</label><input name="note" placeholder="Bank interest, correction, unknown difference..." required></div><button class="btn" style="width:100%">Save Adjustment</button></form>`;}
+
 function settingsView(){return `<form id="settings-form"><div class="form-grid"><div class="field"><label>Forecast salary</label><input name="forecastSalary" type="number" value="${state.settings.forecastSalary}"></div><div class="field"><label>USD/TWD rate</label><input name="usdTwdRate" type="number" step="0.0001" value="${state.settings.usdTwdRate}"></div><div class="field"><label>Raise → wealth (%)</label><input name="wealthRaisePercent" type="number" value="${state.settings.wealthRaisePercent}"></div></div><div class="section-title"><h2>Budget rules</h2></div>${state.categories.filter(c=>c.ruleType!=='expense_only').map(c=>`<div class="row"><div><strong>${esc(c.name)}</strong><div class="sub">${c.ruleType.replaceAll('_',' ')}</div></div><input name="cat-${c.id}" type="number" step="1" value="${c.defaultAmount}" style="width:120px;padding:9px;border:1px solid #d1d5db;border-radius:9px;text-align:right"></div>`).join('')}<button class="btn" style="width:100%;margin-top:14px">Save Settings</button></form><div class="section-title"><h2>Data</h2></div><div class="actions"><button class="btn secondary" data-action="export-backup">Export Backup</button><label class="btn secondary">Restore Backup<input id="restore-file" type="file" accept="application/json" hidden></label></div>`;}
 
 async function createPaycheck(form){
@@ -196,6 +260,8 @@ async function completeTransfer(id){const t=state.transfers.find(x=>x.id===id);a
 async function createSweep(){const p=currentPeriod(),plan=planFor(p.id),totals=expenseTotals(p.id),sweep=sweepInfo(p.id);if(sweep.available<=0)return;const allocs=allocateGoalSurplus({amount:sweep.available,goals:state.goals,bucketBalances:state.bucketBalances});const tid=uid('tr');await put('transfers',{id:tid,fromAccountId:'ctbc',toAccountId:'esun',amount:sweep.available,budgetPeriodId:p.id,status:'planned',plannedDate:today(),transferType:'month_end_sweep',createdAt:new Date().toISOString()});await bulkPut('transferAllocations',allocs.map(a=>({id:uid('ta'),transferId:tid,bucketId:a.bucketId,amount:a.amount,goalId:a.goalId||null,label:a.label})));modal={type:'transfer',id:tid};await load();}
 async function closePeriod(){const p=currentPeriod();await put('periods',{...p,state:'closed',closedAt:new Date().toISOString()});await put('monthlyCloses',{id:p.id,budgetPeriodId:p.id,closedAt:new Date().toISOString(),income:periodRegularIncome(p.id),expenses:totalExpenses(p.id),wealthContribution:completedCoreWealth(p.id),goalFunding:completedGoalFunding(p.id)});modal=null;await load();}
 async function saveInvestment(form){const fd=new FormData(form);const fx=Number(fd.get('fx'));await put('investmentSnapshots',{id:uid('snap'),accountId:'ibkr',date:fd.get('date'),value:Number(fd.get('value')),currency:'USD',fxRate:fx,createdAt:new Date().toISOString()});await put('settings',{...state.settings,usdTwdRate:fx,updatedAt:new Date().toISOString()});modal=null;await load();}
+async function saveEsunReconciliation(form){const fd=new FormData(form);const actual=Number(fd.get('actualBalance'));const expected=Number(state.accountBalances.esun||0);await put('reconciliations',{id:uid('rec'),accountId:'esun',date:fd.get('date'),actualBalance:actual,expectedBalance:expected,difference:actual-expected,note:fd.get('note')||'',createdAt:new Date().toISOString()});modal=null;await load();}
+async function saveEsunAdjustment(form){const fd=new FormData(form);const amount=Number(fd.get('amount'));if(!amount)throw new Error('Enter a non-zero adjustment amount.');await put('adjustments',{id:uid('adj'),accountId:'esun',amount,date:fd.get('date'),note:fd.get('note')||'',createdAt:new Date().toISOString()});modal=null;await load();}
 async function saveSettings(form){const fd=new FormData(form);await put('settings',{...state.settings,forecastSalary:Number(fd.get('forecastSalary')),usdTwdRate:Number(fd.get('usdTwdRate')),operatingBuffer:Number(state.categories.find(c=>c.id==='operating-buffer')?.defaultAmount||3000),wealthRaisePercent:Number(fd.get('wealthRaisePercent')),updatedAt:new Date().toISOString()});for(const c of state.categories){const v=fd.get(`cat-${c.id}`);if(v!==null)await put('categories',{...c,defaultAmount:Number(v),updatedAt:new Date().toISOString()});}const ob=fd.get('cat-operating-buffer');if(ob!==null)await put('settings',{...(await getOne('settings','app')),operatingBuffer:Number(ob),updatedAt:new Date().toISOString()});modal=null;await load();}
 async function backup(){const data=await exportData();const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`wealth-os-backup-${today()}.json`;a.click();URL.revokeObjectURL(a.href);await put('settings',{...state.settings,lastBackupAt:new Date().toISOString()});await load();}
 async function restore(file){const text=await file.text();await importData(JSON.parse(text));modal=null;selectedPeriodId=null;await load();}
@@ -216,6 +282,8 @@ function bind(){
     if(a==='close-period')return closePeriod();
     if(a==='settings')modal={type:'settings'};
     if(a==='investment-snapshot')modal={type:'investment'};
+    if(a==='esun-reconcile')modal={type:'esun-reconcile'};
+    if(a==='esun-adjustment')modal={type:'esun-adjustment'};
     if(a==='close-modal')modal=null;
     if(a==='export-backup')return backup();
     if(a==='run-scenario')return runScenario();
@@ -227,6 +295,8 @@ function bind(){
   const inf=document.querySelector('#income-form');if(inf)inf.onsubmit=e=>{e.preventDefault();addIncome(inf).catch(err=>alert(err.message));};
   const mtf=document.querySelector('#manual-transfer-form');if(mtf)mtf.onsubmit=e=>{e.preventDefault();saveManualTransfer(mtf).catch(err=>alert(err.message));};
   const inv=document.querySelector('#investment-form');if(inv)inv.onsubmit=e=>{e.preventDefault();saveInvestment(inv).catch(err=>alert(err.message));};
+  const erf=document.querySelector('#esun-reconcile-form');if(erf)erf.onsubmit=e=>{e.preventDefault();saveEsunReconciliation(erf).catch(err=>alert(err.message));};
+  const eaf=document.querySelector('#esun-adjustment-form');if(eaf)eaf.onsubmit=e=>{e.preventDefault();saveEsunAdjustment(eaf).catch(err=>alert(err.message));};
   const sf=document.querySelector('#settings-form');if(sf)sf.onsubmit=e=>{e.preventDefault();saveSettings(sf).catch(err=>alert(err.message));};
   const rf=document.querySelector('#restore-file');if(rf)rf.onchange=()=>{if(rf.files[0]&&confirm('Replace all local Wealth OS data with this backup?'))restore(rf.files[0]).catch(err=>alert(err.message));};
 }

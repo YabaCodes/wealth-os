@@ -1,4 +1,4 @@
-const CACHE = 'wealth-os-v1-2-1';
+const CACHE = 'wealth-os-v1-3';
 const ASSETS = [
   './', './index.html', './styles.css', './manifest.webmanifest',
   './js/app.js', './js/db.js', './js/calc.js', './js/defaults.js',

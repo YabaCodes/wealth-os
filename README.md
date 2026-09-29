@@ -1,4 +1,4 @@
-# Wealth OS — v1.2.1
+# Wealth OS — v1.3
 
 A local-first PWA for paycheck allocation, monthly budgeting, virtual sinking funds, wealth contributions, transfers, goals, investments and month-end reconciliation.
 
@@ -149,3 +149,53 @@ This patch adds a safe way to test the paycheck workflow without leaving a fake 
 - Service-worker cache version updated so the installed PWA picks up the patch.
 
 For a test paycheck, create the funding month, explore the budget and planned transfer, **do not mark the transfer completed**, then use **Budget → Funding month controls → Delete Month** when finished.
+
+## Revision 1.3 — 2026-09-29
+
+This revision adds the next control layer: month close, goal management and strategy-based forecasting.
+
+### Month close and historical integrity
+
+- Month-End Review now uses a checklist for payday funding, pending transfers, CTBC reconciliation, E.SUN reconciliation/purpose allocation, fixed obligations and the month-end sweep.
+- A month cannot close while planned transfers are pending, the sweep is still available, payday tithe/reserve funding is incomplete, or bank/purpose reconciliation is unresolved.
+- Fixed obligations that are not fully recorded are shown as an explicit warning before close.
+- Closed months are read-only. Expense, income and transfer edits/deletes tied to a closed month are blocked.
+- Closed months can be intentionally reopened for corrections. Reopened months clearly warn if the previously completed sweep is now too large for the revised budget.
+- Month-close snapshots now store income, expenses, contribution totals, ending Core Wealth, ending Financial Net Worth, account values and category actuals.
+- New funding months store their original budget plan snapshot so later Settings changes do not rewrite that month's plan.
+- The system-generated funding paycheck is protected from direct edit/delete; use Delete Funding Month before completed transfers if the paycheck setup itself was a test or mistake.
+- Planned transfers now appear in Activity and can be completed from there; user-created planned manual/goal transfers can also be deleted before completion.
+- If new activity makes a previous bank reconciliation stale, Financial Net Worth falls back to the current transaction-ledger estimate until the bank is checked again, preventing stale bank balances from double-counting transfers.
+
+### Goals
+
+- Goals now have richer status cards with progress, remaining amount, target date and routing logic.
+- Goal targets, dates, monthly targets and status can be edited.
+- Manual goal contributions can be recorded as planned or completed transfers.
+- The existing routing policy is explicit: build Emergency Fund first; after the Emergency Fund reaches the Home Travel unlock threshold, fund Home Travel at its monthly target while continuing Emergency; once the Emergency Fund target is complete, remaining surplus becomes investable.
+
+### Investment routing
+
+- Goal-allocation logic now routes surplus beyond completed core cash goals to IBKR instead of overfilling Emergency Fund or Home Travel.
+- Payday and month-end sweep logic can create a separate CTBC → IBKR planned transfer when the strategy reaches that stage.
+- Core-wealth contribution reporting counts completed investment transfers as well as Emergency Fund contributions.
+- IBKR valuation remains snapshot-driven; completed transfers after the latest snapshot are temporarily layered onto the portfolio estimate until the next IBKR snapshot replaces it.
+
+### Forecast
+
+- Forecast now models the actual strategy rather than applying one return assumption to all Core Wealth.
+- Emergency Fund cash is modeled at 0% return; the investment return assumption applies only to investments.
+- Home Travel funding is modeled after its Emergency Fund unlock threshold and monthly contribution rule.
+- Forecast shows projected timing for the Home Travel unlock, Emergency Fund completion, Home Travel completion, Core Wealth milestones, and 1/3/5/10-year checkpoints.
+- Scenario Lab now supports take-home salary, investment return and an extra monthly wealth contribution without changing live budget data.
+
+### Recommended validation
+
+1. Create a disposable test funding month.
+2. Complete its payday transfer, then update CTBC/E.SUN balances and purpose allocations.
+3. Record fixed and flexible expenses.
+4. Open **Month-End Review** and verify each checklist item reacts correctly.
+5. Create and complete a sweep, reconcile the bank balances again, then close the month.
+6. Verify the month is read-only; reopen it and confirm editing becomes available again.
+7. Delete the disposable test month only if no completed transfers remain, or restore a pre-test backup.
+

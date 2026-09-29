@@ -52,13 +52,16 @@ export function allocateGoalSurplus({amount, goals, bucketBalances}) {
   let remaining = Math.max(0, Number(amount||0));
   const allocations = [];
   const balances = {...bucketBalances};
-  // Special behavior: when a non-core goal activates with monthlyTarget, fund it, then continue priority routing.
-  const eligible = [...goals].filter(g=>g.status!=='paused' && g.status!=='completed' && g.status!=='archived').sort((a,b)=>a.priority-b.priority);
-  // Detect eligible monthly-target goals whose prerequisite is met.
+  const eligible = [...goals]
+    .filter(g=>g.status!=='paused' && g.status!=='completed' && g.status!=='archived')
+    .sort((a,b)=>a.priority-b.priority);
+
+  // Planned-spending goals with a monthly target receive only that target once their prerequisite is met.
+  // Any remaining wealth capacity continues toward core-wealth goals and, once those are full, investments.
   for (const g of eligible) {
     if (!g.monthlyTarget || remaining <= 0) continue;
     const bal = Number(balances[g.bucketId]||0);
-    if (bal >= g.targetAmount) continue;
+    if (bal >= Number(g.targetAmount||0)) continue;
     if (g.prerequisiteGoalId) {
       const pg = goals.find(x=>x.id===g.prerequisiteGoalId);
       const pbal = pg ? Number(balances[pg.bucketId]||0) : 0;
@@ -66,26 +69,84 @@ export function allocateGoalSurplus({amount, goals, bucketBalances}) {
     }
     const amountForGoal = Math.min(remaining, Number(g.monthlyTarget), Number(g.targetAmount)-bal);
     if (amountForGoal > 0) {
-      allocations.push({goalId:g.id,bucketId:g.bucketId,amount:amountForGoal,label:g.name});
+      allocations.push({goalId:g.id,bucketId:g.bucketId,amount:amountForGoal,label:g.name,destination:'bucket'});
       balances[g.bucketId]=(balances[g.bucketId]||0)+amountForGoal;
       remaining -= amountForGoal;
     }
   }
-  while (remaining > 0.005) {
-    const g = activeGoal(goals, balances);
-    if (!g) {
-      allocations.push({goalId:null,bucketId:'emergency',amount:remaining,label:'Unassigned Wealth'});
-      remaining=0;break;
-    }
+
+  // Core-wealth goals receive the remaining capacity in priority order.
+  for (const g of eligible.filter(g=>g.type==='core_wealth')) {
+    if (remaining <= 0.005) break;
     const bal = Number(balances[g.bucketId]||0);
-    const room = Math.max(0, Number(g.targetAmount)-bal);
-    if (!room) { balances[g.bucketId]=Number(g.targetAmount); continue; }
+    const room = Math.max(0, Number(g.targetAmount||0)-bal);
+    if (!room) continue;
     const a = Math.min(remaining, room);
-    allocations.push({goalId:g.id,bucketId:g.bucketId,amount:a,label:g.name});
+    allocations.push({goalId:g.id,bucketId:g.bucketId,amount:a,label:g.name,destination:'bucket'});
     balances[g.bucketId]=(balances[g.bucketId]||0)+a;
     remaining -= a;
   }
+
+  // Once core cash goals are complete, surplus becomes an investment contribution.
+  if (remaining > 0.005) {
+    allocations.push({goalId:null,bucketId:null,accountId:'ibkr',amount:remaining,label:'Investments',destination:'investment'});
+  }
   return allocations;
+}
+
+export function simulateWealthStrategy({
+  emergencyStart=0,
+  travelStart=0,
+  investmentStart=0,
+  monthlyCapacity=0,
+  annualReturn=0.07,
+  emergencyUnlock=200000,
+  emergencyTarget=300000,
+  travelTarget=100000,
+  travelMonthly=10000,
+  months=600,
+  milestones=[]
+}) {
+  let emergency=Math.max(0,Number(emergencyStart||0));
+  let travel=Math.max(0,Number(travelStart||0));
+  let investment=Math.max(0,Number(investmentStart||0));
+  const capacity=Math.max(0,Number(monthlyCapacity||0));
+  const r=Math.max(-0.99,Number(annualReturn||0))/12;
+  const hits={};
+  const events={travelUnlockMonth: emergency>=emergencyUnlock?0:null, emergencyCompleteMonth: emergency>=emergencyTarget?0:null, travelCompleteMonth: travel>=travelTarget?0:null};
+  const snapshots=[];
+  const orderedMilestones=[...milestones].sort((a,b)=>a-b);
+
+  const recordHits=(m)=>{
+    const core=emergency+investment;
+    for(const t of orderedMilestones){ if(hits[t]===undefined && core>=t) hits[t]=m; }
+    if(events.travelUnlockMonth===null && emergency>=emergencyUnlock) events.travelUnlockMonth=m;
+    if(events.emergencyCompleteMonth===null && emergency>=emergencyTarget) events.emergencyCompleteMonth=m;
+    if(events.travelCompleteMonth===null && travel>=travelTarget) events.travelCompleteMonth=m;
+  };
+
+  recordHits(0);
+  for(let m=1;m<=months;m++){
+    investment=Math.max(0,investment*(1+r));
+    let available=capacity;
+
+    if(emergency>=emergencyUnlock && travel<travelTarget && available>0){
+      const toTravel=Math.min(available,travelMonthly,travelTarget-travel);
+      travel+=toTravel;
+      available-=toTravel;
+    }
+
+    if(emergency<emergencyTarget && available>0){
+      const toEmergency=Math.min(available,emergencyTarget-emergency);
+      emergency+=toEmergency;
+      available-=toEmergency;
+    }
+
+    if(available>0) investment+=available;
+    recordHits(m);
+    if([12,36,60,120].includes(m)) snapshots.push({month:m,coreWealth:emergency+investment,emergency,travel,investment});
+  }
+  return {emergency,travel,investment,coreWealth:emergency+investment,hits,events,snapshots};
 }
 
 export function aggregateExpenses(expenses, periodId) {

@@ -95,11 +95,23 @@ export async function accountBalances(){
   for(const a of adjustments){
     if(!a.deletedAt) out[a.accountId]=(out[a.accountId]||0)+Number(a.amount||0);
   }
-  // Brokerage is snapshot-driven, not cash-ledger-driven, because market movement changes its value.
+  // Brokerage value is anchored to the latest portfolio snapshot. Completed transfers after that
+  // snapshot are layered on top until the next snapshot replaces the estimate.
   const ibkr=accounts.find(a=>a.role==='investment');
   if(ibkr){
-    const relevant=snaps.filter(s=>s.accountId===ibkr.id).sort((a,b)=>String(a.date).localeCompare(String(b.date)));
-    if(relevant.length) out[ibkr.id]=Number(relevant.at(-1).value||0);
+    const relevant=snaps.filter(s=>s.accountId===ibkr.id).sort((a,b)=>String(a.date).localeCompare(String(b.date))||String(a.createdAt||'').localeCompare(String(b.createdAt||'')));
+    if(relevant.length){
+      const latest=relevant.at(-1);
+      const snapStamp=String(latest.createdAt||`${latest.date||''}T00:00:00`);
+      let value=Number(latest.value||0);
+      for(const t of transfers.filter(t=>t.status==='completed'&&!t.deletedAt)){
+        const stamp=String(t.completedAt||t.updatedAt||t.createdAt||`${t.completedDate||''}T00:00:00`);
+        if(stamp<=snapStamp) continue;
+        if(t.toAccountId===ibkr.id) value+=Number(t.amount||0)/(ibkr.currency==='USD'?Number(settings?.usdTwdRate||1):1);
+        if(t.fromAccountId===ibkr.id) value-=Number(t.amount||0)/(ibkr.currency==='USD'?Number(settings?.usdTwdRate||1):1);
+      }
+      out[ibkr.id]=value;
+    }
   }
   return out;
 }
@@ -109,15 +121,20 @@ export async function wealthMetrics(){
     getAll('accounts'),getAll('buckets'),bucketBalances(),accountBalances(),getAll('investmentSnapshots'),getOne('settings','app'),getAll('reconciliations')
   ]);
   const fx=Number(settings?.usdTwdRate||1);
-  const latestActual={};
+  const latestActual={},latestReconciliation={};
   for(const r of [...reconciliations].sort((a,b)=>`${a.date||''}${a.createdAt||''}`.localeCompare(`${b.date||''}${b.createdAt||''}`))){
-    if(!r.deletedAt) latestActual[r.accountId]=Number(r.actualBalance||0);
+    if(!r.deletedAt){latestActual[r.accountId]=Number(r.actualBalance||0);latestReconciliation[r.accountId]=r;}
   }
   let financialNetWorth=0;
   // Reserved E.SUN is classified by virtual purpose buckets so tithe stays excluded.
+  // A bank reconciliation is used for net worth only while it still matches the current
+  // transaction-ledger state. New activity makes the old bank check stale, so the ledger
+  // estimate is used until the user reconciles again.
   for(const a of accounts){
     if(a.role==='reserved') continue;
-    const raw=(a.role!=='investment' && latestActual[a.id]!==undefined)?latestActual[a.id]:Number(ab[a.id]||0);
+    const expected=Number(ab[a.id]||0),rec=latestReconciliation[a.id];
+    const recStillCurrent=a.role!=='investment'&&rec&&Math.abs(Number(rec.expectedBalance||0)-expected)<0.5;
+    const raw=recStillCurrent?Number(rec.actualBalance||0):expected;
     const v=raw*(a.currency==='USD'?fx:1);
     financialNetWorth += v;
   }

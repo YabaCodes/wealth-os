@@ -1,4 +1,4 @@
-# Wealth OS — v1.3
+# Wealth OS — v1.3.1
 
 A local-first PWA for paycheck allocation, monthly budgeting, virtual sinking funds, wealth contributions, transfers, goals, investments and month-end reconciliation.
 
@@ -26,7 +26,7 @@ A local-first PWA for paycheck allocation, monthly budgeting, virtual sinking fu
   - Electricity reserve: NT$4,400/month
   - Operating buffer: NT$3,000
 - Physical accounts: CTBC, E.SUN and IBKR.
-- E.SUN virtual buckets keep Tithe, Emergency Fund, Electricity Reserve, Home Travel and Equipment Fund separate even though the bank sees one balance.
+- E.SUN virtual buckets keep Tithe, Emergency Fund, Home Travel and Equipment Fund separate even though the bank sees one balance. Electricity Reserve is a virtual reserve held inside CTBC Operating.
 - Planned transfers do not change balances until marked completed.
 - Manual transfers can be recorded and assigned to a virtual bucket.
 - Actual expense entry with budget-vs-actual tracking.
@@ -199,3 +199,21 @@ This revision adds the next control layer: month close, goal management and stra
 6. Verify the month is read-only; reopen it and confirm editing becomes available again.
 7. Delete the disposable test month only if no completed transfers remain, or restore a pre-test backup.
 
+
+
+## Revision 1.3.1 — 2026-09-30
+
+This patch fixes the first live-payday issues found during real use:
+
+- Date fields now default to the device's **local calendar date** instead of UTC, preventing Taiwan-morning entries from defaulting to the previous day.
+- Electricity Reserve now remains physically in **CTBC Operating**. It is recorded as an internal CTBC purpose allocation, so no CTBC → E.SUN transfer is required.
+- Electricity Reserve is no longer part of E.SUN virtual composition and is not double-counted in Financial Net Worth.
+- Payday bank-transfer requirements are now derived from the funding plan **minus items already completed**. A separately completed tithe transfer therefore reduces the next action immediately instead of leaving an obsolete combined transfer.
+- The Home **Next action** card shows only the remaining amount for the next destination, with a purpose breakdown.
+- New funding months no longer create a single combined planned payday transfer. The app creates the actual completed transfer only after the user confirms the exact remaining amount was physically moved.
+- Existing uncompleted v1.3 payday/investment plans are migrated away automatically; completed real transfers are preserved.
+- CTBC-hosted reserves are automatically funded as virtual purpose allocations when a paycheck creates the funding month.
+- Bank balances now roll forward from the last exact reconciliation using recorded ledger activity. For example, after recording a completed NT$7,972 CTBC → E.SUN tithe transfer, E.SUN's tracked current balance increases by NT$7,972 automatically while retaining the prior bank-check baseline.
+- Wealth labels clarify when a tracked current balance includes recorded activity since the last exact bank check.
+
+For the September 30 live-payday case, after the existing NT$7,972 tithe transfer is recognized, the remaining E.SUN payday action should be the **NT$11,073 Emergency Fund contribution**. The NT$4,400 Electricity Reserve remains in CTBC and requires no bank transfer.

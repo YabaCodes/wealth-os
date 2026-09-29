@@ -8,7 +8,8 @@ export const DEFAULTS = {
     emergencyTarget: 300000,
     wealthRaisePercent: 75,
     usdTwdRate: 31.78,
-    lastBackupAt: null
+    lastBackupAt: null,
+    dataModelVersion: 131
   },
   accounts: [
     {id:'ctbc', name:'CTBC Operating', type:'checking', role:'operating', currency:'TWD', openingBalance:34850, active:true},
@@ -18,7 +19,7 @@ export const DEFAULTS = {
   buckets: [
     {id:'tithe', name:'Tithe', accountId:'esun', bucketType:'restricted', openingBalance:55000, countsTowardCoreWealth:false, countsTowardNetWorth:false, active:true},
     {id:'emergency', name:'Emergency Fund', accountId:'esun', bucketType:'core_wealth', openingBalance:0, countsTowardCoreWealth:true, countsTowardNetWorth:true, active:true},
-    {id:'electricity', name:'Electricity Reserve', accountId:'esun', bucketType:'operating_reserve', openingBalance:0, countsTowardCoreWealth:false, countsTowardNetWorth:true, active:true},
+    {id:'electricity', name:'Electricity Reserve', accountId:'ctbc', bucketType:'operating_reserve', openingBalance:0, countsTowardCoreWealth:false, countsTowardNetWorth:false, active:true},
     {id:'home-trip', name:'Home Travel Fund', accountId:'esun', bucketType:'sinking_fund', openingBalance:0, countsTowardCoreWealth:false, countsTowardNetWorth:true, active:true},
     {id:'equipment', name:'Equipment Fund', accountId:'esun', bucketType:'sinking_fund', openingBalance:0, countsTowardCoreWealth:false, countsTowardNetWorth:true, active:true}
   ],

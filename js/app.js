@@ -9,12 +9,56 @@ let modal=null;
 let selectedPeriodId=null;
 let activityFilter='all';
 
-const today=()=>new Date().toISOString().slice(0,10);
+const today=(d=new Date())=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 const esc=s=>String(s??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
 const nextMonthId=(dateStr)=>{const d=new Date(`${dateStr}T12:00:00`);return `${d.getFullYear()+(d.getMonth()===11?1:0)}-${String((d.getMonth()+1)%12+1).padStart(2,'0')}`;};
 
+async function migrateV131(){
+  const settings=await getOne('settings','app');
+  if(Number(settings?.dataModelVersion||0)>=131) return;
+
+  const electricity=await getOne('buckets','electricity');
+  if(electricity){
+    await put('buckets',{...electricity,accountId:'ctbc',countsTowardNetWorth:false,updatedAt:new Date().toISOString()});
+  }
+
+  // v1.3 created combined planned payday transfers. They were only intentions and may
+  // become stale when the user records one component separately. v1.3.1 derives payday
+  // transfer requirements from the funding plan instead, so uncompleted system plans can
+  // be safely removed while completed real transfers are preserved.
+  const transfers=await getAll('transfers');
+  const allocations=await getAll('transferAllocations');
+  const stalePlans=transfers.filter(t=>!t.deletedAt&&t.status==='planned'&&['payday','investment_contribution'].includes(t.transferType));
+  for(const t of stalePlans){
+    for(const a of allocations.filter(a=>a.transferId===t.id)) await remove('transferAllocations',a.id);
+    await remove('transfers',t.id);
+  }
+
+  // Electricity remains physically in CTBC. Treat the monthly reserve as an internal
+  // purpose allocation, not a CTBC → E.SUN bank transfer.
+  const periods=await getAll('periods');
+  const remainingTransfers=await getAll('transfers');
+  const remainingAllocs=await getAll('transferAllocations');
+  for(const period of periods.filter(p=>p.state!=='closed')){
+    const line=period.planSnapshot?.lines?.find(x=>x.ruleType==='sinking_contribution'&&x.bucketId==='electricity');
+    const target=Number(line?.budgetAmount||0);
+    if(target<=0) continue;
+    const completedIds=new Set(remainingTransfers.filter(t=>!t.deletedAt&&t.status==='completed'&&t.budgetPeriodId===period.id).map(t=>t.id));
+    const already=remainingAllocs.filter(a=>completedIds.has(a.transferId)&&a.bucketId==='electricity').reduce((sum,a)=>sum+Number(a.amount||0),0);
+    const amount=Math.max(0,target-already);
+    if(amount>0.5){
+      const stamp=new Date().toISOString(),tid=uid('tr');
+      await put('transfers',{id:tid,fromAccountId:'ctbc',toAccountId:'ctbc',amount,budgetPeriodId:period.id,status:'completed',plannedDate:period.fundedAt||today(),completedDate:period.fundedAt||today(),completedAt:stamp,transferType:'reserve_allocation',systemGenerated:true,createdAt:stamp,updatedAt:stamp});
+      await put('transferAllocations',{id:uid('ta'),transferId:tid,bucketId:'electricity',amount,goalId:null,label:'Electricity Reserve'});
+    }
+  }
+
+  await put('settings',{...settings,dataModelVersion:131,updatedAt:new Date().toISOString()});
+}
+
 async function load(){
   await seedIfNeeded();
+  await migrateV131();
   const keys=['accounts','buckets','categories','goals','periods','incomes','expenses','transfers','transferAllocations','investmentSnapshots','reconciliations','adjustments','monthlyCloses'];
   const vals=await Promise.all(keys.map(getAll));
   keys.forEach((k,i)=>state[k]=vals[i]);
@@ -72,15 +116,16 @@ function monthCloseStatus(periodId){
   const ct=accountSnapshot('ctbc'),es=esunSnapshot();
   const reserveFunded=plan.lines.filter(x=>x.ruleType==='sinking_contribution').reduce((sum,x)=>sum+completedAllocationToBucket(periodId,x.bucketId),0);
   const titheAllocated=completedTithe(periodId);
-  const fundingOk=titheAllocated+0.5>=plan.tithe && reserveFunded+0.5>=plan.sinking;
+  const payday=paydayRequirements(periodId);
+  const fundingOk=reserveFunded+0.5>=plan.sinking && payday.totalOutstanding<=0.5;
   const bankOk=ct.verified&&Math.abs(ct.difference)<0.5&&es.verified&&es.bankOk&&es.allocationOk;
   const hardBlockers=[];
   if(pending.length)hardBlockers.push(`${pending.length} planned transfer${pending.length===1?'':'s'} still pending`);
   if(sweep.available>0.5)hardBlockers.push(`${money(sweep.available)} still available to sweep`);
   if(sweep.overSwept>0.5)hardBlockers.push(`${money(sweep.overSwept)} was swept beyond the current available amount`);
-  if(!fundingOk)hardBlockers.push('payday tithe/reserve funding is incomplete');
+  if(!fundingOk)hardBlockers.push('payday allocations are incomplete');
   if(!bankOk)hardBlockers.push('bank reconciliation or E.SUN purpose allocation is incomplete');
-  return {p,plan,totals,sweep,pending,missingFixed,ct,es,reserveFunded,titheAllocated,fundingOk,bankOk,hardBlockers,ready:hardBlockers.length===0};
+  return {p,plan,totals,sweep,pending,missingFixed,ct,es,reserveFunded,titheAllocated,payday,fundingOk,bankOk,hardBlockers,ready:hardBlockers.length===0};
 }
 function latestInvestmentTwd(){
   const usd=Number(state.accountBalances?.ibkr||0);
@@ -113,8 +158,14 @@ function latestReconciliation(accountId){return [...state.reconciliations].filte
 function accountSnapshot(accountId){
   const expected=Number(state.accountBalances[accountId]||0);
   const rec=latestReconciliation(accountId);
-  const actual=rec?Number(rec.actualBalance||0):expected;
-  return {accountId,expected,actual,difference:actual-expected,verified:Boolean(rec),reconciliation:rec};
+  if(!rec) return {accountId,expected,actual:expected,difference:0,verified:false,reconciliation:null,isEstimated:false,ledgerDeltaSinceCheck:0};
+  const checkedExpected=Number(rec.expectedBalance||0);
+  const ledgerDeltaSinceCheck=expected-checkedExpected;
+  // Start from the last exact bank balance, then roll forward only with activity the
+  // user has recorded in Wealth OS. This keeps balances current without forcing a new
+  // reconciliation after every correctly-recorded expense or transfer.
+  const actual=Number(rec.actualBalance||0)+ledgerDeltaSinceCheck;
+  return {accountId,expected,actual,difference:actual-expected,verified:true,reconciliation:rec,isEstimated:Math.abs(ledgerDeltaSinceCheck)>=0.5,ledgerDeltaSinceCheck};
 }
 function esunSnapshot(){
   const base=accountSnapshot('esun');
@@ -127,6 +178,49 @@ function completedAllocationToBucket(periodId,bucketId){
   return state.transferAllocations.filter(a=>complete.has(a.transferId)&&a.bucketId===bucketId).reduce((s,a)=>s+Number(a.amount||0),0);
 }
 function completedTithe(periodId){return completedAllocationToBucket(periodId,'tithe');}
+function paydayRequirements(periodId){
+  const p=state.periods.find(x=>x.id===periodId);
+  if(!p) return {groups:[],totalOutstanding:0,items:[]};
+  const plan=planFor(periodId);
+
+  // Reconstruct the goal-routing state from before this funding month's completed
+  // allocations so already-completed contributions do not change the original plan.
+  const preBalances={...state.bucketBalances};
+  for(const b of state.buckets){
+    preBalances[b.id]=Number(preBalances[b.id]||0)-completedAllocationToBucket(periodId,b.id);
+  }
+  const goalAllocs=Array.isArray(p.paydayRoutingSnapshot?.goalAllocs)
+    ? p.paydayRoutingSnapshot.goalAllocs
+    : allocateGoalSurplus({amount:Math.max(0,Math.round(plan.immediateWealth)),goals:state.goals,bucketBalances:preBalances});
+
+  const intended=[];
+  if(Number(plan.tithe||0)>0) intended.push({bucketId:'tithe',amount:Math.round(Number(plan.tithe)),label:'Tithe'});
+  for(const a of goalAllocs){
+    if(a.bucketId) intended.push({bucketId:a.bucketId,amount:Number(a.amount||0),label:a.label||bucket(a.bucketId)?.name||'Goal'});
+  }
+
+  const byDest=new Map();
+  for(const item of intended){
+    const b=bucket(item.bucketId);
+    if(!b?.accountId) continue;
+    const completed=completedAllocationToBucket(periodId,item.bucketId);
+    const remaining=Math.max(0,Number(item.amount||0)-completed);
+    if(remaining<=0.5) continue;
+    if(!byDest.has(b.accountId)) byDest.set(b.accountId,[]);
+    byDest.get(b.accountId).push({...item,remaining,accountId:b.accountId});
+  }
+
+  const investmentTarget=goalAllocs.filter(a=>a.accountId==='ibkr').reduce((sum,a)=>sum+Number(a.amount||0),0);
+  const completedInvestment=state.transfers.filter(t=>!t.deletedAt&&t.status==='completed'&&t.budgetPeriodId===periodId&&t.toAccountId==='ibkr'&&t.fromAccountId!=='ibkr').reduce((sum,t)=>sum+Number(t.amount||0),0);
+  const investmentRemaining=Math.max(0,investmentTarget-completedInvestment);
+  if(investmentRemaining>0.5){
+    if(!byDest.has('ibkr')) byDest.set('ibkr',[]);
+    byDest.get('ibkr').push({bucketId:null,amount:investmentTarget,remaining:investmentRemaining,label:'Investment contribution',accountId:'ibkr'});
+  }
+
+  const groups=[...byDest.entries()].map(([accountId,items])=>({accountId,items,amount:items.reduce((sum,x)=>sum+Number(x.remaining||0),0)})).filter(g=>g.amount>0.5);
+  return {groups,totalOutstanding:groups.reduce((sum,g)=>sum+g.amount,0),items:groups.flatMap(g=>g.items)};
+}
 function actualAccountValue(accountId){
   const a=physicalAccount(accountId); if(!a) return 0;
   if(a.role==='investment') return Number(state.accountBalances[accountId]||0);
@@ -168,11 +262,23 @@ function homeView(){
   if(!p){return `<section class="card hero-action"><div class="metric-label">Start here</div><div class="metric">Create your first funding month</div><p class="sub">Enter the exact paycheck that lands in your account. Wealth OS will allocate it using your rules.</p><button class="btn" data-action="new-paycheck">Enter Paycheck</button></section>${wealthStrip()}`;}
   const plan=planFor(p.id), spent=totalExpenses(p.id), core=completedCoreWealth(p.id), goalFunding=completedGoalFunding(p.id);
   const expTotals=expenseTotals(p.id);const sweep=sweepInfo(p.id);
-  const pending=state.transfers.find(t=>t.budgetPeriodId===p.id&&t.status==='planned');
+  const payday=paydayRequirements(p.id);
+  const paydayGroup=payday.groups.find(g=>g.amount>0.5);
+  const pending=state.transfers.find(t=>t.budgetPeriodId===p.id&&t.status==='planned'&&!['payday','investment_contribution'].includes(t.transferType));
   let action=`<button class="btn" data-action="add-expense">Add Expense</button>`;
-  let actionText='Keep the ledger current';let actionSub='Record spending as it happens.';
-  if(p.state==='closed'){actionText=`${monthLabel(p.id)} is closed`;actionSub='Period-linked records are locked until you intentionally reopen the month.';action=`<button class="btn" data-action="reopen-period" data-id="${p.id}">Reopen Month</button>`;}
-  else if(pending){actionText=`Transfer ${money(pending.amount)} pending`;actionSub=`Move the money physically, then confirm it here.`;action=`<button class="btn" data-action="complete-transfer" data-id="${pending.id}">Mark Transfer Completed</button>`;}
+  let actionText='Keep the ledger current';let actionSub='Record spending as it happens.';let actionMetric=money(sweep.available);
+  if(p.state==='closed'){
+    actionText=`${monthLabel(p.id)} is closed`;actionSub='Period-linked records are locked until you intentionally reopen the month.';actionMetric='Locked';action=`<button class="btn" data-action="reopen-period" data-id="${p.id}">Reopen Month</button>`;
+  } else if(paydayGroup){
+    const destination=physicalAccount(paydayGroup.accountId)?.name||paydayGroup.accountId;
+    const detail=paydayGroup.items.map(x=>`${x.label} ${money(x.remaining)}`).join(' · ');
+    actionText=`Transfer to ${destination}`;
+    actionSub=`${detail}. Move only this remaining amount physically, then confirm it here.`;
+    actionMetric=money(paydayGroup.amount);
+    action=`<button class="btn" data-action="payday-transfer" data-account="${paydayGroup.accountId}" data-period="${p.id}">Record Transfer Completed</button>`;
+  } else if(pending){
+    actionText=`Transfer ${money(pending.amount)} pending`;actionSub=`Move the money physically, then confirm it here.`;actionMetric=money(pending.amount);action=`<button class="btn" data-action="complete-transfer" data-id="${pending.id}">Mark Transfer Completed</button>`;
+  }
   const em=goal('goal-emergency');const eb=em?goalBal(em):0;const ep=em?Math.min(1,eb/em.targetAmount):0;
   const food=plan.lines.find(x=>x.id==='food'), foodSpent=expTotals.food||0;
   const social=plan.lines.find(x=>x.id==='dating-social'), socialSpent=expTotals['dating-social']||0;
@@ -190,7 +296,7 @@ function homeView(){
   </div>
   <div class="section-title"><h2>Flexible budget</h2><span class="sub">Potential month-end sweep ${money(sweep.available)}</span></div>
   <section class="card">${budgetMini('Food',food?.budgetAmount||0,foodSpent)}${budgetMini('Dating / Social',social?.budgetAmount||0,socialSpent)}</section>
-  <div class="section-title"><h2>Next action</h2></div><section class="card hero-action"><div class="metric-label">${actionText}</div><div class="metric">${p.state==='closed'?'Locked':pending?money(pending.amount):money(sweep.available)}</div><p class="sub">${actionSub}</p>${action}</section>
+  <div class="section-title"><h2>Next action</h2></div><section class="card hero-action"><div class="metric-label">${actionText}</div><div class="metric">${actionMetric}</div><p class="sub">${actionSub}</p>${action}</section>
   <div class="section-title"><h2>Monthly flow</h2></div><section class="card">
     ${row('Planned immediate wealth',money(Math.max(0,plan.immediateWealth)))}${row('Completed goal/reserve funding',money(goalFunding))}${row('Current sweep available',money(sweep.available))}
     <div class="actions" style="margin-top:12px"><button class="btn secondary" data-action="add-income">Add Income</button><button class="btn secondary" data-action="month-close">Month-End Review</button></div>
@@ -247,7 +353,7 @@ function budgetView(){
 
 function budgetKpi(label,value,sub,bad=false){return `<section class="card budget-kpi"><div class="metric-label">${label}</div><div class="kpi-value ${bad?'bad':''}">${value}</div><div class="sub">${sub}</div></section>`;}
 function fundingMonthControls(p){
-  const completed=state.transfers.filter(t=>!t.deletedAt&&t.budgetPeriodId===p.id&&t.status==='completed');
+  const completed=state.transfers.filter(t=>!t.deletedAt&&t.budgetPeriodId===p.id&&t.status==='completed'&&!(t.systemGenerated&&t.fromAccountId===t.toAccountId&&t.transferType==='reserve_allocation'));
   const closed=p.state==='closed';
   if(closed){
     return `<div class="section-title"><h2>Funding month controls</h2></div><section class="card"><div class="split"><div><strong>Reopen ${monthLabel(p.id)}</strong><div class="sub">Use this only to correct a closed month. Changes may require a new reconciliation or sweep correction.</div></div><button class="btn secondary" data-action="reopen-period" data-id="${p.id}">Reopen Month</button></div></section>`;
@@ -275,7 +381,7 @@ function transactionsView(){
   const all=[
     ...state.expenses.filter(x=>!x.deletedAt).map(x=>({...x,_kind:'expense',_date:x.date,_amount:-Number(x.amount),_title:category(x.categoryId)?.name||'Expense',_account:physicalAccount(x.accountId)?.name||'',_detail:x.description||''})),
     ...state.incomes.filter(x=>!x.deletedAt).map(x=>({...x,_kind:'income',_date:x.dateReceived,_amount:Number(x.amount),_title:INCOME_TYPES.find(t=>t[0]===x.incomeType)?.[1]||'Income',_account:physicalAccount(x.accountId)?.name||'',_detail:x.description||''})),
-    ...state.transfers.filter(x=>!x.deletedAt&&['planned','completed'].includes(x.status)).map(x=>{const internal=x.fromAccountId===x.toAccountId;return {...x,_kind:'transfer',_date:x.completedDate||x.plannedDate,_amount:Number(x.amount||0),_title:internal?'E.SUN purpose allocation':`${physicalAccount(x.fromAccountId)?.name} → ${physicalAccount(x.toAccountId)?.name}`,_account:internal?'Virtual buckets':'Internal transfer',_detail:`${(x.transferType==='bucket_allocation'?'Purpose allocation':(x.transferType||'transfer').replaceAll('_',' '))} · ${x.status}`};} )
+    ...state.transfers.filter(x=>!x.deletedAt&&['planned','completed'].includes(x.status)).map(x=>{const internal=x.fromAccountId===x.toAccountId;const internalName=physicalAccount(x.fromAccountId)?.name||'Account';return {...x,_kind:'transfer',_date:x.completedDate||x.plannedDate,_amount:Number(x.amount||0),_title:internal?`${internalName} purpose allocation`:`${physicalAccount(x.fromAccountId)?.name} → ${physicalAccount(x.toAccountId)?.name}`,_account:internal?'Virtual buckets':'Internal transfer',_detail:`${(['bucket_allocation','reserve_allocation'].includes(x.transferType)?'Purpose allocation':(x.transferType||'transfer').replaceAll('_',' '))} · ${x.status}`};} )
   ].sort((a,b)=>String(b._date).localeCompare(String(a._date))||String(b.createdAt||'').localeCompare(String(a.createdAt||'')));
   const list=activityFilter==='all'?all:all.filter(x=>x._kind===activityFilter);
   return `<div><h2 style="margin:0">Activity</h2><div class="sub">Expenses, income and transfers</div></div>
@@ -342,17 +448,18 @@ function wealthView(){
 
   <div class="section-title"><h2>CTBC Operating</h2><span class="tag${ctStatusClass}">${ctStatus}</span></div>
   <section class="card account-detail-card">
-    <div class="account-balance-head"><div><div class="metric-label">Latest bank balance</div><div class="metric">${money(ct.actual)}</div>${ct.verified?`<div class="sub">Checked ${esc(ct.reconciliation.date||'')}</div>`:`<div class="sub">Using ledger balance until you confirm it</div>`}</div></div>
+    <div class="account-balance-head"><div><div class="metric-label">Tracked current balance</div><div class="metric">${money(ct.actual)}</div>${ct.verified?`<div class="sub">Last checked ${esc(ct.reconciliation.date||'')}${ct.isEstimated?' · updated by recorded activity':''}</div>`:`<div class="sub">Using ledger balance until you confirm it</div>`}</div></div>
     <div class="reconcile-grid two-col">
       <div><span class="sub">Ledger expected</span><strong>${money(ct.expected)}</strong></div>
       <div><span class="sub">Bank vs ledger</span><strong class="${Math.abs(ct.difference)<0.5?'good':ct.difference<0?'bad':'warn'}">${ct.difference>0?'+':''}${money(ct.difference)}</strong></div>
     </div>
+    <div class="row"><div><strong>Electricity Reserve</strong><div class="sub">Virtual reserve held inside CTBC · no bank transfer required</div></div><strong class="amount">${money(state.bucketBalances.electricity||0)}</strong></div>
     <div class="actions account-actions"><button class="btn secondary" data-action="account-reconcile" data-id="ctbc">Update Balance</button><button class="btn ghost" data-action="account-adjustment" data-id="ctbc">Add Adjustment</button></div>
   </section>
 
   <div class="section-title"><h2>E.SUN Reserved</h2><span class="tag${esStatusClass}">${esStatus}</span></div>
   <section class="card esun-card">
-    <div class="account-balance-head"><div><div class="metric-label">Latest bank balance</div><div class="metric">${money(es.actual)}</div>${es.verified?`<div class="sub">Checked ${esc(es.reconciliation.date||'')}</div>`:`<div class="sub">Using ledger balance until you confirm it</div>`}</div></div>
+    <div class="account-balance-head"><div><div class="metric-label">Tracked current balance</div><div class="metric">${money(es.actual)}</div>${es.verified?`<div class="sub">Last checked ${esc(es.reconciliation.date||'')}${es.isEstimated?' · updated by recorded activity':''}</div>`:`<div class="sub">Using ledger balance until you confirm it</div>`}</div></div>
     <div class="reconcile-grid">
       <div><span class="sub">Ledger expected</span><strong>${money(es.expected)}</strong></div>
       <div><span class="sub">Virtual allocated</span><strong>${money(es.virtualTotal)}</strong></div>
@@ -389,6 +496,7 @@ function renderModal(){
   if(modal.type==='income') return modalWrap(modal.id?'Edit Income':'Add Income',incomeForm(modal.id?state.incomes.find(x=>x.id===modal.id):null));
   if(modal.type==='manual-transfer') return modalWrap(modal.id?'Edit Transfer':'Record Transfer',manualTransferForm(modal.id?state.transfers.find(x=>x.id===modal.id):null));
   if(modal.type==='transfer') return modalWrap('Confirm Transfer',transferConfirm(modal.id));
+  if(modal.type==='payday-transfer') return modalWrap('Confirm Payday Transfer',paydayTransferConfirm(modal.periodId,modal.accountId));
   if(modal.type==='close') return modalWrap('Month-End Review',monthCloseView());
   if(modal.type==='settings') return modalWrap('Settings',settingsView());
   if(modal.type==='investment') return modalWrap('Update IBKR Value',investmentForm());
@@ -424,6 +532,12 @@ function manualTransferForm(x=null){
   return `<form id="manual-transfer-form"><input type="hidden" name="id" value="${x?.id||''}"><div class="field"><label>Amount</label><input name="amount" type="number" min="0" step="1" value="${x?.amount||''}" required></div><div class="form-grid"><div class="field"><label>From account</label><select name="from">${state.accounts.map(a=>`<option value="${a.id}" ${a.id===(x?.fromAccountId||'ctbc')?'selected':''}>${esc(a.name)}</option>`).join('')}</select></div><div class="field"><label>To account</label><select name="to">${state.accounts.map(a=>`<option value="${a.id}" ${a.id===(x?.toAccountId||'esun')?'selected':''}>${esc(a.name)}</option>`).join('')}</select></div></div><div class="field"><label>Purpose / virtual bucket</label><select name="bucket"><option value="">No bucket allocation</option>${state.buckets.map(b=>`<option value="${b.id}" ${b.id===alloc?.bucketId?'selected':''}>${esc(b.name)}</option>`).join('')}</select></div><div class="form-grid"><div class="field"><label>Date</label><input name="date" type="date" value="${x?.completedDate||x?.plannedDate||today()}"></div><div class="field"><label>Budget period</label><select name="period"><option value="">None</option>${periods.map(y=>`<option value="${y.id}" ${y.id===period?'selected':''}>${monthLabel(y.id)}</option>`).join('')}</select></div></div><label><input name="completed" type="checkbox" ${!x||x.status==='completed'?'checked':''}> Transfer already completed</label><button class="btn" style="width:100%;margin-top:14px">${x?'Save Changes':'Save Transfer'}</button></form>`;
 }
 function transferConfirm(id){const t=state.transfers.find(x=>x.id===id);if(!t)return'';const allocs=state.transferAllocations.filter(a=>a.transferId===id);const details=allocs.length?allocs.map(a=>row(bucket(a.bucketId)?.name||a.label||'Allocation',money(a.amount))).join(''):row(t.toAccountId==='ibkr'?'Investment contribution':'Transfer amount',money(t.amount));return `<div class="notice">Confirm only after you actually moved the money in your banking app.</div><div class="section-title"><h2>${physicalAccount(t.fromAccountId)?.name} → ${physicalAccount(t.toAccountId)?.name}</h2></div><section class="card">${details}<div class="row"><strong>Total</strong><strong>${money(t.amount)}</strong></div></section><div class="actions" style="margin-top:14px"><button class="btn" data-action="confirm-transfer" data-id="${id}">Yes — Transfer Completed</button><button class="btn secondary" data-action="close-modal">Not Yet</button></div>`;}
+function paydayTransferConfirm(periodId,accountId){
+  const req=paydayRequirements(periodId),group=req.groups.find(g=>g.accountId===accountId);
+  if(!group)return `<div class="notice">This payday transfer is already fully satisfied.</div>`;
+  const destination=physicalAccount(accountId)?.name||accountId;
+  return `<div class="notice">Confirm only after you physically moved this exact remaining amount. Already-completed payday items are excluded automatically.</div><div class="section-title"><h2>CTBC Operating → ${esc(destination)}</h2></div><section class="card">${group.items.map(x=>row(x.label,money(x.remaining))).join('')}<div class="row"><strong>Total</strong><strong>${money(group.amount)}</strong></div></section><div class="actions" style="margin-top:14px"><button class="btn" data-action="confirm-payday-transfer" data-period="${periodId}" data-account="${accountId}">Yes — Transfer Completed</button><button class="btn secondary" data-action="close-modal">Not Yet</button></div>`;
+}
 function monthCloseView(){
   const p=currentPeriod();if(!p)return'';
   const c=monthCloseStatus(p.id),closeRecord=state.monthlyCloses.find(x=>x.budgetPeriodId===p.id||x.id===p.id);
@@ -432,7 +546,7 @@ function monthCloseView(){
   }
   const fixedText=c.missingFixed.length?`${c.missingFixed.length} fixed obligation${c.missingFixed.length===1?'':'s'} not fully recorded`:'All fixed obligations recorded';
   const checks=[
-    ['Payday funding',c.fundingOk,c.fundingOk?'Tithe and reserve funding complete':'Tithe or reserve funding incomplete'],
+    ['Payday funding',c.fundingOk,c.fundingOk?'Tithe, CTBC reserve allocation and planned wealth routing complete':`${money(c.payday.totalOutstanding)} of payday bank transfers still outstanding`],
     ['Planned transfers',c.pending.length===0,c.pending.length?`${c.pending.length} still pending`:'None pending'],
     ['CTBC reconciliation',c.ct.verified&&Math.abs(c.ct.difference)<0.5,c.ct.verified?`Difference ${c.ct.difference>0?'+':''}${money(c.ct.difference)}`:'Not checked'],
     ['E.SUN reconciliation',c.es.verified&&c.es.bankOk&&c.es.allocationOk,c.es.verified?(c.es.allocationOk?'Bank/ledger needs attention':'Purpose allocation needs attention'):'Not checked'],
@@ -468,7 +582,7 @@ function deleteFundingMonthView(periodId){
   const incomes=state.incomes.filter(x=>x.budgetPeriodId===periodId&&!x.deletedAt);
   const expenses=state.expenses.filter(x=>x.budgetPeriodId===periodId&&!x.deletedAt);
   const transfers=state.transfers.filter(x=>x.budgetPeriodId===periodId&&!x.deletedAt);
-  const completed=transfers.filter(x=>x.status==='completed');
+  const completed=transfers.filter(x=>x.status==='completed'&&!(x.systemGenerated&&x.fromAccountId===x.toAccountId&&x.transferType==='reserve_allocation'));
   if(p.state==='closed') return `<div class="notice"><strong>${monthLabel(periodId)} is closed.</strong><br>Closed months are protected from deletion.</div>`;
   if(completed.length) return `<div class="notice"><strong>Deletion is blocked.</strong><br>This month has ${completed.length} completed transfer${completed.length===1?'':'s'}. Wealth OS will not silently reverse money you may have actually moved between accounts.</div><section class="card" style="margin-top:14px">${row('Income entries',incomes.length)}${row('Expenses',expenses.length)}${row('Transfers',transfers.length)}${row('Completed transfers',completed.length)}</section><div class="sub" style="margin-top:12px">If this was only a test, leave system transfers uncompleted before deleting the month.</div>`;
   return `<div class="notice"><strong>This action is intended for test or mistaken funding months.</strong><br>It will permanently remove the month and its period-linked entries from this device.</div><section class="card" style="margin-top:14px">${row('Funding month',monthLabel(periodId))}${row('Income entries',incomes.length)}${row('Expenses',expenses.length)}${row('Planned transfers',transfers.length)}</section><div class="sub" style="margin:12px 0">E.SUN/CTBC reconciliations, account adjustments, IBKR snapshots, and unrelated transactions are not touched.</div><button class="btn danger" style="width:100%" data-action="confirm-delete-period" data-id="${periodId}">Delete Month & Test Data</button>`;
@@ -480,24 +594,25 @@ async function createPaycheck(form){
   const fd=new FormData(form),amount=Number(fd.get('amount')),date=fd.get('date'),periodId=fd.get('period');
   if(state.periods.some(p=>p.id===periodId))throw new Error('That budget month already exists.');
   const plan=buildBudgetPlan({income:amount,categories:state.categories,settings:state.settings}),stamp=new Date().toISOString();
-  await put('periods',{id:periodId,state:'funded',createdAt:stamp,fundedAt:date,planSnapshot:plan});
+  const goalAllocs=allocateGoalSurplus({amount:Math.max(0,Math.round(plan.immediateWealth)),goals:state.goals,bucketBalances:state.bucketBalances});
+  await put('periods',{
+    id:periodId,state:'funded',createdAt:stamp,fundedAt:date,planSnapshot:plan,
+    paydayRoutingSnapshot:{goalAllocs:goalAllocs.map(a=>({...a})),createdAt:stamp}
+  });
   await put('incomes',{id:uid('inc'),dateReceived:date,budgetPeriodId:periodId,amount,incomeType:'regular_income',accountId:'ctbc',description:'Monthly salary',titheEligible:true,includedInRegularIncomeMetrics:true,systemGenerated:true,createdAt:stamp});
-  const bucketAllocations=[];
-  const titheLine=plan.lines.find(x=>x.ruleType==='percentage');
-  if(titheLine?.budgetAmount>0)bucketAllocations.push({bucketId:'tithe',amount:titheLine.budgetAmount,label:'Tithe'});
-  plan.lines.filter(x=>x.ruleType==='sinking_contribution'&&x.bucketId).forEach(x=>bucketAllocations.push({bucketId:x.bucketId,amount:x.budgetAmount,label:x.name}));
-  const goalAllocs=allocateGoalSurplus({amount:Math.max(0,plan.immediateWealth),goals:state.goals,bucketBalances:state.bucketBalances});
-  bucketAllocations.push(...goalAllocs.filter(x=>x.bucketId));
-  const investmentAmount=goalAllocs.filter(x=>x.accountId==='ibkr').reduce((sum,x)=>sum+Number(x.amount||0),0);
-  const esunTotal=bucketAllocations.reduce((sum,a)=>sum+Number(a.amount||0),0);
-  if(esunTotal>0){
-    const tid=uid('tr');
-    await put('transfers',{id:tid,fromAccountId:'ctbc',toAccountId:'esun',amount:esunTotal,budgetPeriodId:periodId,status:'planned',plannedDate:date,transferType:'payday',createdAt:new Date().toISOString()});
-    await bulkPut('transferAllocations',bucketAllocations.map(a=>({id:uid('ta'),transferId:tid,bucketId:a.bucketId,amount:a.amount,goalId:a.goalId||null,label:a.label})));
+
+  // Reserves that live in CTBC are funded by purpose designation, not by moving cash
+  // to another bank. The money is already physically in CTBC when salary arrives.
+  const ctbcReserveLines=plan.lines.filter(x=>x.ruleType==='sinking_contribution'&&x.bucketId&&bucket(x.bucketId)?.accountId==='ctbc'&&Number(x.budgetAmount||0)>0);
+  if(ctbcReserveLines.length){
+    const total=ctbcReserveLines.reduce((sum,x)=>sum+Number(x.budgetAmount||0),0),tid=uid('tr');
+    await put('transfers',{id:tid,fromAccountId:'ctbc',toAccountId:'ctbc',amount:total,budgetPeriodId:periodId,status:'completed',plannedDate:date,completedDate:date,completedAt:stamp,transferType:'reserve_allocation',systemGenerated:true,createdAt:stamp,updatedAt:stamp});
+    await bulkPut('transferAllocations',ctbcReserveLines.map(x=>({id:uid('ta'),transferId:tid,bucketId:x.bucketId,amount:Number(x.budgetAmount||0),goalId:null,label:x.name})));
   }
-  if(investmentAmount>0){
-    await put('transfers',{id:uid('tr'),fromAccountId:'ctbc',toAccountId:'ibkr',amount:investmentAmount,budgetPeriodId:periodId,status:'planned',plannedDate:date,transferType:'investment_contribution',createdAt:new Date().toISOString()});
-  }
+
+  // Bank-transfer actions are now derived from the funding plan and what has already
+  // been completed. This prevents a separately-recorded tithe transfer from leaving
+  // behind an obsolete combined payday transfer.
   selectedPeriodId=periodId;modal=null;await load();
 }
 async function saveExpense(form){
@@ -528,6 +643,16 @@ async function completeTransfer(id){
   assertPeriodEditable(t.budgetPeriodId||null);
   const stamp=new Date().toISOString();
   await put('transfers',{...t,status:'completed',completedDate:today(),completedAt:stamp,updatedAt:stamp});modal=null;await load();
+}
+async function completePaydayTransfer(periodId,accountId){
+  assertPeriodEditable(periodId);
+  const req=paydayRequirements(periodId),group=req.groups.find(g=>g.accountId===accountId);
+  if(!group||group.amount<=0.5){modal=null;await load();return;}
+  const stamp=new Date().toISOString(),tid=uid('tr'),date=today();
+  await put('transfers',{id:tid,fromAccountId:'ctbc',toAccountId:accountId,amount:group.amount,budgetPeriodId:periodId,status:'completed',plannedDate:date,completedDate:date,completedAt:stamp,transferType:accountId==='ibkr'?'investment_contribution':'payday',systemGenerated:true,createdAt:stamp,updatedAt:stamp});
+  const allocs=group.items.filter(x=>x.bucketId);
+  if(allocs.length) await bulkPut('transferAllocations',allocs.map(x=>({id:uid('ta'),transferId:tid,bucketId:x.bucketId,amount:x.remaining,goalId:null,label:x.label})));
+  modal=null;await load();
 }
 async function createSweep(){
   const p=currentPeriod();if(!p)return;assertPeriodEditable(p.id);
@@ -605,7 +730,7 @@ async function deleteFundingMonth(periodId){
   const p=state.periods.find(x=>x.id===periodId);if(!p)throw new Error('Funding month not found.');
   if(p.state==='closed')throw new Error('Closed months cannot be deleted.');
   const transfers=state.transfers.filter(x=>x.budgetPeriodId===periodId&&!x.deletedAt);
-  const completed=transfers.filter(x=>x.status==='completed');
+  const completed=transfers.filter(x=>x.status==='completed'&&!(x.systemGenerated&&x.fromAccountId===x.toAccountId&&x.transferType==='reserve_allocation'));
   if(completed.length)throw new Error('This month has completed transfers. Resolve those before deleting the funding month.');
   for(const t of transfers){
     for(const a of state.transferAllocations.filter(a=>a.transferId===t.id)) await remove('transferAllocations',a.id);
@@ -648,6 +773,8 @@ function bind(){
     if(a==='add-income')modal={type:'income'};
     if(a==='manual-transfer')modal={type:'manual-transfer'};
     if(a==='complete-transfer')modal={type:'transfer',id:b.dataset.id};
+    if(a==='payday-transfer')modal={type:'payday-transfer',periodId:b.dataset.period,accountId:b.dataset.account};
+    if(a==='confirm-payday-transfer')return completePaydayTransfer(b.dataset.period,b.dataset.account);
     if(a==='confirm-transfer')return completeTransfer(b.dataset.id);
     if(a==='month-close')modal={type:'close'};
     if(a==='create-sweep')return createSweep();

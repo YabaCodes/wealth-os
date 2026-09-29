@@ -127,14 +127,17 @@ export async function wealthMetrics(){
   }
   let financialNetWorth=0;
   // Reserved E.SUN is classified by virtual purpose buckets so tithe stays excluded.
-  // A bank reconciliation is used for net worth only while it still matches the current
-  // transaction-ledger state. New activity makes the old bank check stale, so the ledger
-  // estimate is used until the user reconciles again.
+  // For operating cash, the last exact bank check is rolled forward with recorded ledger
+  // activity so balances remain current between manual reconciliations.
   for(const a of accounts){
     if(a.role==='reserved') continue;
     const expected=Number(ab[a.id]||0),rec=latestReconciliation[a.id];
-    const recStillCurrent=a.role!=='investment'&&rec&&Math.abs(Number(rec.expectedBalance||0)-expected)<0.5;
-    const raw=recStillCurrent?Number(rec.actualBalance||0):expected;
+    // Roll the last exact bank check forward with recorded ledger activity. This preserves
+    // any known reconciliation difference while allowing completed expenses/transfers to
+    // update the tracked balance automatically.
+    const raw=a.role!=='investment'&&rec
+      ? Number(rec.actualBalance||0)+(expected-Number(rec.expectedBalance||0))
+      : expected;
     const v=raw*(a.currency==='USD'?fx:1);
     financialNetWorth += v;
   }

@@ -1,4 +1,4 @@
-# Wealth OS — v1
+# Wealth OS — v1.2
 
 A local-first PWA for paycheck allocation, monthly budgeting, virtual sinking funds, wealth contributions, transfers, goals, investments and month-end reconciliation.
 
@@ -89,7 +89,6 @@ v1 has no server or bank connection. Records are stored in IndexedDB in the brow
 - No automatic bank or IBKR connection.
 - Bonus/windfall allocation is recorded but not yet governed by a dedicated configurable allocation policy; use manual transfers for these in v1.
 - Recurring fixed obligations are budgeted automatically but do not yet have a separate Expected/Paid workflow.
-- Reconciliation records are in the data architecture, but the full guided bank-reconciliation screen is a next-step feature.
 - Goal-rule editing UI is limited; the underlying model already supports the current Emergency/Home Travel dependency.
 
 ## Revision 1.1 — 2026-09-29
@@ -109,3 +108,30 @@ This revision keeps the original local data model and adds the requested interfa
 ### Updating an existing GitHub Pages installation
 
 Replace the files in the repository root with the files from this revision, keeping the same folder structure (`js/`, `icons/`, etc.). Commit the changes to `main`. GitHub Pages will redeploy automatically. Because this PWA uses a service worker, the first launch after deployment may still show the previous version briefly; close and reopen the installed PWA after the new service worker activates.
+
+
+## Revision 1.2 — 2026-09-29
+
+This revision focuses on daily usability and bank-to-ledger accuracy:
+
+- E.SUN balance updates now immediately detect money that has no virtual purpose.
+- Unassigned E.SUN money can be assigned to one bucket, split across several buckets, or left partially unassigned.
+- If virtual allocations exceed the actual E.SUN balance, allocations can be explicitly reduced.
+- Bank reconciliation and purpose allocation are shown as separate statuses; E.SUN only shows fully reconciled when both are clean.
+- CTBC now has the same actual-balance update and explicit adjustment workflow as E.SUN.
+- Reconciled CTBC bank balances are used in Financial Net Worth while transaction-ledger differences remain visible until resolved.
+- Wealth now includes an Account Health summary for CTBC, E.SUN and IBKR.
+- Budget is now a monthly Plan vs Actual dashboard with Income, Fixed, Flexible, Reserves, Wealth and Buffer summary cards.
+- Budget categories now include progress bars, actual/funded amounts and remaining/over-budget amounts.
+- Activity now supports filters for All, Expenses, Income and Transfers.
+- Expenses and income can be edited or deleted. Manual transfers can be edited or deleted. System-generated payday/sweep transfers remain protected from accidental editing.
+- E.SUN purpose assignments are recorded as internal allocation events, not expenses, so physical account balances are unchanged.
+- Service-worker cache version bumped to v1.2 for more reliable GitHub Pages/PWA refreshes.
+
+### Recommended validation after upgrading
+
+1. Open **Wealth** and update the exact CTBC and E.SUN balances from the banking apps.
+2. If E.SUN shows unassigned money, use **Assign Money** and tell Wealth OS what that amount is for.
+3. If either bank shows a Bank vs Ledger difference, first confirm it is not a missing expense, income or transfer; otherwise use **Add Adjustment** with a reason.
+4. Open **Budget** and verify the current month Plan vs Actual values.
+5. Add one small test expense, income and transfer, then confirm the Activity filters and edit/delete controls behave as expected.

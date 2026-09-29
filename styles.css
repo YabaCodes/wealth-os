@@ -50,3 +50,29 @@ button,input,select,textarea{font:inherit}button{cursor:pointer}
 @media(max-width:390px){
   .tab{font-size:9px}.tabs-inner{padding-left:10px;padding-right:10px}.tab-icon .ui-icon{width:19px;height:19px}.reconcile-grid{grid-template-columns:1fr}.settings-btn span{display:none}.settings-btn{width:42px;padding:0}.brand p{max-width:245px}
 }
+
+/* v1.2 budget dashboard, account health and activity controls */
+.budget-overview{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.budget-kpi{min-width:0}.kpi-value{font-size:18px;font-weight:780;margin-top:5px;font-variant-numeric:tabular-nums}
+.flow-card .row{padding:9px 0}.budget-category-list{padding-top:4px;padding-bottom:4px}
+.budget-category{padding:14px 0;border-bottom:1px solid var(--line)}.budget-category:last-child{border-bottom:0}
+.budget-category .progress{margin-bottom:0}.budget-category .progress.over>span{background:var(--bad)}
+.budget-numbers{text-align:right;display:flex;flex-direction:column;gap:2px;white-space:nowrap}.budget-numbers span{font-size:11px;color:var(--muted)}
+.filter-chips{display:flex;gap:8px;overflow:auto;padding:0 0 10px;scrollbar-width:none}.filter-chips::-webkit-scrollbar{display:none}
+.filter-chip{border:1px solid var(--line);background:white;color:#475569;border-radius:999px;padding:7px 11px;font-size:12px;font-weight:700;white-space:nowrap}
+.filter-chip.active{background:#111827;color:white;border-color:#111827}
+.tx-main{min-width:0}.tx-actions{display:flex;gap:10px;margin-top:6px}.text-btn{border:0;background:transparent;padding:0;color:#475569;font-size:11px;font-weight:700}.danger-text{color:var(--bad)}
+.account-health{padding-top:4px;padding-bottom:4px}.account-health-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;border-bottom:1px solid var(--line)}.account-health-row:last-child{border-bottom:0}
+.account-detail-card .metric{margin-top:3px}.reconcile-grid.two-col{grid-template-columns:repeat(2,minmax(0,1fr))}
+.allocation-callout{margin-top:14px;padding:13px;border-radius:14px;background:#fff7ed;border:1px solid #fed7aa;display:flex;align-items:center;justify-content:space-between;gap:12px}.allocation-callout .btn{flex:0 0 auto}
+.allocation-fields{margin-top:14px}.allocation-row{display:grid;grid-template-columns:1fr 120px;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--line)}.allocation-row:last-child{border-bottom:0}.allocation-row input{width:100%;padding:10px;border:1px solid #d1d5db;border-radius:10px;text-align:right}
+
+@media(max-width:700px){
+  .budget-overview{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .budget-kpi{padding:13px}.kpi-value{font-size:16px}
+  .allocation-callout{align-items:flex-start;flex-direction:column}.allocation-callout .btn{width:100%}
+}
+@media(max-width:390px){
+  .budget-overview{grid-template-columns:1fr 1fr;gap:9px}.budget-kpi{padding:12px}.kpi-value{font-size:15px}
+  .allocation-row{grid-template-columns:1fr 100px}
+}

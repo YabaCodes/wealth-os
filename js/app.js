@@ -199,9 +199,17 @@ function budgetView(){
   ${budgetGroup('Flexible',lines,p.id)}
   ${budgetGroup('Reserve',lines,p.id)}
   ${budgetGroup('Giving',lines,p.id)}
-  ${budgetGroup('Buffer',lines,p.id)}`;
+  ${budgetGroup('Buffer',lines,p.id)}
+  ${fundingMonthControls(p)}`;
 }
 function budgetKpi(label,value,sub,bad=false){return `<section class="card budget-kpi"><div class="metric-label">${label}</div><div class="kpi-value ${bad?'bad':''}">${value}</div><div class="sub">${sub}</div></section>`;}
+function fundingMonthControls(p){
+  const completed=state.transfers.filter(t=>!t.deletedAt&&t.budgetPeriodId===p.id&&t.status==='completed');
+  const closed=p.state==='closed';
+  const warning=closed?'Closed months cannot be deleted.':completed.length?`${completed.length} completed transfer${completed.length===1?'':'s'} must be resolved before this month can be deleted.`:'Use this to remove a test or mistaken funding month and all of its period-linked draft data.';
+  return `<div class="section-title"><h2>Funding month controls</h2></div><section class="card danger-zone"><div class="split"><div><strong>Delete ${monthLabel(p.id)} funding month</strong><div class="sub">${warning}</div></div><button class="btn danger" data-action="delete-period" data-id="${p.id}" ${closed?'disabled':''}>Delete Month</button></div></section>`;
+}
+
 function budgetGroup(group,lines,periodId){
   const xs=lines.filter(x=>x.group===group);if(!xs.length)return'';
   return `<div class="section-title"><h2>${group}</h2></div><section class="card budget-category-list">${xs.map(x=>budgetCategoryRow(x,periodId)).join('')}</section>`;
@@ -315,6 +323,7 @@ function renderModal(){
   if(modal.type==='account-reconcile') return modalWrap(`Update ${physicalAccount(modal.accountId)?.name||'Account'} Balance`,accountReconciliationForm(modal.accountId));
   if(modal.type==='account-adjustment') return modalWrap(`Add ${physicalAccount(modal.accountId)?.name||'Account'} Adjustment`,accountAdjustmentForm(modal.accountId));
   if(modal.type==='esun-allocate') return modalWrap('Assign E.SUN Money',esunAllocationForm());
+  if(modal.type==='delete-period') return modalWrap('Delete Funding Month',deleteFundingMonthView(modal.periodId));
   return '';
 }
 function modalWrap(title,body){return `<div class="modal-backdrop" data-action="close-modal"><section class="modal" onclick="event.stopPropagation()"><div class="split"><h3>${title}</h3><button class="btn ghost small" data-action="close-modal">Close</button></div>${body}</section></div>`;}
@@ -328,6 +337,17 @@ function investmentForm(){const snap=[...state.investmentSnapshots].sort((a,b)=>
 function accountReconciliationForm(accountId){const a=physicalAccount(accountId),snap=accountId==='esun'?esunSnapshot():accountSnapshot(accountId);return `<form id="account-reconcile-form" data-account="${accountId}"><div class="notice">Enter the exact balance shown in your ${esc(a?.name||'bank')} app. Wealth OS will compare it with the transaction ledger.</div><div class="field" style="margin-top:14px"><label>Actual bank balance</label><input name="actualBalance" type="number" step="1" min="0" value="${Math.round(snap.actual)}" required></div><div class="form-grid"><div class="field"><label>Date checked</label><input name="date" type="date" value="${today()}" required></div><div class="field"><label>Ledger expected</label><input type="text" value="${money(snap.expected)}" disabled></div></div><div class="field"><label>Note (optional)</label><input name="note" placeholder="Checked in bank app"></div><button class="btn" style="width:100%">Save Actual Balance</button></form>`;}
 function accountAdjustmentForm(accountId){const snap=accountSnapshot(accountId);return `<form id="account-adjustment-form" data-account="${accountId}"><div class="notice">Use an adjustment only when the difference is real and is not better recorded as an expense, income or transfer.</div><div class="field" style="margin-top:14px"><label>Adjustment amount</label><input name="amount" type="number" step="1" value="${Math.round(snap.difference)||''}" placeholder="Use + to add or − to subtract" required></div><div class="form-grid"><div class="field"><label>Date</label><input name="date" type="date" value="${today()}" required></div><div class="field"><label>Current bank vs ledger</label><input type="text" value="${snap.difference>0?'+':''}${money(snap.difference)}" disabled></div></div><div class="field"><label>Reason</label><input name="note" placeholder="Bank interest, correction, opening-balance fix..." required></div><button class="btn" style="width:100%">Save Adjustment</button></form>`;}
 function esunAllocationForm(){const es=esunSnapshot();const diff=Number(modal.amount??es.unassigned);const reducing=diff<0;const amount=Math.abs(diff);return `<form id="esun-allocation-form"><div class="notice"><strong>${reducing?'Reduce':'Assign'} ${money(amount)}</strong><br>${reducing?'Choose which virtual buckets should be reduced.':'Choose what the unassigned E.SUN money is for.'} You can split it across several buckets or leave part unassigned.</div><div class="allocation-fields">${state.buckets.filter(b=>b.accountId==='esun').map(b=>`<div class="allocation-row"><div><strong>${esc(b.name)}</strong><div class="sub">Current ${money(state.bucketBalances[b.id]||0)}</div></div><input name="bucket-${b.id}" type="number" min="0" step="1" value="0" ${reducing?`max="${Math.max(0,Math.floor(state.bucketBalances[b.id]||0))}"`:''}></div>`).join('')}</div><input type="hidden" name="direction" value="${reducing?'-1':'1'}"><input type="hidden" name="limit" value="${amount}"><div class="sub" style="margin:10px 0">Maximum to ${reducing?'reduce':'assign'} now: ${money(amount)}</div><button class="btn" style="width:100%">Save Purpose Allocation</button></form>`;}
+
+function deleteFundingMonthView(periodId){
+  const p=state.periods.find(x=>x.id===periodId);if(!p)return '<div class="empty">Funding month not found.</div>';
+  const incomes=state.incomes.filter(x=>x.budgetPeriodId===periodId&&!x.deletedAt);
+  const expenses=state.expenses.filter(x=>x.budgetPeriodId===periodId&&!x.deletedAt);
+  const transfers=state.transfers.filter(x=>x.budgetPeriodId===periodId&&!x.deletedAt);
+  const completed=transfers.filter(x=>x.status==='completed');
+  if(p.state==='closed') return `<div class="notice"><strong>${monthLabel(periodId)} is closed.</strong><br>Closed months are protected from deletion.</div>`;
+  if(completed.length) return `<div class="notice"><strong>Deletion is blocked.</strong><br>This month has ${completed.length} completed transfer${completed.length===1?'':'s'}. Wealth OS will not silently reverse money you may have actually moved between accounts.</div><section class="card" style="margin-top:14px">${row('Income entries',incomes.length)}${row('Expenses',expenses.length)}${row('Transfers',transfers.length)}${row('Completed transfers',completed.length)}</section><div class="sub" style="margin-top:12px">If this was only a test, leave system transfers uncompleted before deleting the month.</div>`;
+  return `<div class="notice"><strong>This action is intended for test or mistaken funding months.</strong><br>It will permanently remove the month and its period-linked entries from this device.</div><section class="card" style="margin-top:14px">${row('Funding month',monthLabel(periodId))}${row('Income entries',incomes.length)}${row('Expenses',expenses.length)}${row('Planned transfers',transfers.length)}</section><div class="sub" style="margin:12px 0">E.SUN/CTBC reconciliations, account adjustments, IBKR snapshots, and unrelated transactions are not touched.</div><button class="btn danger" style="width:100%" data-action="confirm-delete-period" data-id="${periodId}">Delete Month & Test Data</button>`;
+}
 
 function settingsView(){return `<form id="settings-form"><div class="form-grid"><div class="field"><label>Forecast salary</label><input name="forecastSalary" type="number" value="${state.settings.forecastSalary}"></div><div class="field"><label>USD/TWD rate</label><input name="usdTwdRate" type="number" step="0.0001" value="${state.settings.usdTwdRate}"></div><div class="field"><label>Raise → wealth (%)</label><input name="wealthRaisePercent" type="number" value="${state.settings.wealthRaisePercent}"></div></div><div class="section-title"><h2>Budget rules</h2></div>${state.categories.filter(c=>c.ruleType!=='expense_only').map(c=>`<div class="row"><div><strong>${esc(c.name)}</strong><div class="sub">${c.ruleType.replaceAll('_',' ')}</div></div><input name="cat-${c.id}" type="number" step="1" value="${c.defaultAmount}" style="width:120px;padding:9px;border:1px solid #d1d5db;border-radius:9px;text-align:right"></div>`).join('')}<button class="btn" style="width:100%;margin-top:14px">Save Settings</button></form><div class="section-title"><h2>Data</h2></div><div class="actions"><button class="btn secondary" data-action="export-backup">Export Backup</button><label class="btn secondary">Restore Backup<input id="restore-file" type="file" accept="application/json" hidden></label></div>`;}
 
@@ -392,6 +412,23 @@ async function saveEsunAllocation(form){
   await bulkPut('transferAllocations',allocations.map(a=>({id:uid('ta'),transferId:tid,bucketId:a.bucketId,amount:a.amount,goalId:null,label:a.label})));
   modal=null;await load();
 }
+async function deleteFundingMonth(periodId){
+  const p=state.periods.find(x=>x.id===periodId);if(!p)throw new Error('Funding month not found.');
+  if(p.state==='closed')throw new Error('Closed months cannot be deleted.');
+  const transfers=state.transfers.filter(x=>x.budgetPeriodId===periodId&&!x.deletedAt);
+  const completed=transfers.filter(x=>x.status==='completed');
+  if(completed.length)throw new Error('This month has completed transfers. Resolve those before deleting the funding month.');
+  for(const t of transfers){
+    for(const a of state.transferAllocations.filter(a=>a.transferId===t.id)) await remove('transferAllocations',a.id);
+    await remove('transfers',t.id);
+  }
+  for(const x of state.expenses.filter(x=>x.budgetPeriodId===periodId)) await remove('expenses',x.id);
+  for(const x of state.incomes.filter(x=>x.budgetPeriodId===periodId)) await remove('incomes',x.id);
+  for(const x of state.monthlyCloses.filter(x=>x.budgetPeriodId===periodId||x.id===periodId)) await remove('monthlyCloses',x.id);
+  await remove('periods',periodId);
+  selectedPeriodId=null;modal=null;await load();
+}
+
 async function deleteTransaction(kind,id){
   if(kind==='expense'){const x=state.expenses.find(e=>e.id===id);await put('expenses',{...x,deletedAt:new Date().toISOString()});}
   if(kind==='income'){const x=state.incomes.find(e=>e.id===id);await put('incomes',{...x,deletedAt:new Date().toISOString()});}
@@ -421,6 +458,11 @@ function bind(){
     if(a==='account-reconcile')modal={type:'account-reconcile',accountId:b.dataset.id};
     if(a==='account-adjustment')modal={type:'account-adjustment',accountId:b.dataset.id};
     if(a==='esun-allocate')modal={type:'esun-allocate',amount:esunSnapshot().unassigned};
+    if(a==='delete-period')modal={type:'delete-period',periodId:b.dataset.id};
+    if(a==='confirm-delete-period'){
+      if(confirm(`Delete ${monthLabel(b.dataset.id)} and all of its test data? This cannot be undone.`)) return deleteFundingMonth(b.dataset.id);
+      return;
+    }
     if(a==='activity-filter'){activityFilter=b.dataset.filter;return render();}
     if(a==='edit-transaction'){
       if(b.dataset.kind==='expense')modal={type:'expense',id:b.dataset.id};

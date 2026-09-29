@@ -74,7 +74,7 @@ export async function bucketBalances(){
   const out={};
   buckets.forEach(b=>out[b.id]=Number(b.openingBalance||0));
   const transfers=await getAll('transfers');
-  const completed=new Set(transfers.filter(t=>t.status==='completed').map(t=>t.id));
+  const completed=new Set(transfers.filter(t=>t.status==='completed'&&!t.deletedAt).map(t=>t.id));
   for(const a of allocs){ if(completed.has(a.transferId)) out[a.bucketId]=(out[a.bucketId]||0)+Number(a.amount||0); }
   for(const e of expenses){ if(!e.deletedAt && e.fundingBucketId) out[e.fundingBucketId]=(out[e.fundingBucketId]||0)-Number(e.amount||0); }
   return out;
@@ -88,7 +88,7 @@ export async function accountBalances(){
   accounts.forEach(a=>out[a.id]=Number(a.openingBalance||0));
   for(const i of incomes){ if(!i.deletedAt) out[i.accountId]=(out[i.accountId]||0)+Number(i.amount||0); }
   for(const e of expenses){ if(!e.deletedAt) out[e.accountId]=(out[e.accountId]||0)-Number(e.amount||0); }
-  for(const t of transfers.filter(t=>t.status==='completed')){
+  for(const t of transfers.filter(t=>t.status==='completed'&&!t.deletedAt)){
     out[t.fromAccountId]=(out[t.fromAccountId]||0)-Number(t.amount||0);
     out[t.toAccountId]=(out[t.toAccountId]||0)+Number(t.amount||0);
   }
@@ -105,20 +105,25 @@ export async function accountBalances(){
 }
 
 export async function wealthMetrics(){
-  const [accounts,buckets,bb,ab,snaps,settings]=await Promise.all([
-    getAll('accounts'),getAll('buckets'),bucketBalances(),accountBalances(),getAll('investmentSnapshots'),getOne('settings','app')
+  const [accounts,buckets,bb,ab,snaps,settings,reconciliations]=await Promise.all([
+    getAll('accounts'),getAll('buckets'),bucketBalances(),accountBalances(),getAll('investmentSnapshots'),getOne('settings','app'),getAll('reconciliations')
   ]);
   const fx=Number(settings?.usdTwdRate||1);
+  const latestActual={};
+  for(const r of [...reconciliations].sort((a,b)=>`${a.date||''}${a.createdAt||''}`.localeCompare(`${b.date||''}${b.createdAt||''}`))){
+    if(!r.deletedAt) latestActual[r.accountId]=Number(r.actualBalance||0);
+  }
   let financialNetWorth=0;
-  // For reserved E.SUN, use bucket classification rather than whole account to exclude tithe.
+  // Reserved E.SUN is classified by virtual purpose buckets so tithe stays excluded.
   for(const a of accounts){
     if(a.role==='reserved') continue;
-    const v=Number(ab[a.id]||0)*(a.currency==='USD'?fx:1);
+    const raw=(a.role!=='investment' && latestActual[a.id]!==undefined)?latestActual[a.id]:Number(ab[a.id]||0);
+    const v=raw*(a.currency==='USD'?fx:1);
     financialNetWorth += v;
   }
   for(const b of buckets){ if(b.countsTowardNetWorth) financialNetWorth += Number(bb[b.id]||0); }
   let coreWealth=0;
   for(const b of buckets){ if(b.countsTowardCoreWealth) coreWealth += Number(bb[b.id]||0); }
   for(const a of accounts.filter(x=>x.role==='investment')) coreWealth += Number(ab[a.id]||0)*(a.currency==='USD'?fx:1);
-  return {financialNetWorth,coreWealth,bucketBalances:bb,accountBalances:ab};
+  return {financialNetWorth,coreWealth,bucketBalances:bb,accountBalances:ab,latestActual};
 }

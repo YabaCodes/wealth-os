@@ -1,4 +1,4 @@
-# Wealth OS — v1.2
+# Wealth OS — v1.2.1
 
 A local-first PWA for paycheck allocation, monthly budgeting, virtual sinking funds, wealth contributions, transfers, goals, investments and month-end reconciliation.
 
@@ -135,3 +135,17 @@ This revision focuses on daily usability and bank-to-ledger accuracy:
 3. If either bank shows a Bank vs Ledger difference, first confirm it is not a missing expense, income or transfer; otherwise use **Add Adjustment** with a reason.
 4. Open **Budget** and verify the current month Plan vs Actual values.
 5. Add one small test expense, income and transfer, then confirm the Activity filters and edit/delete controls behave as expected.
+
+
+## Revision 1.2.1 — 2026-09-29
+
+This patch adds a safe way to test the paycheck workflow without leaving a fake funding month behind:
+
+- Budget now includes **Funding month controls** with **Delete Month**.
+- Deleting an open funding month removes its period-linked income entries, expenses, planned transfers, and transfer allocations so the same month can be created again.
+- Account reconciliations, account adjustments, IBKR snapshots, and unrelated transactions are preserved.
+- Deletion is blocked for closed months.
+- Deletion is also blocked when the month has completed transfers, so Wealth OS never silently reverses money that may have actually moved between accounts.
+- Service-worker cache version updated so the installed PWA picks up the patch.
+
+For a test paycheck, create the funding month, explore the budget and planned transfer, **do not mark the transfer completed**, then use **Budget → Funding month controls → Delete Month** when finished.

@@ -1,4 +1,4 @@
-# Wealth OS — v1.3.2
+# Wealth OS — v1.3.3
 
 A local-first PWA for paycheck allocation, monthly budgeting, virtual sinking funds, wealth contributions, transfers, goals, investments and month-end reconciliation.
 

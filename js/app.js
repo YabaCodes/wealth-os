@@ -115,10 +115,73 @@ async function migrateV132(){
   await put('settings',{...settings,dataModelVersion:132,updatedAt:new Date().toISOString()});
 }
 
+async function migrateV133(){
+  const settings=await getOne('settings','app');
+  if(Number(settings?.dataModelVersion||0)>=133) return;
+
+  // v1.3.2 still derived the post-reconciliation bank roll-forward from the entire
+  // historical ledger. Older reconciliation adjustments could therefore be counted
+  // again after the reconciliation had already established the true bank baseline.
+  // Rebuild the E.SUN comparison from only physical activity that happened after the
+  // latest exact bank check.
+  const recs=(await getAll('reconciliations')).filter(r=>r.accountId==='esun'&&!r.deletedAt)
+    .sort((a,b)=>`${a.date||''}${a.createdAt||''}`.localeCompare(`${b.date||''}${b.createdAt||''}`));
+  const rec=recs.at(-1)||null;
+  if(rec){
+    const after=(effectiveDate,stamp)=>{
+      const rd=String(rec.date||'');
+      const ed=String(effectiveDate||'');
+      if(ed>rd) return true;
+      if(ed<rd) return false;
+      return String(stamp||'')>String(rec.createdAt||'');
+    };
+    const [incomes,expenses,transfers,adjustments,buckets,allocs]=await Promise.all([
+      getAll('incomes'),getAll('expenses'),getAll('transfers'),getAll('adjustments'),getAll('buckets'),getAll('transferAllocations')
+    ]);
+    let delta=0;
+    for(const x of incomes){if(!x.deletedAt&&x.accountId==='esun'&&after(x.date,x.createdAt||x.updatedAt))delta+=Number(x.amount||0);}
+    for(const x of expenses){if(!x.deletedAt&&x.accountId==='esun'&&after(x.date,x.createdAt||x.updatedAt))delta-=Number(x.amount||0);}
+    for(const t of transfers){
+      if(t.deletedAt||t.status!=='completed') continue;
+      const purposeOnly=t.affectsPhysicalBalance===false||t.fromAccountId===t.toAccountId||['bucket_allocation','reserve_allocation'].includes(t.transferType);
+      if(purposeOnly||!after(t.completedDate||t.plannedDate,t.completedAt||t.updatedAt||t.createdAt)) continue;
+      if(t.toAccountId==='esun')delta+=Number(t.amount||0);
+      if(t.fromAccountId==='esun')delta-=Number(t.amount||0);
+    }
+    for(const a of adjustments){if(!a.deletedAt&&a.accountId==='esun'&&after(a.date,a.createdAt||a.updatedAt))delta+=Number(a.amount||0);}
+    const tracked=Number(rec.actualBalance||0)+delta;
+
+    // Remove the duplicate NT$4,500-style purpose allocation only when the current
+    // virtual ledger is over the correctly rolled-forward bank balance by exactly the
+    // original positive reconciliation gap, and duplicate matching internal allocations
+    // actually exist. This is deliberately narrow so legitimate allocations are untouched.
+    const baselineGap=Number(rec.actualBalance||0)-Number(rec.expectedBalance||0);
+    const bb=await bucketBalances();
+    const virtualTotal=buckets.filter(b=>b.accountId==='esun').reduce((sum,b)=>sum+Number(bb[b.id]||0),0);
+    const over=virtualTotal-tracked;
+    if(baselineGap>0.5&&Math.abs(over-baselineGap)<0.5){
+      const candidates=transfers.filter(t=>!t.deletedAt&&t.status==='completed'&&t.transferType==='bucket_allocation'&&t.fromAccountId==='esun'&&t.toAccountId==='esun'&&Math.abs(Number(t.amount||0)-baselineGap)<0.5);
+      const signature=t=>allocs.filter(a=>a.transferId===t.id).map(a=>`${a.bucketId}:${Number(a.amount||0)}`).sort().join('|');
+      const groups=new Map();
+      for(const t of candidates){const sig=signature(t);if(!sig)continue;if(!groups.has(sig))groups.set(sig,[]);groups.get(sig).push(t);}
+      for(const group of groups.values()){
+        if(group.length<2)continue;
+        group.sort((a,b)=>String(a.createdAt||a.completedAt||a.completedDate||'').localeCompare(String(b.createdAt||b.completedAt||b.completedDate||'')));
+        const duplicate=group.at(-1);
+        await put('transfers',{...duplicate,deletedAt:new Date().toISOString(),repairNote:'v1.3.3 removed duplicate E.SUN purpose allocation after reconciliation-baseline repair',updatedAt:new Date().toISOString()});
+        break;
+      }
+    }
+  }
+
+  await put('settings',{...settings,dataModelVersion:133,updatedAt:new Date().toISOString()});
+}
+
 async function load(){
   await seedIfNeeded();
   await migrateV131();
   await migrateV132();
+  await migrateV133();
   const keys=['accounts','buckets','categories','goals','periods','incomes','expenses','transfers','transferAllocations','investmentSnapshots','reconciliations','adjustments','monthlyCloses'];
   const vals=await Promise.all(keys.map(getAll));
   keys.forEach((k,i)=>state[k]=vals[i]);
@@ -215,15 +278,34 @@ function icon(name,extra=''){
   return `<svg class="ui-icon ${extra}" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${paths[name]||''}</svg>`;
 }
 function latestReconciliation(accountId){return [...state.reconciliations].filter(r=>r.accountId===accountId&&!r.deletedAt).sort((a,b)=>`${a.date||''}${a.createdAt||''}`.localeCompare(`${b.date||''}${b.createdAt||''}`)).at(-1)||null;}
+function recordAfterReconciliation(rec,effectiveDate,stamp){
+  const rd=String(rec?.date||''),ed=String(effectiveDate||'');
+  if(ed>rd)return true;
+  if(ed<rd)return false;
+  return String(stamp||'')>String(rec?.createdAt||'');
+}
+function physicalDeltaSinceReconciliation(accountId,rec){
+  let delta=0;
+  for(const x of state.incomes||[]){if(!x.deletedAt&&x.accountId===accountId&&recordAfterReconciliation(rec,x.date,x.createdAt||x.updatedAt))delta+=Number(x.amount||0);}
+  for(const x of state.expenses||[]){if(!x.deletedAt&&x.accountId===accountId&&recordAfterReconciliation(rec,x.date,x.createdAt||x.updatedAt))delta-=Number(x.amount||0);}
+  for(const t of state.transfers||[]){
+    if(t.deletedAt||t.status!=='completed')continue;
+    const purposeOnly=t.affectsPhysicalBalance===false||t.fromAccountId===t.toAccountId||['bucket_allocation','reserve_allocation'].includes(t.transferType);
+    if(purposeOnly||!recordAfterReconciliation(rec,t.completedDate||t.plannedDate,t.completedAt||t.updatedAt||t.createdAt))continue;
+    if(t.toAccountId===accountId)delta+=Number(t.amount||0);
+    if(t.fromAccountId===accountId)delta-=Number(t.amount||0);
+  }
+  for(const a of state.adjustments||[]){if(!a.deletedAt&&a.accountId===accountId&&recordAfterReconciliation(rec,a.date,a.createdAt||a.updatedAt))delta+=Number(a.amount||0);}
+  return delta;
+}
 function accountSnapshot(accountId){
   const rawExpected=Number(state.accountBalances[accountId]||0);
   const rec=latestReconciliation(accountId);
   if(!rec) return {accountId,expected:rawExpected,rawExpected,actual:rawExpected,difference:0,verified:false,reconciliation:null,isEstimated:false,ledgerDeltaSinceCheck:0};
-  const checkedExpected=Number(rec.expectedBalance||0);
-  const ledgerDeltaSinceCheck=rawExpected-checkedExpected;
-  // A saved reconciliation establishes a new authoritative physical-bank baseline.
-  // Roll that exact bank amount forward with subsequently recorded physical activity.
-  // Do NOT preserve the old pre-reconciliation gap as a permanent mismatch.
+  // The exact bank check is the authoritative baseline. Only physical activity that
+  // occurred after that check is allowed to roll the balance forward. Historical
+  // adjustments that helped reach the checked balance are therefore never counted twice.
+  const ledgerDeltaSinceCheck=physicalDeltaSinceReconciliation(accountId,rec);
   const tracked=Number(rec.actualBalance||0)+ledgerDeltaSinceCheck;
   return {accountId,expected:tracked,rawExpected,actual:tracked,difference:0,verified:true,reconciliation:rec,isEstimated:Math.abs(ledgerDeltaSinceCheck)>=0.5,ledgerDeltaSinceCheck};
 }
@@ -764,7 +846,7 @@ async function saveGoalContribution(form){
 }
 async function saveInvestment(form){const fd=new FormData(form);const fx=Number(fd.get('fx'));await put('investmentSnapshots',{id:uid('snap'),accountId:'ibkr',date:fd.get('date'),value:Number(fd.get('value')),currency:'USD',fxRate:fx,createdAt:new Date().toISOString()});await put('settings',{...state.settings,usdTwdRate:fx,updatedAt:new Date().toISOString()});modal=null;await load();}
 async function saveAccountReconciliation(form){
-  const fd=new FormData(form),accountId=form.dataset.account,actual=Number(fd.get('actualBalance')),expected=Number(state.accountBalances[accountId]||0);
+  const fd=new FormData(form),accountId=form.dataset.account,actual=Number(fd.get('actualBalance')),expected=Number(accountSnapshot(accountId).actual||0);
   await put('reconciliations',{id:uid('rec'),accountId,date:fd.get('date'),actualBalance:actual,expectedBalance:expected,difference:actual-expected,note:fd.get('note')||'',createdAt:new Date().toISOString()});
   if(accountId==='esun'){
     const virtualTotal=state.buckets.filter(b=>b.accountId==='esun').reduce((sum,b)=>sum+Number(state.bucketBalances[b.id]||0),0);

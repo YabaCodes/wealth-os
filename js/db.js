@@ -124,9 +124,30 @@ export async function accountBalances(){
   return out;
 }
 
+function recordAfterReconciliation(rec,effectiveDate,stamp){
+  const rd=String(rec?.date||''),ed=String(effectiveDate||'');
+  if(ed>rd)return true;
+  if(ed<rd)return false;
+  return String(stamp||'')>String(rec?.createdAt||'');
+}
+function physicalDeltaSinceReconciliation(accountId,rec,{incomes,expenses,transfers,adjustments}){
+  let delta=0;
+  for(const x of incomes){if(!x.deletedAt&&x.accountId===accountId&&recordAfterReconciliation(rec,x.date,x.createdAt||x.updatedAt))delta+=Number(x.amount||0);}
+  for(const x of expenses){if(!x.deletedAt&&x.accountId===accountId&&recordAfterReconciliation(rec,x.date,x.createdAt||x.updatedAt))delta-=Number(x.amount||0);}
+  for(const t of transfers){
+    if(t.deletedAt||t.status!=='completed')continue;
+    const purposeOnly=t.affectsPhysicalBalance===false||t.fromAccountId===t.toAccountId||['bucket_allocation','reserve_allocation'].includes(t.transferType);
+    if(purposeOnly||!recordAfterReconciliation(rec,t.completedDate||t.plannedDate,t.completedAt||t.updatedAt||t.createdAt))continue;
+    if(t.toAccountId===accountId)delta+=Number(t.amount||0);
+    if(t.fromAccountId===accountId)delta-=Number(t.amount||0);
+  }
+  for(const a of adjustments){if(!a.deletedAt&&a.accountId===accountId&&recordAfterReconciliation(rec,a.date,a.createdAt||a.updatedAt))delta+=Number(a.amount||0);}
+  return delta;
+}
+
 export async function wealthMetrics(){
-  const [accounts,buckets,bb,ab,snaps,settings,reconciliations]=await Promise.all([
-    getAll('accounts'),getAll('buckets'),bucketBalances(),accountBalances(),getAll('investmentSnapshots'),getOne('settings','app'),getAll('reconciliations')
+  const [accounts,buckets,bb,ab,snaps,settings,reconciliations,incomes,expenses,transfers,adjustments]=await Promise.all([
+    getAll('accounts'),getAll('buckets'),bucketBalances(),accountBalances(),getAll('investmentSnapshots'),getOne('settings','app'),getAll('reconciliations'),getAll('incomes'),getAll('expenses'),getAll('transfers'),getAll('adjustments')
   ]);
   const fx=Number(settings?.usdTwdRate||1);
   const latestActual={},latestReconciliation={};
@@ -140,11 +161,11 @@ export async function wealthMetrics(){
   for(const a of accounts){
     if(a.role==='reserved') continue;
     const expected=Number(ab[a.id]||0),rec=latestReconciliation[a.id];
-    // Roll the last exact bank check forward with recorded ledger activity. This preserves
-    // any known reconciliation difference while allowing completed expenses/transfers to
-    // update the tracked balance automatically.
+    // A reconciliation is an authoritative bank baseline. Roll it forward only with
+    // physical activity after that check; do not re-apply historical adjustments that
+    // were already reflected in the checked balance.
     const raw=a.role!=='investment'&&rec
-      ? Number(rec.actualBalance||0)+(expected-Number(rec.expectedBalance||0))
+      ? Number(rec.actualBalance||0)+physicalDeltaSinceReconciliation(a.id,rec,{incomes,expenses,transfers,adjustments})
       : expected;
     const v=raw*(a.currency==='USD'?fx:1);
     financialNetWorth += v;

@@ -175,3 +175,33 @@ button,input,select,textarea{font:inherit}button{cursor:pointer}
   .comparison-line,.insight-row{align-items:flex-start}
   .history-bars{overflow-x:auto;justify-content:flex-start}.history-bar-item{flex:0 0 52px}
 }
+
+/* v1.6 quality-of-life, quick capture and local workflow automation */
+.quick-action-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-bottom:10px}
+.quick-action{border:1px solid var(--line);background:#fff;border-radius:14px;padding:12px 8px;display:flex;align-items:center;justify-content:center;gap:7px;color:#111827;font:inherit;font-size:12px;font-weight:750;min-height:48px;box-shadow:0 2px 8px rgba(15,23,42,.025)}
+.quick-action .ui-icon{width:18px;height:18px;color:#475569}
+.quick-action:active{transform:translateY(1px);background:#f8fafc}
+.mini-activity{padding-top:3px;padding-bottom:3px}
+.mini-activity-row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--line)}
+.mini-activity-row:last-child{border-bottom:0}
+.mini-activity-row .amount{white-space:nowrap}
+.obligation-list{padding-top:4px;padding-bottom:4px}
+.obligation-row{display:grid;grid-template-columns:28px 1fr auto;align-items:center;gap:11px;padding:11px 0;border-bottom:1px solid var(--line)}
+.obligation-row:last-child{border-bottom:0}
+.obligation-status{width:26px;height:26px;border-radius:999px;display:flex;align-items:center;justify-content:center;background:#f1f5f9;color:#64748b;font-size:13px;font-weight:850}
+.obligation-status.done{background:#ecfdf5;color:var(--good)}
+.obligation-copy{min-width:0}
+.obligation-row .btn{white-space:nowrap}
+.activity-search{display:grid;grid-template-columns:1fr auto auto;gap:8px;margin-bottom:10px}
+.activity-search input{width:100%;min-width:0;padding:10px 12px;border:1px solid #d1d5db;border-radius:11px;background:#fff;color:#111827;font:inherit;font-size:13px}
+.settings-export-actions{flex-wrap:wrap}
+.settings-export-actions .btn{flex:1 1 calc(50% - 8px)}
+
+@media(max-width:700px){
+  .obligation-row{grid-template-columns:26px 1fr}.obligation-row .btn,.obligation-row>.tag{grid-column:2;justify-self:start}
+  .activity-search{grid-template-columns:1fr auto}.activity-search [data-action="clear-activity-search"]{grid-column:1 / -1;width:100%}
+}
+@media(max-width:390px){
+  .quick-action-grid{gap:7px}.quick-action{padding:10px 6px;font-size:11px}.quick-action .ui-icon{width:17px;height:17px}
+  .settings-export-actions .btn{flex:1 1 100%}
+}

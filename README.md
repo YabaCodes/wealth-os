@@ -1,4 +1,4 @@
-# Wealth OS — v1.3.1
+# Wealth OS — v1.3.2
 
 A local-first PWA for paycheck allocation, monthly budgeting, virtual sinking funds, wealth contributions, transfers, goals, investments and month-end reconciliation.
 
@@ -217,3 +217,17 @@ This patch fixes the first live-payday issues found during real use:
 - Wealth labels clarify when a tracked current balance includes recorded activity since the last exact bank check.
 
 For the September 30 live-payday case, after the existing NT$7,972 tithe transfer is recognized, the remaining E.SUN payday action should be the **NT$11,073 Emergency Fund contribution**. The NT$4,400 Electricity Reserve remains in CTBC and requires no bank transfer.
+
+
+## Revision 1.3.2 — 2026-09-30
+
+This patch fixes E.SUN purpose-allocation reconciliation semantics:
+
+- A saved bank reconciliation now becomes the authoritative physical-balance baseline. The old pre-reconciliation difference is no longer carried forward forever as a false current mismatch.
+- E.SUN/CTBC purpose allocations are explicitly non-physical records. They can change virtual buckets but cannot change physical bank balances.
+- Physical account calculations defensively ignore all internal/purpose-only allocation records, including historical records created by older app versions.
+- A narrow one-time repair removes a duplicated E.SUN purpose allocation only when it exactly matches the prior reconciliation gap and an identical allocation record exists. Legitimate distinct allocations are left untouched.
+- Existing real physical transfers (such as the NT$7,972 CTBC → E.SUN tithe transfer) are preserved and continue to roll the tracked bank balance forward.
+- The PWA cache version is bumped so installed Home Screen apps receive the patch.
+
+For the live September 30 case, the expected post-patch result is E.SUN tracked/ledger balance NT$67,472 after the recorded NT$7,972 tithe transfer, with the original NT$4,500 categorized as tithe without creating another bank movement.

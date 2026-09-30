@@ -15,8 +15,8 @@ export const DEFAULTS = {
     conservativeSalaryGrowth: 1,
     aggressiveInvestmentReturn: 9,
     aggressiveSalaryGrowth: 5,
-    appVersion: '1.6',
-    dataModelVersion: 160
+    appVersion: '1.6.1',
+    dataModelVersion: 161
   },
   accounts: [
     {id:'ctbc', name:'CTBC Operating', type:'checking', role:'operating', currency:'TWD', openingBalance:34850, active:true},

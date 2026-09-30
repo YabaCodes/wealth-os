@@ -9,8 +9,8 @@ let modal=null;
 let selectedPeriodId=null;
 let activityFilter='all';
 let activitySearch='';
-const APP_VERSION='1.6';
-const DATA_MODEL_VERSION=160;
+const APP_VERSION='1.6.1';
+const DATA_MODEL_VERSION=161;
 
 const today=(d=new Date())=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 const esc=s=>String(s??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
@@ -214,6 +214,15 @@ async function migrateV160(){
   await put('settings',{...settings,dataModelVersion:160,appVersion:'1.6',updatedAt:new Date().toISOString()});
 }
 
+async function migrateV161(){
+  const settings=await getOne('settings','app');
+  if(Number(settings?.dataModelVersion||0)>=161) return;
+  // v1.6.1 fixes annual Tithe reporting only. It does not create, delete, reclassify,
+  // or rewrite any financial ledger records. Historical purpose corrections and
+  // reallocations remain in the audit trail; annual Tithe reporting nets corrections and excludes pure purpose moves.
+  await put('settings',{...settings,dataModelVersion:161,appVersion:'1.6.1',updatedAt:new Date().toISOString()});
+}
+
 async function load(){
   await seedIfNeeded();
   await migrateV131();
@@ -222,6 +231,7 @@ async function load(){
   await migrateV140();
   await migrateV150();
   await migrateV160();
+  await migrateV161();
   const keys=['accounts','buckets','categories','goals','periods','incomes','expenses','transfers','transferAllocations','investmentSnapshots','reconciliations','adjustments','monthlyCloses'];
   const vals=await Promise.all(keys.map(getAll));
   keys.forEach((k,i)=>state[k]=vals[i]);
@@ -339,12 +349,21 @@ function dateAfterMonths(months){
   const d=new Date();d.setDate(1);d.setMonth(d.getMonth()+Math.max(0,Math.ceil(months)));
   return new Intl.DateTimeFormat('en-US',{month:'short',year:'numeric'}).format(d);
 }
-function completedAllocationInYear(bucketId,year){
-  const completed=new Map(state.transfers.filter(t=>!t.deletedAt&&t.status==='completed').map(t=>[t.id,t]));
+function titheContributedInYear(year){
+  const completed=state.transfers.filter(t=>!t.deletedAt&&t.status==='completed');
+  const byId=new Map(completed.map(t=>[t.id,t]));
   return state.transferAllocations.reduce((sum,a)=>{
-    const t=completed.get(a.transferId);if(!t)return sum;
+    const t=byId.get(a.transferId);if(!t||a.bucketId!=='tithe')return sum;
     const d=String(t.completedDate||t.plannedDate||'');
-    if(!d.startsWith(String(year))||a.bucketId!==bucketId||Number(a.amount||0)<=0)return sum;
+    if(!d.startsWith(String(year)))return sum;
+    // Purpose reallocations only rename existing E.SUN money and are not new Tithe.
+    // Direct bucket allocations can represent newly recognized unassigned Tithe cash;
+    // include both positive and negative amounts so later corrections net out cleanly.
+    if(['purpose_reallocation','reserve_allocation'].includes(t.transferType))return sum;
+    if(t.transferType==='allocation_reversal'){
+      const original=byId.get(t.reversalOf)||state.transfers.find(x=>x.id===t.reversalOf);
+      if(original&&['purpose_reallocation','reserve_allocation'].includes(original.transferType))return sum;
+    }
     return sum+Number(a.amount||0);
   },0);
 }
@@ -363,7 +382,7 @@ function yearSummary(year){
   const income=state.incomes.filter(x=>!x.deletedAt&&String(x.dateReceived||'').startsWith(prefix)).reduce((s,x)=>s+Number(x.amount||0),0);
   const regularIncome=state.incomes.filter(x=>!x.deletedAt&&x.incomeType==='regular_income'&&String(x.dateReceived||'').startsWith(prefix)).reduce((s,x)=>s+Number(x.amount||0),0);
   const expenses=state.expenses.filter(x=>!x.deletedAt&&String(x.date||'').startsWith(prefix)).reduce((s,x)=>s+Number(x.amount||0),0);
-  const tithe=completedAllocationInYear('tithe',year);
+  const tithe=titheContributedInYear(year);
   const emergency=completedContributionToBucketInYear('emergency',year);
   const investments=state.transfers.filter(t=>!t.deletedAt&&t.status==='completed'&&t.toAccountId==='ibkr'&&t.fromAccountId!=='ibkr'&&String(t.completedDate||t.plannedDate||'').startsWith(prefix)).reduce((s,t)=>s+Number(t.amount||0),0);
   const coreBucketIds=new Set(state.buckets.filter(b=>b.countsTowardCoreWealth).map(b=>b.id));
@@ -872,7 +891,7 @@ function forecastView(){
   <div class="grid g2 annual-grid">
     ${insightKpi('Income',annual.income,'All recorded income')}
     ${insightKpi('Expenses',annual.expenses,'Actual spending')}
-    ${insightKpi('Tithe allocated',annual.tithe,'Completed Tithe allocations')}
+    ${insightKpi('Tithe contributed',annual.tithe,'Net Tithe additions · purpose reallocations excluded')}
     ${insightKpi('Emergency added',annual.emergency,'Completed Emergency contributions')}
     ${insightKpi('Invested',annual.investments,'Transfers into IBKR')}
     ${insightKpi('Net-worth change',annual.netWorthChange===null?'—':signedMoney(annual.netWorthChange),annual.netWorthChange===null?'Need 2 recorded snapshots':'From first to latest recorded snapshot')}

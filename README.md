@@ -231,3 +231,24 @@ This patch fixes E.SUN purpose-allocation reconciliation semantics:
 - The PWA cache version is bumped so installed Home Screen apps receive the patch.
 
 For the live September 30 case, the expected post-patch result is E.SUN tracked/ledger balance NT$67,472 after the recorded NT$7,972 tithe transfer, with the original NT$4,500 categorized as tithe without creating another bank movement.
+
+## Revision 1.3.3 — 2026-09-30
+
+This patch corrects the remaining E.SUN reconciliation-baseline double count found during live use:
+
+- A bank reconciliation is now a true **authoritative physical baseline**. Tracked CTBC/E.SUN balances roll forward only with physical activity that occurred after the latest bank check.
+- Historical adjustments or corrections that were already reflected in the checked bank balance are no longer added again after reconciliation.
+- Saving a new bank reconciliation now stores the currently tracked ledger balance as the expected value, so future reconciliations chain cleanly from the previous verified baseline.
+- Financial Net Worth uses the same post-reconciliation physical-activity logic, keeping dashboard and Wealth calculations consistent.
+- The v1.3.3 migration re-runs the narrow duplicate E.SUN purpose-allocation repair using the corrected tracked bank balance. If the virtual ledger is over by exactly the prior reconciliation gap and two identical matching allocations exist, only the duplicate is retired.
+- Purpose-only allocations remain non-physical and never change a bank balance.
+
+For the live September 30 case, the correct E.SUN state after the NT$7,972 salary tithe and NT$11,073 Emergency Fund transfer is:
+
+- Confirmed prior E.SUN baseline: NT$59,500
+- Salary tithe transfer: +NT$7,972
+- Emergency Fund transfer: +NT$11,073
+- **Tracked E.SUN balance: NT$78,545**
+- Tithe virtual balance: NT$67,472
+- Emergency Fund virtual balance: NT$11,073
+- **Virtual total: NT$78,545**

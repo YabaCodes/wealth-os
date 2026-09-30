@@ -108,3 +108,22 @@ button,input,select,textarea{font:inherit}button{cursor:pointer}
 @media(max-width:390px){
   .forecast-checkpoints{grid-template-columns:1fr}
 }
+
+/* v1.4 reliability, auditability and safer confirmations */
+.audit-summary .row{padding:9px 0}
+.audit-list{padding-top:4px;padding-bottom:4px}
+.audit-line{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;padding:12px 0;border-bottom:1px solid var(--line)}
+.audit-line:last-child{border-bottom:0}
+.audit-line .right{display:flex;flex-direction:column;align-items:flex-end;gap:4px;min-width:116px}
+.audit-line .text-btn{margin-top:2px}
+.app-info-card{margin-bottom:4px}
+.app-info-card .row{margin-top:8px}
+.account-actions .btn{min-width:120px}
+@media(max-width:700px){
+  .account-actions .btn{flex:1 1 calc(50% - 8px);min-width:0}
+  .audit-line{gap:10px}.audit-line .right{min-width:105px}
+}
+@media(max-width:390px){
+  .account-actions .btn{flex:1 1 100%}
+  .audit-line{flex-direction:column}.audit-line .right{align-items:flex-start;text-align:left;min-width:0}
+}

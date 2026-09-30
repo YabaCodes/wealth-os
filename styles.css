@@ -205,3 +205,18 @@ button,input,select,textarea{font:inherit}button{cursor:pointer}
   .quick-action-grid{gap:7px}.quick-action{padding:10px 6px;font-size:11px}.quick-action .ui-icon{width:17px;height:17px}
   .settings-export-actions .btn{flex:1 1 100%}
 }
+/* v1.7 Month Operations & Data Health */
+.health-list{padding-top:6px;padding-bottom:6px}
+.health-item{display:grid;grid-template-columns:30px 1fr;gap:10px;align-items:flex-start;padding:12px 0;border-bottom:1px solid var(--line)}
+.health-item:last-child{border-bottom:0}
+.health-dot{width:25px;height:25px;border-radius:999px;display:grid;place-items:center;font-weight:800;background:#eef2f7;color:#667085}
+.health-item.warn .health-dot{background:#fff4e5;color:#b45309}
+.health-item.critical .health-dot{background:#fff0f0;color:var(--bad)}
+.health-item.info .health-dot{background:#eef4ff;color:#475467}
+.health-item .text-btn{margin-top:5px}
+.good-notice{border-left-color:#14866d;background:#f4fbf8}
+.forecast-assumptions .row:last-of-type{border-bottom:0}
+.period-nav{display:flex;align-items:center;gap:6px;max-width:100%}
+.period-step{width:34px;height:34px;border-radius:10px;border:1px solid var(--line);background:var(--panel);color:var(--text);font-size:22px;line-height:1;display:grid;place-items:center;padding:0}
+.period-step:disabled{opacity:.3}
+.period-nav select{max-width:min(280px,64vw)}

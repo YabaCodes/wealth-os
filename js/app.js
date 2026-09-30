@@ -8,6 +8,8 @@ let state={};
 let modal=null;
 let selectedPeriodId=null;
 let activityFilter='all';
+const APP_VERSION='1.4';
+const DATA_MODEL_VERSION=140;
 
 const today=(d=new Date())=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 const esc=s=>String(s??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
@@ -139,8 +141,8 @@ async function migrateV133(){
       getAll('incomes'),getAll('expenses'),getAll('transfers'),getAll('adjustments'),getAll('buckets'),getAll('transferAllocations')
     ]);
     let delta=0;
-    for(const x of incomes){if(!x.deletedAt&&x.accountId==='esun'&&after(x.date,x.createdAt||x.updatedAt))delta+=Number(x.amount||0);}
-    for(const x of expenses){if(!x.deletedAt&&x.accountId==='esun'&&after(x.date,x.createdAt||x.updatedAt))delta-=Number(x.amount||0);}
+    for(const x of incomes){if(!x.deletedAt&&x.accountId==='esun'&&after(x.dateReceived||x.date,x.createdAt||x.updatedAt))delta+=Number(x.amount||0);}
+    for(const x of expenses){if(!x.deletedAt&&x.accountId==='esun'&&after(x.dateReceived||x.date,x.createdAt||x.updatedAt))delta-=Number(x.amount||0);}
     for(const t of transfers){
       if(t.deletedAt||t.status!=='completed') continue;
       const purposeOnly=t.affectsPhysicalBalance===false||t.fromAccountId===t.toAccountId||['bucket_allocation','reserve_allocation'].includes(t.transferType);
@@ -177,11 +179,20 @@ async function migrateV133(){
   await put('settings',{...settings,dataModelVersion:133,updatedAt:new Date().toISOString()});
 }
 
+async function migrateV140(){
+  const settings=await getOne('settings','app');
+  if(Number(settings?.dataModelVersion||0)>=DATA_MODEL_VERSION) return;
+  // Reliability release only: do not mutate balances, transactions, reconciliations,
+  // allocations, goals, or funding months during this upgrade.
+  await put('settings',{...settings,dataModelVersion:DATA_MODEL_VERSION,appVersion:APP_VERSION,updatedAt:new Date().toISOString()});
+}
+
 async function load(){
   await seedIfNeeded();
   await migrateV131();
   await migrateV132();
   await migrateV133();
+  await migrateV140();
   const keys=['accounts','buckets','categories','goals','periods','incomes','expenses','transfers','transferAllocations','investmentSnapshots','reconciliations','adjustments','monthlyCloses'];
   const vals=await Promise.all(keys.map(getAll));
   keys.forEach((k,i)=>state[k]=vals[i]);
@@ -286,8 +297,8 @@ function recordAfterReconciliation(rec,effectiveDate,stamp){
 }
 function physicalDeltaSinceReconciliation(accountId,rec){
   let delta=0;
-  for(const x of state.incomes||[]){if(!x.deletedAt&&x.accountId===accountId&&recordAfterReconciliation(rec,x.date,x.createdAt||x.updatedAt))delta+=Number(x.amount||0);}
-  for(const x of state.expenses||[]){if(!x.deletedAt&&x.accountId===accountId&&recordAfterReconciliation(rec,x.date,x.createdAt||x.updatedAt))delta-=Number(x.amount||0);}
+  for(const x of state.incomes||[]){if(!x.deletedAt&&x.accountId===accountId&&recordAfterReconciliation(rec,x.dateReceived||x.date,x.createdAt||x.updatedAt))delta+=Number(x.amount||0);}
+  for(const x of state.expenses||[]){if(!x.deletedAt&&x.accountId===accountId&&recordAfterReconciliation(rec,x.dateReceived||x.date,x.createdAt||x.updatedAt))delta-=Number(x.amount||0);}
   for(const t of state.transfers||[]){
     if(t.deletedAt||t.status!=='completed')continue;
     const purposeOnly=t.affectsPhysicalBalance===false||t.fromAccountId===t.toAccountId||['bucket_allocation','reserve_allocation'].includes(t.transferType);
@@ -314,6 +325,46 @@ function esunSnapshot(){
   const virtualTotal=state.buckets.filter(b=>b.accountId==='esun').reduce((sum,b)=>sum+Number(state.bucketBalances[b.id]||0),0);
   const unassigned=base.actual-virtualTotal;
   return {...base,virtualTotal,unassigned,allocationOk:Math.abs(unassigned)<0.5,bankOk:Math.abs(base.difference)<0.5};
+}
+
+function isPurposeOnlyTransfer(t){
+  return !!t && (t.affectsPhysicalBalance===false || t.fromAccountId===t.toAccountId || ['bucket_allocation','reserve_allocation','allocation_reversal','purpose_reallocation'].includes(t.transferType));
+}
+function allocationsForTransfer(transferId){return state.transferAllocations.filter(a=>a.transferId===transferId);}
+function accountAudit(accountId){
+  const a=physicalAccount(accountId),rec=latestReconciliation(accountId);
+  const baseline=rec?Number(rec.actualBalance||0):Number(a?.openingBalance||0);
+  const baselineDate=rec?.date||null;
+  const include=(date,stamp)=>!rec||recordAfterReconciliation(rec,date,stamp);
+  const entries=[];
+  for(const x of state.incomes.filter(x=>!x.deletedAt&&x.accountId===accountId)){
+    const date=x.dateReceived||x.date;if(include(date,x.createdAt||x.updatedAt))entries.push({date,stamp:x.createdAt||x.updatedAt||'',type:'Income',detail:x.description||INCOME_TYPES.find(t=>t[0]===x.incomeType)?.[1]||'Income',delta:Number(x.amount||0),recordId:x.id});
+  }
+  for(const x of state.expenses.filter(x=>!x.deletedAt&&x.accountId===accountId)){
+    if(include(x.date,x.createdAt||x.updatedAt))entries.push({date:x.date,stamp:x.createdAt||x.updatedAt||'',type:'Expense',detail:x.description||category(x.categoryId)?.name||'Expense',delta:-Number(x.amount||0),recordId:x.id});
+  }
+  for(const t of state.transfers.filter(t=>!t.deletedAt&&t.status==='completed'&&!isPurposeOnlyTransfer(t))){
+    const date=t.completedDate||t.plannedDate,stamp=t.completedAt||t.updatedAt||t.createdAt||'';
+    if(!include(date,stamp))continue;
+    if(t.toAccountId===accountId)entries.push({date,stamp,type:'Bank transfer in',detail:`From ${physicalAccount(t.fromAccountId)?.name||t.fromAccountId}`,delta:Number(t.amount||0),recordId:t.id});
+    if(t.fromAccountId===accountId)entries.push({date,stamp,type:'Bank transfer out',detail:`To ${physicalAccount(t.toAccountId)?.name||t.toAccountId}`,delta:-Number(t.amount||0),recordId:t.id});
+  }
+  for(const x of state.adjustments.filter(x=>!x.deletedAt&&x.accountId===accountId)){
+    if(include(x.date,x.createdAt||x.updatedAt))entries.push({date:x.date,stamp:x.createdAt||x.updatedAt||'',type:'Adjustment',detail:x.note||'Account adjustment',delta:Number(x.amount||0),recordId:x.id});
+  }
+  entries.sort((x,y)=>String(x.date||'').localeCompare(String(y.date||''))||String(x.stamp||'').localeCompare(String(y.stamp||'')));
+  let running=baseline;for(const e of entries){running+=e.delta;e.running=running;}
+  const accountBucketIds=new Set(state.buckets.filter(b=>b.accountId===accountId).map(b=>b.id));
+  const purposeEvents=state.transfers.filter(t=>!t.deletedAt&&t.status==='completed'&&allocationsForTransfer(t.id).some(a=>accountBucketIds.has(a.bucketId))).map(t=>({
+    transfer:t,
+    allocations:allocationsForTransfer(t.id).filter(a=>accountBucketIds.has(a.bucketId)),
+    reversedBy:state.transfers.find(r=>!r.deletedAt&&r.reversalOf===t.id)||null
+  })).sort((x,y)=>String(y.transfer.completedDate||y.transfer.plannedDate||'').localeCompare(String(x.transfer.completedDate||x.transfer.plannedDate||''))||String(y.transfer.createdAt||'').localeCompare(String(x.transfer.createdAt||'')));
+  return {account:a,reconciliation:rec,baseline,baselineDate,entries,tracked:running,purposeEvents};
+}
+function canReversePurposeEvent(event){
+  const t=event?.transfer;if(!t||event.reversedBy||t.systemGenerated||t.reversalOf)return false;
+  return isPurposeOnlyTransfer(t)&&event.allocations.length>0;
 }
 function completedAllocationToBucket(periodId,bucketId){
   const complete=new Set(state.transfers.filter(t=>t.status==='completed'&&!t.deletedAt&&t.budgetPeriodId===periodId).map(t=>t.id));
@@ -521,9 +572,9 @@ function budgetCategoryRow(x,periodId){
 
 function transactionsView(){
   const all=[
-    ...state.expenses.filter(x=>!x.deletedAt).map(x=>({...x,_kind:'expense',_date:x.date,_amount:-Number(x.amount),_title:category(x.categoryId)?.name||'Expense',_account:physicalAccount(x.accountId)?.name||'',_detail:x.description||''})),
-    ...state.incomes.filter(x=>!x.deletedAt).map(x=>({...x,_kind:'income',_date:x.dateReceived,_amount:Number(x.amount),_title:INCOME_TYPES.find(t=>t[0]===x.incomeType)?.[1]||'Income',_account:physicalAccount(x.accountId)?.name||'',_detail:x.description||''})),
-    ...state.transfers.filter(x=>!x.deletedAt&&['planned','completed'].includes(x.status)).map(x=>{const internal=x.fromAccountId===x.toAccountId;const internalName=physicalAccount(x.fromAccountId)?.name||'Account';return {...x,_kind:'transfer',_date:x.completedDate||x.plannedDate,_amount:Number(x.amount||0),_title:internal?`${internalName} purpose allocation`:`${physicalAccount(x.fromAccountId)?.name} → ${physicalAccount(x.toAccountId)?.name}`,_account:internal?'Virtual buckets':'Internal transfer',_detail:`${(['bucket_allocation','reserve_allocation'].includes(x.transferType)?'Purpose allocation':(x.transferType||'transfer').replaceAll('_',' '))} · ${x.status}`};} )
+    ...state.expenses.filter(x=>!x.deletedAt).map(x=>({...x,_kind:'expense',_date:x.date,_amount:-Number(x.amount),_title:category(x.categoryId)?.name||'Expense',_account:physicalAccount(x.accountId)?.name||'',_detail:['Physical expense',x.description||''].filter(Boolean).join(' · ')})),
+    ...state.incomes.filter(x=>!x.deletedAt).map(x=>({...x,_kind:'income',_date:x.dateReceived,_amount:Number(x.amount),_title:INCOME_TYPES.find(t=>t[0]===x.incomeType)?.[1]||'Income',_account:physicalAccount(x.accountId)?.name||'',_detail:['Physical income',x.description||''].filter(Boolean).join(' · ')})),
+    ...state.transfers.filter(x=>!x.deletedAt&&['planned','completed'].includes(x.status)).map(x=>{const virtualOnly=isPurposeOnlyTransfer(x);const internalName=physicalAccount(x.fromAccountId)?.name||'Account';return {...x,_kind:'transfer',_date:x.completedDate||x.plannedDate,_amount:Number(x.amount||0),_title:virtualOnly?`${internalName} purpose allocation`:`${physicalAccount(x.fromAccountId)?.name} → ${physicalAccount(x.toAccountId)?.name}`,_account:virtualOnly?'Virtual purpose ledger':'Physical bank transfer',_detail:`${virtualOnly?'Virtual only · bank impact NT$0':'Physical transfer · spending impact NT$0'} · ${x.status}`};} )
   ].sort((a,b)=>String(b._date).localeCompare(String(a._date))||String(b.createdAt||'').localeCompare(String(a.createdAt||'')));
   const list=activityFilter==='all'?all:all.filter(x=>x._kind===activityFilter);
   return `<div><h2 style="margin:0">Activity</h2><div class="sub">Expenses, income and transfers</div></div>
@@ -596,7 +647,7 @@ function wealthView(){
       <div><span class="sub">Bank vs ledger</span><strong class="${Math.abs(ct.difference)<0.5?'good':ct.difference<0?'bad':'warn'}">${ct.difference>0?'+':''}${money(ct.difference)}</strong></div>
     </div>
     <div class="row"><div><strong>Electricity Reserve</strong><div class="sub">Virtual reserve held inside CTBC · no bank transfer required</div></div><strong class="amount">${money(state.bucketBalances.electricity||0)}</strong></div>
-    <div class="actions account-actions"><button class="btn secondary" data-action="account-reconcile" data-id="ctbc">Update Balance</button><button class="btn ghost" data-action="account-adjustment" data-id="ctbc">Add Adjustment</button></div>
+    <div class="actions account-actions"><button class="btn secondary" data-action="account-reconcile" data-id="ctbc">Update Balance</button><button class="btn ghost" data-action="account-audit" data-id="ctbc">Audit Trail</button><button class="btn ghost" data-action="account-adjustment" data-id="ctbc">Add Adjustment</button></div>
   </section>
 
   <div class="section-title"><h2>E.SUN Reserved</h2><span class="tag${esStatusClass}">${esStatus}</span></div>
@@ -609,7 +660,7 @@ function wealthView(){
       <div><span class="sub">Purpose allocation</span><strong class="${es.allocationOk?'good':'warn'}">${allocationText}</strong></div>
     </div>
     ${!es.allocationOk?`<div class="allocation-callout"><div><strong>${es.unassigned>0?`${money(es.unassigned)} needs a purpose`:`Allocations exceed the bank balance by ${money(Math.abs(es.unassigned))}`}</strong><div class="sub">Assign or reduce virtual buckets explicitly. Wealth OS will never guess.</div></div><button class="btn" data-action="esun-allocate">${es.unassigned>0?'Assign Money':'Reduce Allocation'}</button></div>`:''}
-    <div class="actions account-actions"><button class="btn secondary" data-action="account-reconcile" data-id="esun">Update Balance</button><button class="btn ghost" data-action="account-adjustment" data-id="esun">Add Adjustment</button></div>
+    <div class="actions account-actions"><button class="btn secondary" data-action="account-reconcile" data-id="esun">Update Balance</button><button class="btn ghost" data-action="account-audit" data-id="esun">Audit Trail</button><button class="btn ghost" data-action="esun-reallocate">Reallocate Purpose</button><button class="btn ghost" data-action="account-adjustment" data-id="esun">Add Adjustment</button></div>
   </section>
   <div class="section-title"><h2>E.SUN virtual composition</h2><span class="sub">Purpose ledger</span></div><section class="card">${state.buckets.filter(b=>b.accountId==='esun').map(b=>row(b.name,money(state.bucketBalances[b.id]||0))).join('')}<div class="row"><strong>Virtual total</strong><strong class="amount">${money(es.virtualTotal)}</strong></div>${!es.allocationOk?`<div class="row"><strong>${es.unassigned>0?'Unassigned':'Over-allocated'}</strong><strong class="amount ${es.unassigned<0?'bad':'warn'}">${es.unassigned>0?'+':''}${money(es.unassigned)}</strong></div>`:''}</section>
   <div class="section-title"><h2>Investments</h2></div><section class="card">${row('IBKR current value',money(latestInvestmentTwd()))}${row('USD/TWD rate',Number(fx).toFixed(2))}<div class="actions" style="margin-top:12px"><button class="btn secondary" data-action="investment-snapshot">Update IBKR Value</button></div></section>`;
@@ -636,15 +687,19 @@ function renderModal(){
   if(modal.type==='paycheck') return modalWrap('New Paycheck',paycheckForm());
   if(modal.type==='expense') return modalWrap(modal.id?'Edit Expense':'Add Expense',expenseForm(modal.id?state.expenses.find(x=>x.id===modal.id):null));
   if(modal.type==='income') return modalWrap(modal.id?'Edit Income':'Add Income',incomeForm(modal.id?state.incomes.find(x=>x.id===modal.id):null));
-  if(modal.type==='manual-transfer') return modalWrap(modal.id?'Edit Transfer':'Record Transfer',manualTransferForm(modal.id?state.transfers.find(x=>x.id===modal.id):null));
+  if(modal.type==='manual-transfer'){const x=modal.draft?{id:modal.draft.id||'',amount:modal.draft.amount,fromAccountId:modal.draft.from,toAccountId:modal.draft.to,budgetPeriodId:modal.draft.periodId,status:modal.draft.status,plannedDate:modal.draft.date,completedDate:modal.draft.status==='completed'?modal.draft.date:null,_bucketId:modal.draft.bucketId}:modal.id?state.transfers.find(x=>x.id===modal.id):null;return modalWrap(modal.id?'Edit Transfer':'Record Transfer',manualTransferForm(x));}
   if(modal.type==='transfer') return modalWrap('Confirm Transfer',transferConfirm(modal.id));
   if(modal.type==='payday-transfer') return modalWrap('Confirm Payday Transfer',paydayTransferConfirm(modal.periodId,modal.accountId));
   if(modal.type==='close') return modalWrap('Month-End Review',monthCloseView());
   if(modal.type==='settings') return modalWrap('Settings',settingsView());
   if(modal.type==='investment') return modalWrap('Update IBKR Value',investmentForm());
   if(modal.type==='account-reconcile') return modalWrap(`Update ${physicalAccount(modal.accountId)?.name||'Account'} Balance`,accountReconciliationForm(modal.accountId));
+  if(modal.type==='reconcile-preview') return modalWrap('Review Balance Update',reconciliationPreviewView());
+  if(modal.type==='account-audit') return modalWrap(`${physicalAccount(modal.accountId)?.name||'Account'} Audit Trail`,accountAuditView(modal.accountId));
   if(modal.type==='account-adjustment') return modalWrap(`Add ${physicalAccount(modal.accountId)?.name||'Account'} Adjustment`,accountAdjustmentForm(modal.accountId));
   if(modal.type==='esun-allocate') return modalWrap('Assign E.SUN Money',esunAllocationForm());
+  if(modal.type==='esun-reallocate') return modalWrap('Reallocate E.SUN Purpose',esunReallocationForm());
+  if(modal.type==='manual-transfer-review') return modalWrap('Review Bank Transfer',manualTransferReview());
   if(modal.type==='delete-period') return modalWrap('Delete Funding Month',deleteFundingMonthView(modal.periodId));
   if(modal.type==='edit-goal') return modalWrap('Edit Goal',goalEditForm(modal.goalId));
   if(modal.type==='goal-contribution') return modalWrap('Add Goal Contribution',goalContributionForm(modal.goalId));
@@ -669,16 +724,16 @@ function incomeForm(x=null){
 function manualTransferForm(x=null){
   const p=currentPeriod(),period=x?.budgetPeriodId||p?.id||'';
   if(x&&x.budgetPeriodId&&isClosedPeriod(x.budgetPeriodId))return `<div class="notice"><strong>${monthLabel(x.budgetPeriodId)} is closed.</strong><br>Reopen the month before editing this transfer.</div>`;
-  const alloc=x?state.transferAllocations.find(a=>a.transferId===x.id):null;
+  const alloc=x?state.transferAllocations.find(a=>a.transferId===x.id):null,selectedBucket=x?._bucketId||alloc?.bucketId||'';
   const periods=state.periods.filter(y=>y.state!=='closed'||y.id===period);
-  return `<form id="manual-transfer-form"><input type="hidden" name="id" value="${x?.id||''}"><div class="field"><label>Amount</label><input name="amount" type="number" min="0" step="1" value="${x?.amount||''}" required></div><div class="form-grid"><div class="field"><label>From account</label><select name="from">${state.accounts.map(a=>`<option value="${a.id}" ${a.id===(x?.fromAccountId||'ctbc')?'selected':''}>${esc(a.name)}</option>`).join('')}</select></div><div class="field"><label>To account</label><select name="to">${state.accounts.map(a=>`<option value="${a.id}" ${a.id===(x?.toAccountId||'esun')?'selected':''}>${esc(a.name)}</option>`).join('')}</select></div></div><div class="field"><label>Purpose / virtual bucket</label><select name="bucket"><option value="">No bucket allocation</option>${state.buckets.map(b=>`<option value="${b.id}" ${b.id===alloc?.bucketId?'selected':''}>${esc(b.name)}</option>`).join('')}</select></div><div class="form-grid"><div class="field"><label>Date</label><input name="date" type="date" value="${x?.completedDate||x?.plannedDate||today()}"></div><div class="field"><label>Budget period</label><select name="period"><option value="">None</option>${periods.map(y=>`<option value="${y.id}" ${y.id===period?'selected':''}>${monthLabel(y.id)}</option>`).join('')}</select></div></div><label><input name="completed" type="checkbox" ${!x||x.status==='completed'?'checked':''}> Transfer already completed</label><button class="btn" style="width:100%;margin-top:14px">${x?'Save Changes':'Save Transfer'}</button></form>`;
+  return `<form id="manual-transfer-form"><input type="hidden" name="id" value="${x?.id||''}"><div class="field"><label>Amount</label><input name="amount" type="number" min="0" step="1" value="${x?.amount||''}" required></div><div class="form-grid"><div class="field"><label>From account</label><select name="from">${state.accounts.map(a=>`<option value="${a.id}" ${a.id===(x?.fromAccountId||'ctbc')?'selected':''}>${esc(a.name)}</option>`).join('')}</select></div><div class="field"><label>To account</label><select name="to">${state.accounts.map(a=>`<option value="${a.id}" ${a.id===(x?.toAccountId||'esun')?'selected':''}>${esc(a.name)}</option>`).join('')}</select></div></div><div class="field"><label>Purpose / virtual bucket</label><select name="bucket"><option value="">No bucket allocation</option>${state.buckets.map(b=>`<option value="${b.id}" ${b.id===selectedBucket?'selected':''}>${esc(b.name)}</option>`).join('')}</select></div><div class="form-grid"><div class="field"><label>Date</label><input name="date" type="date" value="${x?.completedDate||x?.plannedDate||today()}"></div><div class="field"><label>Budget period</label><select name="period"><option value="">None</option>${periods.map(y=>`<option value="${y.id}" ${y.id===period?'selected':''}>${monthLabel(y.id)}</option>`).join('')}</select></div></div><label><input name="completed" type="checkbox" ${!x||x.status==='completed'?'checked':''}> Transfer already completed</label><button class="btn" style="width:100%;margin-top:14px">${x?'Save Changes':'Save Transfer'}</button></form>`;
 }
-function transferConfirm(id){const t=state.transfers.find(x=>x.id===id);if(!t)return'';const allocs=state.transferAllocations.filter(a=>a.transferId===id);const details=allocs.length?allocs.map(a=>row(bucket(a.bucketId)?.name||a.label||'Allocation',money(a.amount))).join(''):row(t.toAccountId==='ibkr'?'Investment contribution':'Transfer amount',money(t.amount));return `<div class="notice">Confirm only after you actually moved the money in your banking app.</div><div class="section-title"><h2>${physicalAccount(t.fromAccountId)?.name} → ${physicalAccount(t.toAccountId)?.name}</h2></div><section class="card">${details}<div class="row"><strong>Total</strong><strong>${money(t.amount)}</strong></div></section><div class="actions" style="margin-top:14px"><button class="btn" data-action="confirm-transfer" data-id="${id}">Yes — Transfer Completed</button><button class="btn secondary" data-action="close-modal">Not Yet</button></div>`;}
+function transferConfirm(id){const t=state.transfers.find(x=>x.id===id);if(!t)return'';const allocs=state.transferAllocations.filter(a=>a.transferId===id);const details=allocs.length?allocs.map(a=>row(`Virtual · ${bucket(a.bucketId)?.name||a.label||'Allocation'}`,`+${money(a.amount)}`)).join(''):'';return `<div class="notice">Confirm only after you actually moved the money in your banking app. This transfer does not count as spending.</div><div class="section-title"><h2>Impact preview</h2></div><section class="card">${row(`Physical · ${physicalAccount(t.fromAccountId)?.name||t.fromAccountId}`,`−${money(t.amount)}`)}${row(`Physical · ${physicalAccount(t.toAccountId)?.name||t.toAccountId}`,`+${money(t.amount)}`)}${details}${row('Spending impact',money(0))}<div class="row"><strong>Total bank movement</strong><strong>${money(t.amount)}</strong></div></section><div class="actions" style="margin-top:14px"><button class="btn" data-action="confirm-transfer" data-id="${id}">Yes — Transfer Completed</button><button class="btn secondary" data-action="close-modal">Not Yet</button></div>`;}
 function paydayTransferConfirm(periodId,accountId){
   const req=paydayRequirements(periodId),group=req.groups.find(g=>g.accountId===accountId);
   if(!group)return `<div class="notice">This payday transfer is already fully satisfied.</div>`;
   const destination=physicalAccount(accountId)?.name||accountId;
-  return `<div class="notice">Confirm only after you physically moved this exact remaining amount. Already-completed payday items are excluded automatically.</div><div class="section-title"><h2>CTBC Operating → ${esc(destination)}</h2></div><section class="card">${group.items.map(x=>row(x.label,money(x.remaining))).join('')}<div class="row"><strong>Total</strong><strong>${money(group.amount)}</strong></div></section><div class="actions" style="margin-top:14px"><button class="btn" data-action="confirm-payday-transfer" data-period="${periodId}" data-account="${accountId}">Yes — Transfer Completed</button><button class="btn secondary" data-action="close-modal">Not Yet</button></div>`;
+  return `<div class="notice">Confirm only after you physically moved this exact remaining amount. Already-completed payday items are excluded automatically. Transfers are not spending.</div><div class="section-title"><h2>Impact preview</h2></div><section class="card">${row('Physical · CTBC Operating',`−${money(group.amount)}`)}${row(`Physical · ${destination}`,`+${money(group.amount)}`)}${group.items.filter(x=>x.bucketId).map(x=>row(`Virtual · ${x.label}`,`+${money(x.remaining)}`)).join('')}${row('Spending impact',money(0))}<div class="row"><strong>Total bank movement</strong><strong>${money(group.amount)}</strong></div></section><div class="actions" style="margin-top:14px"><button class="btn" data-action="confirm-payday-transfer" data-period="${periodId}" data-account="${accountId}">Yes — Transfer Completed</button><button class="btn secondary" data-action="close-modal">Not Yet</button></div>`;
 }
 function monthCloseView(){
   const p=currentPeriod();if(!p)return'';
@@ -715,9 +770,60 @@ function goalContributionForm(goalId){
   return `<form id="goal-contribution-form" data-goal="${g.id}"><div class="notice">This records a real transfer into ${esc(g.name)}. Confirm completion only after you actually move the money.</div><div class="field" style="margin-top:14px"><label>Contribution amount</label><input name="amount" type="number" min="1" step="1" required></div><div class="form-grid"><div class="field"><label>Date</label><input name="date" type="date" value="${today()}" required></div><div class="field"><label>Funding month (optional)</label><select name="period"><option value="">None</option>${openPeriods.map(p=>`<option value="${p.id}" ${p.id===selectedPeriodId?'selected':''}>${monthLabel(p.id)}</option>`).join('')}</select></div></div><label><input name="completed" type="checkbox"> Transfer already completed</label><button class="btn" style="width:100%;margin-top:14px">Save Goal Contribution</button></form>`;
 }
 function investmentForm(){const snap=[...state.investmentSnapshots].sort((a,b)=>String(a.date).localeCompare(String(b.date))).at(-1),estimated=Number(state.accountBalances?.ibkr??snap?.value??3536);return `<form id="investment-form"><div class="notice">Enter the total portfolio value shown in IBKR. This snapshot replaces the interim estimate from any contributions recorded since the previous snapshot.</div><div class="field" style="margin-top:14px"><label>IBKR portfolio value (USD)</label><input name="value" type="number" step="0.01" value="${estimated.toFixed(2)}" required></div><div class="form-grid"><div class="field"><label>Date</label><input name="date" type="date" value="${today()}" required></div><div class="field"><label>USD/TWD rate</label><input name="fx" type="number" step="0.0001" value="${state.settings.usdTwdRate}" required></div></div><button class="btn" style="width:100%">Save Snapshot</button></form>`;}
-function accountReconciliationForm(accountId){const a=physicalAccount(accountId),snap=accountId==='esun'?esunSnapshot():accountSnapshot(accountId);return `<form id="account-reconcile-form" data-account="${accountId}"><div class="notice">Enter the exact balance shown in your ${esc(a?.name||'bank')} app. Saving it establishes the new bank baseline; recorded physical activity will roll forward from there.</div><div class="field" style="margin-top:14px"><label>Actual bank balance</label><input name="actualBalance" type="number" step="1" min="0" value="${Math.round(snap.actual)}" required></div><div class="form-grid"><div class="field"><label>Date checked</label><input name="date" type="date" value="${today()}" required></div><div class="field"><label>Ledger expected</label><input type="text" value="${money(snap.expected)}" disabled></div></div><div class="field"><label>Note (optional)</label><input name="note" placeholder="Checked in bank app"></div><button class="btn" style="width:100%">Save Actual Balance</button></form>`;}
+function accountReconciliationForm(accountId){const a=physicalAccount(accountId),snap=accountId==='esun'?esunSnapshot():accountSnapshot(accountId);return `<form id="account-reconcile-form" data-account="${accountId}"><div class="notice">Enter the exact balance shown in your ${esc(a?.name||'bank')} app. Nothing is changed until you review and confirm the impact.</div><div class="field" style="margin-top:14px"><label>Actual bank balance</label><input name="actualBalance" type="number" step="1" min="0" value="${Math.round(snap.actual)}" required></div><div class="form-grid"><div class="field"><label>Date checked</label><input name="date" type="date" value="${today()}" required></div><div class="field"><label>Current tracked balance</label><input type="text" value="${money(snap.actual)}" disabled></div></div><div class="field"><label>Note (optional)</label><input name="note" placeholder="Checked in bank app"></div><button class="btn" style="width:100%">Review Balance Update</button></form>`;}
 function accountAdjustmentForm(accountId){const snap=accountSnapshot(accountId);return `<form id="account-adjustment-form" data-account="${accountId}"><div class="notice">Use an adjustment only when the difference is real and is not better recorded as an expense, income or transfer.</div><div class="field" style="margin-top:14px"><label>Adjustment amount</label><input name="amount" type="number" step="1" value="${Math.round(snap.difference)||''}" placeholder="Use + to add or − to subtract" required></div><div class="form-grid"><div class="field"><label>Date</label><input name="date" type="date" value="${today()}" required></div><div class="field"><label>Current bank vs ledger</label><input type="text" value="${snap.difference>0?'+':''}${money(snap.difference)}" disabled></div></div><div class="field"><label>Reason</label><input name="note" placeholder="Bank interest, correction, opening-balance fix..." required></div><button class="btn" style="width:100%">Save Adjustment</button></form>`;}
 function esunAllocationForm(){const es=esunSnapshot();const diff=Number(modal.amount??es.unassigned);const reducing=diff<0;const amount=Math.abs(diff);return `<form id="esun-allocation-form"><div class="notice"><strong>${reducing?'Reduce':'Assign'} ${money(amount)}</strong><br>${reducing?'Choose which virtual buckets should be reduced.':'Choose what the unassigned E.SUN money is for.'} You can split it across several buckets or leave part unassigned.</div><div class="allocation-fields">${state.buckets.filter(b=>b.accountId==='esun').map(b=>`<div class="allocation-row"><div><strong>${esc(b.name)}</strong><div class="sub">Current ${money(state.bucketBalances[b.id]||0)}</div></div><input name="bucket-${b.id}" type="number" min="0" step="1" value="0" ${reducing?`max="${Math.max(0,Math.floor(state.bucketBalances[b.id]||0))}"`:''}></div>`).join('')}</div><input type="hidden" name="direction" value="${reducing?'-1':'1'}"><input type="hidden" name="limit" value="${amount}"><div class="sub" style="margin:10px 0">Maximum to ${reducing?'reduce':'assign'} now: ${money(amount)}</div><button class="btn" style="width:100%">Save Purpose Allocation</button></form>`;}
+
+function reconciliationPreviewView(){
+  const d=modal.draft||{},accountId=d.accountId,a=physicalAccount(accountId),snap=accountId==='esun'?esunSnapshot():accountSnapshot(accountId);
+  const actual=Number(d.actualBalance||0),difference=actual-Number(snap.actual||0);
+  const es=accountId==='esun'?esunSnapshot():null;
+  const purposeAfter=es?actual-Number(es.virtualTotal||0):null;
+  return `<div class="notice"><strong>No transaction will be created.</strong><br>This only establishes a new verified bank baseline. Existing expenses, income, transfers and virtual allocations remain unchanged.</div>
+  <section class="card audit-summary" style="margin-top:14px">
+    ${row('Account',esc(a?.name||accountId))}
+    ${row('Current tracked balance',money(snap.actual))}
+    ${row('Bank balance entered',money(actual))}
+    ${row('Difference to acknowledge',`${difference>0?'+':''}${money(difference)}`)}
+    ${row('Date checked',esc(d.date||today()))}
+  </section>
+  ${es?`<section class="card" style="margin-top:12px"><div class="metric-label">E.SUN purpose impact</div>${row('Current virtual allocation',money(es.virtualTotal))}${row('Unassigned after new baseline',`${purposeAfter>0?'+':''}${money(purposeAfter)}`)}<div class="sub">If this is not zero, Wealth OS will ask you to assign or reduce purpose buckets after the bank baseline is saved.</div></section>`:''}
+  <div class="actions" style="margin-top:14px"><button class="btn" data-action="confirm-reconciliation">Confirm New Baseline</button><button class="btn secondary" data-action="account-reconcile" data-id="${accountId}">Go Back</button></div>`;
+}
+function accountAuditView(accountId){
+  const audit=accountAudit(accountId),snap=accountId==='esun'?esunSnapshot():accountSnapshot(accountId);
+  const physical=audit.entries.length?audit.entries.slice(-100).map(e=>`<div class="audit-line"><div><strong>${esc(e.type)}</strong><div class="sub">${esc(e.date||'')} · ${esc(e.detail||'')}</div></div><div class="right"><strong class="${e.delta<0?'bad':e.delta>0?'good':''}">${e.delta>0?'+':''}${money(e.delta)}</strong><div class="sub">→ ${money(e.running)}</div></div></div>`).join(''):`<div class="empty compact-empty"><strong>No physical activity after the baseline.</strong><span>The tracked balance equals the verified baseline.</span></div>`;
+  const purpose=audit.purposeEvents.length?audit.purposeEvents.slice(0,60).map(ev=>{
+    const t=ev.transfer,allocText=ev.allocations.map(a=>`${bucket(a.bucketId)?.name||a.bucketId} ${a.amount>=0?'+':''}${money(a.amount)}`).join(' · ');
+    const physical=!isPurposeOnlyTransfer(t);
+    return `<div class="audit-line"><div><strong>${physical?'Bank transfer + purpose':'Virtual allocation only'}</strong><div class="sub">${esc(t.completedDate||t.plannedDate||'')} · ${esc(allocText)}</div>${ev.reversedBy?`<div class="sub good">Reversed by ${esc(ev.reversedBy.completedDate||ev.reversedBy.plannedDate||'later record')}</div>`:''}</div><div class="right"><span class="tag ${physical?'':'good-tag'}">${physical?'physical + virtual':'virtual only'}</span>${canReversePurposeEvent(ev)?`<button class="text-btn danger-text" data-action="reverse-allocation" data-id="${t.id}">Reverse</button>`:''}</div></div>`;
+  }).join(''):`<div class="empty compact-empty"><strong>No purpose-allocation history.</strong><span>Virtual bucket changes will appear here.</span></div>`;
+  const buckets=state.buckets.filter(b=>b.accountId===accountId),crossDiff=Number(snap.rawExpected??snap.actual)-Number(audit.tracked||0);
+  return `<div class="notice"><strong>Audit view is read-only except explicit reversals.</strong><br>Physical money movements and virtual-purpose changes are shown separately so one cannot be mistaken for the other.</div>
+  ${Math.abs(crossDiff)>=0.5?`<div class="notice danger-notice" style="margin-top:12px"><strong>Historical ledger differs from the verified bank trail by ${crossDiff>0?'+':''}${money(crossDiff)}.</strong><br>The verified bank baseline remains authoritative. Use the trail below to identify the historical record; do not create a compensating transaction just to force the old raw ledger to match.</div>`:''}
+  <section class="card audit-summary" style="margin-top:14px">
+    ${row('Verified baseline',money(audit.baseline))}
+    ${row('Baseline date',esc(audit.baselineDate||'Opening balance'))}
+    ${row('Physical activity after baseline',`${audit.entries.reduce((s,e)=>s+e.delta,0)>=0?'+':''}${money(audit.entries.reduce((s,e)=>s+e.delta,0))}`)}
+    ${row('Tracked current balance',money(audit.tracked))}
+    ${row('Raw ledger cross-check',money(snap.rawExpected??snap.actual))}
+    ${row('Current screen balance',money(snap.actual))}
+  </section>
+  <div class="section-title"><h2>Physical bank trail</h2><span class="sub">Changes the bank balance</span></div><section class="card audit-list">${physical}</section>
+  ${buckets.length?`<div class="section-title"><h2>Current purpose buckets</h2><span class="sub">Does not move bank cash</span></div><section class="card">${buckets.map(b=>row(b.name,money(state.bucketBalances[b.id]||0))).join('')}</section>`:''}
+  <div class="section-title"><h2>Purpose-allocation history</h2><span class="sub">Physical and virtual effects labeled separately</span></div><section class="card audit-list">${purpose}</section>
+  ${accountId==='esun'?`<button class="btn secondary" style="width:100%;margin-top:14px" data-action="esun-reallocate">Reallocate E.SUN Purpose</button>`:''}`;
+}
+function esunReallocationForm(){
+  const buckets=state.buckets.filter(b=>b.accountId==='esun'&&Number(state.bucketBalances[b.id]||0)>0);
+  const all=state.buckets.filter(b=>b.accountId==='esun');
+  if(!buckets.length)return `<div class="notice">There is no E.SUN bucket balance available to move.</div>`;
+  return `<form id="esun-reallocation-form"><div class="notice"><strong>Virtual-purpose change only.</strong><br>This moves purpose between E.SUN buckets and does not change the physical E.SUN bank balance.</div><div class="form-grid" style="margin-top:14px"><div class="field"><label>Move from</label><select name="fromBucket">${buckets.map(b=>`<option value="${b.id}">${esc(b.name)} · ${money(state.bucketBalances[b.id]||0)}</option>`).join('')}</select></div><div class="field"><label>Move to</label><select name="toBucket">${all.map(b=>`<option value="${b.id}">${esc(b.name)}</option>`).join('')}</select></div></div><div class="field"><label>Amount</label><input name="amount" type="number" min="1" step="1" required></div><div class="form-grid"><div class="field"><label>Date</label><input name="date" type="date" value="${today()}" required></div><div class="field"><label>Bank impact</label><input type="text" value="NT$0" disabled></div></div><div class="field"><label>Note (optional)</label><input name="note" placeholder="Why the purpose changed"></div><button class="btn" style="width:100%">Save Virtual Reallocation</button></form>`;
+}
+function manualTransferReview(){
+  const d=modal.draft||{},from=physicalAccount(d.from),to=physicalAccount(d.to),b=d.bucketId?bucket(d.bucketId):null;
+  return `<div class="notice"><strong>${d.status==='completed'?'Completed bank movement':'Planned bank movement'}.</strong><br>${d.status==='completed'?'Confirm only if the money has already moved in your bank.':'This will not affect balances until you later mark it completed.'}</div><section class="card" style="margin-top:14px">${row('Physical · '+(from?.name||d.from),`−${money(d.amount)}`)}${row('Physical · '+(to?.name||d.to),`+${money(d.amount)}`)}${b?row('Virtual · '+b.name,`+${money(d.amount)}`):row('Virtual allocation','None')}${row('Spending impact',money(0))}${row('Date',esc(d.date))}</section><div class="actions" style="margin-top:14px"><button class="btn" data-action="confirm-manual-transfer">Confirm & Save</button><button class="btn secondary" data-action="manual-transfer-back">Go Back</button></div>`;
+}
 
 function deleteFundingMonthView(periodId){
   const p=state.periods.find(x=>x.id===periodId);if(!p)return '<div class="empty">Funding month not found.</div>';
@@ -730,7 +836,13 @@ function deleteFundingMonthView(periodId){
   return `<div class="notice"><strong>This action is intended for test or mistaken funding months.</strong><br>It will permanently remove the month and its period-linked entries from this device.</div><section class="card" style="margin-top:14px">${row('Funding month',monthLabel(periodId))}${row('Income entries',incomes.length)}${row('Expenses',expenses.length)}${row('Planned transfers',transfers.length)}</section><div class="sub" style="margin:12px 0">E.SUN/CTBC reconciliations, account adjustments, IBKR snapshots, and unrelated transactions are not touched.</div><button class="btn danger" style="width:100%" data-action="confirm-delete-period" data-id="${periodId}">Delete Month & Test Data</button>`;
 }
 
-function settingsView(){return `<form id="settings-form"><div class="form-grid"><div class="field"><label>Forecast salary</label><input name="forecastSalary" type="number" value="${state.settings.forecastSalary}"></div><div class="field"><label>USD/TWD rate</label><input name="usdTwdRate" type="number" step="0.0001" value="${state.settings.usdTwdRate}"></div><div class="field"><label>Raise → wealth (%)</label><input name="wealthRaisePercent" type="number" value="${state.settings.wealthRaisePercent}"></div></div><div class="section-title"><h2>Budget rules</h2></div><div class="notice">Budget-rule changes apply to funding months created after the change. Existing v1.3 funding months keep the plan that was created with their paycheck.</div>${state.categories.filter(c=>c.ruleType!=='expense_only').map(c=>`<div class="row"><div><strong>${esc(c.name)}</strong><div class="sub">${c.ruleType.replaceAll('_',' ')}</div></div><input name="cat-${c.id}" type="number" step="1" value="${c.defaultAmount}" style="width:120px;padding:9px;border:1px solid #d1d5db;border-radius:9px;text-align:right"></div>`).join('')}<button class="btn" style="width:100%;margin-top:14px">Save Settings</button></form><div class="section-title"><h2>Data</h2></div><div class="actions"><button class="btn secondary" data-action="export-backup">Export Backup</button><label class="btn secondary">Restore Backup<input id="restore-file" type="file" accept="application/json" hidden></label></div>`;}
+function settingsView(){
+  const lastBackup=state.settings.lastBackupAt?new Date(state.settings.lastBackupAt).toLocaleString():'Never';
+  return `<section class="card app-info-card"><div class="split"><div><div class="metric-label">Installed build</div><strong>Wealth OS v${APP_VERSION}</strong><div class="sub">Data model ${DATA_MODEL_VERSION}</div></div><span class="tag good-tag">Local-first</span></div>${row('Last backup',esc(lastBackup))}<div class="actions" style="margin-top:12px"><button class="btn secondary" data-action="export-backup">Export Backup</button><label class="btn secondary">Restore Backup<input id="restore-file" type="file" accept="application/json" hidden></label></div></section>
+  <div class="section-title"><h2>Reliability tools</h2><span class="sub">Inspect before correcting</span></div><section class="card"><div class="row"><div><strong>CTBC audit trail</strong><div class="sub">Verified baseline + physical movements + virtual reserves</div></div><button class="btn ghost small" type="button" data-action="account-audit" data-id="ctbc">Open</button></div><div class="row"><div><strong>E.SUN audit trail</strong><div class="sub">Bank movements separated from purpose allocations</div></div><button class="btn ghost small" type="button" data-action="account-audit" data-id="esun">Open</button></div></section>
+  <form id="settings-form"><div class="section-title"><h2>Planning settings</h2></div><div class="form-grid"><div class="field"><label>Forecast salary</label><input name="forecastSalary" type="number" value="${state.settings.forecastSalary}"></div><div class="field"><label>USD/TWD rate</label><input name="usdTwdRate" type="number" step="0.0001" value="${state.settings.usdTwdRate}"></div><div class="field"><label>Raise → wealth (%)</label><input name="wealthRaisePercent" type="number" value="${state.settings.wealthRaisePercent}"></div></div><div class="section-title"><h2>Budget rules</h2></div><div class="notice">Budget-rule changes apply only to funding months created after the change. Existing funding months keep their saved plan.</div>${state.categories.filter(c=>c.ruleType!=='expense_only').map(c=>`<div class="row"><div><strong>${esc(c.name)}</strong><div class="sub">${c.ruleType.replaceAll('_',' ')}</div></div><input name="cat-${c.id}" type="number" step="1" value="${c.defaultAmount}" style="width:120px;padding:9px;border:1px solid #d1d5db;border-radius:9px;text-align:right"></div>`).join('')}<button class="btn" style="width:100%;margin-top:14px">Save Settings</button></form>`;
+}
+
 
 async function createPaycheck(form){
   const fd=new FormData(form),amount=Number(fd.get('amount')),date=fd.get('date'),periodId=fd.get('period');
@@ -765,16 +877,26 @@ async function saveExpense(form){
   const obj={...(existing||{}),id:existing?.id||uid('exp'),amount:Number(fd.get('amount')),categoryId:fd.get('category'),date:fd.get('date'),accountId,budgetPeriodId:periodId,description:fd.get('description')||'',fundingBucketId,createdAt:existing?.createdAt||new Date().toISOString(),updatedAt:new Date().toISOString()};
   await put('expenses',obj);modal=null;await load();
 }
-async function saveManualTransfer(form){
-  const fd=new FormData(form),id=fd.get('id'),existing=id?state.transfers.find(x=>x.id===id):null;
-  const amount=Number(fd.get('amount')),from=fd.get('from'),to=fd.get('to'),periodId=fd.get('period')||null;if(from===to)throw new Error('From and to accounts must be different for a bank transfer.');
+function prepareManualTransfer(form){
+  const fd=new FormData(form),id=fd.get('id')||null,existing=id?state.transfers.find(x=>x.id===id):null;
+  const amount=Number(fd.get('amount')),from=fd.get('from'),to=fd.get('to'),periodId=fd.get('period')||null,bucketId=fd.get('bucket')||null;
+  if(amount<=0)throw new Error('Enter a transfer amount greater than zero.');
+  if(from===to)throw new Error('From and to accounts must be different for a bank transfer.');
   assertPeriodEditable(periodId||existing?.budgetPeriodId||null);
-  const tid=existing?.id||uid('tr'),status=fd.get('completed')==='on'?'completed':'planned',date=fd.get('date'),stamp=new Date().toISOString();
-  await put('transfers',{...(existing||{}),id:tid,fromAccountId:from,toAccountId:to,amount,budgetPeriodId:periodId,status,plannedDate:date,completedDate:status==='completed'?date:null,completedAt:status==='completed'?(existing?.completedAt||stamp):null,transferType:'manual',createdAt:existing?.createdAt||stamp,updatedAt:stamp,deletedAt:null});
+  if(bucketId){const b=bucket(bucketId);if(b?.accountId!==to)throw new Error(`${b?.name||'Selected bucket'} belongs to ${physicalAccount(b?.accountId)?.name||'another account'}, not ${physicalAccount(to)?.name||'the destination account'}.`);}
+  modal={type:'manual-transfer-review',draft:{id,amount,from,to,periodId,status:fd.get('completed')==='on'?'completed':'planned',date:fd.get('date')||today(),bucketId}};
+  render();
+}
+async function commitManualTransfer(){
+  const d=modal?.draft;if(!d)throw new Error('Transfer preview is no longer available.');
+  const existing=d.id?state.transfers.find(x=>x.id===d.id):null;assertPeriodEditable(d.periodId||existing?.budgetPeriodId||null);
+  const tid=existing?.id||uid('tr'),stamp=new Date().toISOString();
+  await put('transfers',{...(existing||{}),id:tid,fromAccountId:d.from,toAccountId:d.to,amount:d.amount,budgetPeriodId:d.periodId,status:d.status,plannedDate:d.date,completedDate:d.status==='completed'?d.date:null,completedAt:d.status==='completed'?(existing?.completedAt||stamp):null,transferType:'manual',affectsPhysicalBalance:true,createdAt:existing?.createdAt||stamp,updatedAt:stamp,deletedAt:null});
   for(const a of state.transferAllocations.filter(a=>a.transferId===tid))await remove('transferAllocations',a.id);
-  const bid=fd.get('bucket');if(bid){const b=bucket(bid);if(b?.accountId!==to)throw new Error(`${b?.name||'Selected bucket'} belongs to ${physicalAccount(b?.accountId)?.name||'another account'}, not ${physicalAccount(to)?.name||'the destination account'}.`);await put('transferAllocations',{id:uid('ta'),transferId:tid,bucketId:bid,amount,goalId:null,label:'Manual allocation'});}
+  if(d.bucketId)await put('transferAllocations',{id:uid('ta'),transferId:tid,bucketId:d.bucketId,amount:d.amount,goalId:null,label:'Manual allocation'});
   modal=null;await load();
 }
+
 async function saveIncome(form){
   const fd=new FormData(form),id=fd.get('id'),type=fd.get('type'),existing=id?state.incomes.find(x=>x.id===id):null,periodId=fd.get('period');
   assertPeriodEditable(periodId||existing?.budgetPeriodId||null);
@@ -845,16 +967,24 @@ async function saveGoalContribution(form){
   await put('transferAllocations',{id:uid('ta'),transferId:tid,bucketId:g.bucketId,amount,goalId:g.id,label:g.name});modal=null;await load();
 }
 async function saveInvestment(form){const fd=new FormData(form);const fx=Number(fd.get('fx'));await put('investmentSnapshots',{id:uid('snap'),accountId:'ibkr',date:fd.get('date'),value:Number(fd.get('value')),currency:'USD',fxRate:fx,createdAt:new Date().toISOString()});await put('settings',{...state.settings,usdTwdRate:fx,updatedAt:new Date().toISOString()});modal=null;await load();}
-async function saveAccountReconciliation(form){
-  const fd=new FormData(form),accountId=form.dataset.account,actual=Number(fd.get('actualBalance')),expected=Number(accountSnapshot(accountId).actual||0);
-  await put('reconciliations',{id:uid('rec'),accountId,date:fd.get('date'),actualBalance:actual,expectedBalance:expected,difference:actual-expected,note:fd.get('note')||'',createdAt:new Date().toISOString()});
-  if(accountId==='esun'){
+function prepareAccountReconciliation(form){
+  const fd=new FormData(form),accountId=form.dataset.account,actualBalance=Number(fd.get('actualBalance'));
+  if(!Number.isFinite(actualBalance)||actualBalance<0)throw new Error('Enter a valid non-negative bank balance.');
+  modal={type:'reconcile-preview',draft:{accountId,actualBalance,date:fd.get('date')||today(),note:fd.get('note')||''}};
+  render();
+}
+async function confirmAccountReconciliation(){
+  const d=modal?.draft;if(!d)throw new Error('Balance preview is no longer available.');
+  const snap=d.accountId==='esun'?esunSnapshot():accountSnapshot(d.accountId),expected=Number(snap.actual||0),stamp=new Date().toISOString();
+  await put('reconciliations',{id:uid('rec'),accountId:d.accountId,date:d.date,actualBalance:Number(d.actualBalance),expectedBalance:expected,difference:Number(d.actualBalance)-expected,note:d.note||'',createdAt:stamp,appVersion:APP_VERSION});
+  if(d.accountId==='esun'){
     const virtualTotal=state.buckets.filter(b=>b.accountId==='esun').reduce((sum,b)=>sum+Number(state.bucketBalances[b.id]||0),0);
-    const unassigned=actual-virtualTotal;
+    const unassigned=Number(d.actualBalance)-virtualTotal;
     if(Math.abs(unassigned)>=0.5){modal={type:'esun-allocate',amount:unassigned};await load();return;}
   }
   modal=null;await load();
 }
+
 async function saveAccountAdjustment(form){
   const fd=new FormData(form),accountId=form.dataset.account,amount=Number(fd.get('amount'));if(!amount)throw new Error('Enter a non-zero adjustment amount.');
   await put('adjustments',{id:uid('adj'),accountId,amount,date:fd.get('date'),note:fd.get('note')||'',createdAt:new Date().toISOString()});modal=null;await load();
@@ -868,6 +998,30 @@ async function saveEsunAllocation(form){
   await bulkPut('transferAllocations',allocations.map(a=>({id:uid('ta'),transferId:tid,bucketId:a.bucketId,amount:a.amount,goalId:null,label:a.label})));
   modal=null;await load();
 }
+async function saveEsunReallocation(form){
+  const fd=new FormData(form),fromBucket=fd.get('fromBucket'),toBucket=fd.get('toBucket'),amount=Number(fd.get('amount'));
+  if(fromBucket===toBucket)throw new Error('Choose two different purpose buckets.');
+  if(amount<=0)throw new Error('Enter a reallocation amount greater than zero.');
+  if(amount>Number(state.bucketBalances[fromBucket]||0)+0.5)throw new Error(`Cannot move more than the current ${bucket(fromBucket)?.name||'source'} balance of ${money(state.bucketBalances[fromBucket]||0)}.`);
+  const stamp=new Date().toISOString(),tid=uid('tr'),date=fd.get('date')||today();
+  await put('transfers',{id:tid,fromAccountId:'esun',toAccountId:'esun',amount,budgetPeriodId:null,status:'completed',plannedDate:date,completedDate:date,completedAt:stamp,transferType:'purpose_reallocation',affectsPhysicalBalance:false,note:fd.get('note')||'',createdAt:stamp,updatedAt:stamp});
+  await bulkPut('transferAllocations',[
+    {id:uid('ta'),transferId:tid,bucketId:fromBucket,amount:-amount,goalId:null,label:`Move from ${bucket(fromBucket)?.name||fromBucket}`},
+    {id:uid('ta'),transferId:tid,bucketId:toBucket,amount:amount,goalId:null,label:`Move to ${bucket(toBucket)?.name||toBucket}`}
+  ]);
+  modal=null;await load();
+}
+async function reversePurposeAllocation(transferId){
+  const t=state.transfers.find(x=>x.id===transferId&&!x.deletedAt);if(!t)throw new Error('Allocation record not found.');
+  const event={transfer:t,allocations:allocationsForTransfer(t.id),reversedBy:state.transfers.find(r=>!r.deletedAt&&r.reversalOf===t.id)||null};
+  if(!canReversePurposeEvent(event))throw new Error('This allocation cannot be reversed here. System-generated or already-reversed records are protected.');
+  for(const a of event.allocations){if(Number(a.amount)>0&&Number(a.amount)>Number(state.bucketBalances[a.bucketId]||0)+0.5)throw new Error(`Cannot reverse ${bucket(a.bucketId)?.name||a.bucketId}; part of that allocation has already been used or moved.`);}
+  const stamp=new Date().toISOString(),tid=uid('tr'),date=today();
+  await put('transfers',{id:tid,fromAccountId:t.fromAccountId,toAccountId:t.toAccountId,amount:Number(t.amount||event.allocations.reduce((sum,a)=>sum+Math.abs(Number(a.amount||0)),0)),budgetPeriodId:null,status:'completed',plannedDate:date,completedDate:date,completedAt:stamp,transferType:'allocation_reversal',affectsPhysicalBalance:false,reversalOf:t.id,createdAt:stamp,updatedAt:stamp});
+  await bulkPut('transferAllocations',event.allocations.map(a=>({id:uid('ta'),transferId:tid,bucketId:a.bucketId,amount:-Number(a.amount||0),goalId:null,label:`Reversal · ${a.label||bucket(a.bucketId)?.name||'allocation'}`})));
+  modal={type:'account-audit',accountId:t.fromAccountId};await load();
+}
+
 async function deleteFundingMonth(periodId){
   const p=state.periods.find(x=>x.id===periodId);if(!p)throw new Error('Funding month not found.');
   if(p.state==='closed')throw new Error('Closed months cannot be deleted.');
@@ -917,6 +1071,9 @@ function bind(){
     if(a==='complete-transfer')modal={type:'transfer',id:b.dataset.id};
     if(a==='payday-transfer')modal={type:'payday-transfer',periodId:b.dataset.period,accountId:b.dataset.account};
     if(a==='confirm-payday-transfer')return completePaydayTransfer(b.dataset.period,b.dataset.account);
+    if(a==='confirm-manual-transfer')return commitManualTransfer();
+    if(a==='manual-transfer-back'){const d=modal?.draft;modal={type:'manual-transfer',id:d?.id||null,draft:d};return render();}
+    if(a==='confirm-reconciliation')return confirmAccountReconciliation();
     if(a==='confirm-transfer')return completeTransfer(b.dataset.id);
     if(a==='month-close')modal={type:'close'};
     if(a==='create-sweep')return createSweep();
@@ -924,6 +1081,8 @@ function bind(){
     if(a==='settings')modal={type:'settings'};
     if(a==='investment-snapshot')modal={type:'investment'};
     if(a==='account-reconcile')modal={type:'account-reconcile',accountId:b.dataset.id};
+    if(a==='account-audit')modal={type:'account-audit',accountId:b.dataset.id};
+    if(a==='esun-reallocate')modal={type:'esun-reallocate'};
     if(a==='account-adjustment')modal={type:'account-adjustment',accountId:b.dataset.id};
     if(a==='esun-allocate')modal={type:'esun-allocate',amount:esunSnapshot().unassigned};
     if(a==='delete-period')modal={type:'delete-period',periodId:b.dataset.id};
@@ -934,6 +1093,7 @@ function bind(){
       if(confirm(`Delete ${monthLabel(b.dataset.id)} and all of its test data? This cannot be undone.`)) return deleteFundingMonth(b.dataset.id);
       return;
     }
+    if(a==='reverse-allocation'){if(confirm('Reverse this virtual-purpose allocation? This creates a new audit record and does not move bank cash.'))return reversePurposeAllocation(b.dataset.id);return;}
     if(a==='activity-filter'){activityFilter=b.dataset.filter;return render();}
     if(a==='edit-transaction'){
       if(b.dataset.kind==='expense')modal={type:'expense',id:b.dataset.id};
@@ -952,11 +1112,12 @@ function bind(){
   const pf=document.querySelector('#paycheck-form');if(pf)pf.onsubmit=e=>{e.preventDefault();createPaycheck(pf).catch(err=>alert(err.message));};
   const ef=document.querySelector('#expense-form');if(ef)ef.onsubmit=e=>{e.preventDefault();saveExpense(ef).catch(err=>alert(err.message));};
   const inf=document.querySelector('#income-form');if(inf)inf.onsubmit=e=>{e.preventDefault();saveIncome(inf).catch(err=>alert(err.message));};
-  const mtf=document.querySelector('#manual-transfer-form');if(mtf)mtf.onsubmit=e=>{e.preventDefault();saveManualTransfer(mtf).catch(err=>alert(err.message));};
+  const mtf=document.querySelector('#manual-transfer-form');if(mtf)mtf.onsubmit=e=>{e.preventDefault();try{prepareManualTransfer(mtf);}catch(err){alert(err.message);}};
   const inv=document.querySelector('#investment-form');if(inv)inv.onsubmit=e=>{e.preventDefault();saveInvestment(inv).catch(err=>alert(err.message));};
-  const arf=document.querySelector('#account-reconcile-form');if(arf)arf.onsubmit=e=>{e.preventDefault();saveAccountReconciliation(arf).catch(err=>alert(err.message));};
+  const arf=document.querySelector('#account-reconcile-form');if(arf)arf.onsubmit=e=>{e.preventDefault();try{prepareAccountReconciliation(arf);}catch(err){alert(err.message);}};
   const aaf=document.querySelector('#account-adjustment-form');if(aaf)aaf.onsubmit=e=>{e.preventDefault();saveAccountAdjustment(aaf).catch(err=>alert(err.message));};
   const eal=document.querySelector('#esun-allocation-form');if(eal)eal.onsubmit=e=>{e.preventDefault();saveEsunAllocation(eal).catch(err=>alert(err.message));};
+  const erl=document.querySelector('#esun-reallocation-form');if(erl)erl.onsubmit=e=>{e.preventDefault();saveEsunReallocation(erl).catch(err=>alert(err.message));};
   const gef=document.querySelector('#goal-edit-form');if(gef)gef.onsubmit=e=>{e.preventDefault();saveGoal(gef).catch(err=>alert(err.message));};
   const gcf=document.querySelector('#goal-contribution-form');if(gcf)gcf.onsubmit=e=>{e.preventDefault();saveGoalContribution(gcf).catch(err=>alert(err.message));};
   const sf=document.querySelector('#settings-form');if(sf)sf.onsubmit=e=>{e.preventDefault();saveSettings(sf).catch(err=>alert(err.message));};

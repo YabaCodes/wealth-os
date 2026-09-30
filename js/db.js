@@ -132,8 +132,8 @@ function recordAfterReconciliation(rec,effectiveDate,stamp){
 }
 function physicalDeltaSinceReconciliation(accountId,rec,{incomes,expenses,transfers,adjustments}){
   let delta=0;
-  for(const x of incomes){if(!x.deletedAt&&x.accountId===accountId&&recordAfterReconciliation(rec,x.date,x.createdAt||x.updatedAt))delta+=Number(x.amount||0);}
-  for(const x of expenses){if(!x.deletedAt&&x.accountId===accountId&&recordAfterReconciliation(rec,x.date,x.createdAt||x.updatedAt))delta-=Number(x.amount||0);}
+  for(const x of incomes){if(!x.deletedAt&&x.accountId===accountId&&recordAfterReconciliation(rec,x.dateReceived||x.date,x.createdAt||x.updatedAt))delta+=Number(x.amount||0);}
+  for(const x of expenses){if(!x.deletedAt&&x.accountId===accountId&&recordAfterReconciliation(rec,x.dateReceived||x.date,x.createdAt||x.updatedAt))delta-=Number(x.amount||0);}
   for(const t of transfers){
     if(t.deletedAt||t.status!=='completed')continue;
     const purposeOnly=t.affectsPhysicalBalance===false||t.fromAccountId===t.toAccountId||['bucket_allocation','reserve_allocation'].includes(t.transferType);

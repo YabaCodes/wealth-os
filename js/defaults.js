@@ -9,7 +9,8 @@ export const DEFAULTS = {
     wealthRaisePercent: 75,
     usdTwdRate: 31.78,
     lastBackupAt: null,
-    dataModelVersion: 133
+    appVersion: '1.4',
+    dataModelVersion: 140
   },
   accounts: [
     {id:'ctbc', name:'CTBC Operating', type:'checking', role:'operating', currency:'TWD', openingBalance:34850, active:true},

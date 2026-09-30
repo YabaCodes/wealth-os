@@ -9,8 +9,8 @@ let modal=null;
 let selectedPeriodId=null;
 let activityFilter='all';
 let activitySearch='';
-const APP_VERSION='1.6.1';
-const DATA_MODEL_VERSION=161;
+const APP_VERSION='1.7';
+const DATA_MODEL_VERSION=170;
 
 const today=(d=new Date())=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 const esc=s=>String(s??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
@@ -223,6 +223,22 @@ async function migrateV161(){
   await put('settings',{...settings,dataModelVersion:161,appVersion:'1.6.1',updatedAt:new Date().toISOString()});
 }
 
+async function migrateV170(){
+  const settings=await getOne('settings','app');
+  if(Number(settings?.dataModelVersion||0)>=170) return;
+  // v1.7 adds month-operation, data-health and snapshot metadata only. It deliberately
+  // does not rewrite financial balances, transactions, allocations, reconciliations or goals.
+  // Existing fixed categories already generate expected monthly obligations; mark them
+  // explicitly so future releases can distinguish expectations from real expenses.
+  const categories=await getAll('categories');
+  for(const c of categories){
+    if(c.ruleType==='fixed'&&c.expectedEachMonth!==true){
+      await put('categories',{...c,expectedEachMonth:true,updatedAt:c.updatedAt||new Date().toISOString()});
+    }
+  }
+  await put('settings',{...settings,dataModelVersion:170,appVersion:'1.7',updatedAt:new Date().toISOString()});
+}
+
 async function load(){
   await seedIfNeeded();
   await migrateV131();
@@ -232,6 +248,7 @@ async function load(){
   await migrateV150();
   await migrateV160();
   await migrateV161();
+  await migrateV170();
   const keys=['accounts','buckets','categories','goals','periods','incomes','expenses','transfers','transferAllocations','investmentSnapshots','reconciliations','adjustments','monthlyCloses'];
   const vals=await Promise.all(keys.map(getAll));
   keys.forEach((k,i)=>state[k]=vals[i]);
@@ -482,6 +499,59 @@ function esunSnapshot(){
   return {...base,virtualTotal,unassigned,allocationOk:Math.abs(unassigned)<0.5,bankOk:Math.abs(base.difference)<0.5};
 }
 
+function daysSince(dateStr){
+  if(!dateStr)return null;
+  const d=new Date(`${dateStr}T12:00:00`);if(Number.isNaN(d.getTime()))return null;
+  return Math.max(0,Math.floor((new Date()-d)/86400000));
+}
+function duplicateGroups(records,keyFn){
+  const groups=new Map();
+  for(const r of records){const k=keyFn(r);if(!k)continue;if(!groups.has(k))groups.set(k,[]);groups.get(k).push(r);}
+  return [...groups.values()].filter(g=>g.length>1);
+}
+function dataHealthReport(){
+  const issues=[];
+  const add=(severity,title,detail,action=null)=>issues.push({severity,title,detail,action});
+  const ct=accountSnapshot('ctbc'),es=esunSnapshot();
+  if(!ct.verified)add('warn','CTBC has no verified bank baseline','Update the CTBC balance from your bank app so the ledger has an authoritative starting point.','ctbc');
+  if(ct.verified&&Math.abs(ct.difference)>=0.5)add('critical','CTBC does not reconcile',`Bank vs ledger differs by ${ct.difference>0?'+':''}${money(ct.difference)}.`,'ctbc');
+  if(!es.verified)add('warn','E.SUN has no verified bank baseline','Update the E.SUN balance from your bank app.','esun');
+  if(es.verified&&!es.bankOk)add('critical','E.SUN bank ledger mismatch',`Bank vs ledger differs by ${es.difference>0?'+':''}${money(es.difference)}.`,'esun');
+  if(!es.allocationOk)add('critical','E.SUN purpose allocation mismatch',es.unassigned>0?`${money(es.unassigned)} is unassigned.`:`Virtual buckets exceed tracked E.SUN cash by ${money(Math.abs(es.unassigned))}.`,'esun');
+  for(const [id,label] of [['ctbc','CTBC'],['esun','E.SUN']]){
+    const rec=latestReconciliation(id),age=daysSince(rec?.date);
+    if(age!==null&&age>45)add('warn',`${label} reconciliation is ${age} days old`,'Consider confirming the bank balance before month close.',id);
+  }
+  const pending=state.transfers.filter(t=>!t.deletedAt&&t.status==='planned');
+  if(pending.length)add('warn',`${pending.length} planned transfer${pending.length===1?'':'s'} still pending`,'Planned transfers do not affect balances until completed or deleted.');
+  const unrouted=state.incomes.filter(i=>!i.deletedAt&&i.incomeType!=='regular_income'&&i.incomeType!=='reimbursement'&&!routingTransfersForIncome(i.id).length);
+  if(unrouted.length)add('warn',`${unrouted.length} supplemental income record${unrouted.length===1?' needs':'s need'} routing`,'Open the funding month or Activity and decide whether the money stays in operating cash, funds a goal, or goes to investments.');
+  const negative=state.buckets.filter(b=>Number(state.bucketBalances[b.id]||0)<-0.5);
+  for(const b of negative)add('critical',`${b.name} is negative`,`${money(state.bucketBalances[b.id])} indicates a reserve/bucket was used beyond its recorded funding.`);
+  const expDup=duplicateGroups(state.expenses.filter(x=>!x.deletedAt),x=>[x.date,Number(x.amount||0),x.categoryId,x.accountId,(x.description||'').trim().toLowerCase()].join('|'));
+  const incDup=duplicateGroups(state.incomes.filter(x=>!x.deletedAt),x=>[x.dateReceived,Number(x.amount||0),x.incomeType,x.accountId,(x.description||'').trim().toLowerCase()].join('|'));
+  const trDup=duplicateGroups(state.transfers.filter(x=>!x.deletedAt),x=>[x.completedDate||x.plannedDate,Number(x.amount||0),x.fromAccountId,x.toAccountId,x.transferType,x.status].join('|'));
+  const dupCount=expDup.length+incDup.length+trDup.length;
+  if(dupCount)add('warn',`${dupCount} possible duplicate record group${dupCount===1?'':'s'}`,'These are exact same-day/same-amount matches. Review Activity before deleting anything.');
+  const currentMonth=today().slice(0,7);
+  for(const p of state.periods.filter(p=>p.state!=='closed'&&p.id<currentMonth))add('warn',`${monthLabel(p.id)} is still open`,'Review, reconcile, sweep and close old funding months so history remains clean.');
+  const lastBackup=state.settings.lastBackupAt?new Date(state.settings.lastBackupAt):null;
+  const backupAge=lastBackup?Math.floor((Date.now()-lastBackup.getTime())/86400000):null;
+  if(backupAge===null)add('info','No JSON backup recorded','Export a backup before major corrections or device changes.');
+  else if(backupAge>30)add('info',`Backup is ${backupAge} days old`,'Export a fresh JSON backup.');
+  const closedWithoutSnapshot=state.periods.filter(p=>p.state==='closed'&&!state.monthlyCloses.some(c=>(c.id===p.id||c.budgetPeriodId===p.id)&&c.status==='closed'));
+  for(const p of closedWithoutSnapshot)add('critical',`${monthLabel(p.id)} is closed without a close snapshot`,'Reopen and close the month again to rebuild the historical snapshot.');
+  const severityRank={critical:0,warn:1,info:2};issues.sort((a,b)=>severityRank[a.severity]-severityRank[b.severity]);
+  return {issues,critical:issues.filter(x=>x.severity==='critical').length,warn:issues.filter(x=>x.severity==='warn').length,info:issues.filter(x=>x.severity==='info').length,healthy:!issues.some(x=>x.severity==='critical'||x.severity==='warn')};
+}
+function dataHealthView(){
+  const r=dataHealthReport();
+  const status=r.healthy?'Healthy':r.critical?`${r.critical} critical issue${r.critical===1?'':'s'}`:`${r.warn} warning${r.warn===1?'':'s'}`;
+  const summaryClass=r.critical?'danger-notice':r.warn?'':'good-notice';
+  const items=r.issues.length?r.issues.map(x=>`<div class="health-item ${x.severity}"><span class="health-dot">${x.severity==='critical'?'!':x.severity==='warn'?'!':'i'}</span><div><strong>${esc(x.title)}</strong><div class="sub">${esc(x.detail)}</div>${x.action?`<button class="text-btn" data-action="account-audit" data-id="${x.action}">Open ${x.action==='ctbc'?'CTBC':'E.SUN'} audit</button>`:''}</div></div>`).join(''):`<div class="empty compact-empty"><strong>No data-health issues found.</strong><span>Accounts, virtual buckets and month states are internally consistent.</span></div>`;
+  return `<div class="notice ${summaryClass}"><strong>${esc(status)}</strong><br>Data Health looks for reconciliation gaps, stale checks, negative buckets, exact duplicate patterns, pending transfers and month-state problems. It never changes data automatically.</div><section class="card health-list" style="margin-top:14px">${items}</section><div class="sub" style="margin-top:12px">Last evaluated live from the records currently stored on this device.</div>`;
+}
+
 function isPurposeOnlyTransfer(t){
   return !!t && (t.affectsPhysicalBalance===false || t.fromAccountId===t.toAccountId || ['bucket_allocation','reserve_allocation','allocation_reversal','purpose_reallocation'].includes(t.transferType));
 }
@@ -592,7 +662,8 @@ function nav(){
 
 function periodSelector(){
   if(!state.periods.length) return '';
-  return `<select id="period-select">${[...state.periods].sort((a,b)=>b.id.localeCompare(a.id)).map(p=>`<option value="${p.id}" ${p.id===selectedPeriodId?'selected':''}>${monthLabel(p.id)} · ${p.state.replaceAll('_',' ')}</option>`).join('')}</select>`;
+  const ordered=[...state.periods].sort((a,b)=>a.id.localeCompare(b.id)),idx=ordered.findIndex(p=>p.id===selectedPeriodId),older=idx>0?ordered[idx-1]:null,newer=idx>=0&&idx<ordered.length-1?ordered[idx+1]:null;
+  return `<div class="period-nav"><button class="period-step" data-action="period-step" data-id="${older?.id||''}" ${older?'':'disabled'} aria-label="Older funding month">‹</button><select id="period-select">${[...ordered].reverse().map(p=>`<option value="${p.id}" ${p.id===selectedPeriodId?'selected':''}>${monthLabel(p.id)} · ${p.state.replaceAll('_',' ')}</option>`).join('')}</select><button class="period-step" data-action="period-step" data-id="${newer?.id||''}" ${newer?'':'disabled'} aria-label="Newer funding month">›</button></div>`;
 }
 
 function render(){
@@ -717,7 +788,7 @@ function fixedObligationsView(periodId,plan,totals,closed){
   const lines=plan.lines.filter(x=>x.ruleType==='fixed');
   if(!lines.length)return '';
   const paidCount=lines.filter(x=>Number(totals[x.id]||0)+0.5>=Number(x.budgetAmount||0)).length;
-  return `<div class="section-title"><h2>Fixed obligations</h2><span class="sub">${paidCount} of ${lines.length} covered</span></div><section class="card obligation-list">${lines.map(x=>{const actual=Number(totals[x.id]||0),planned=Number(x.budgetAmount||0),remaining=Math.max(0,planned-actual),paid=remaining<=0.5;return `<div class="obligation-row"><div class="obligation-status ${paid?'done':''}">${paid?'✓':'•'}</div><div class="obligation-copy"><strong>${esc(x.name)}</strong><div class="sub">${money(actual)} of ${money(planned)}${paid?' · paid':actual>0?' · partially recorded':''}</div></div>${!paid&&!closed?`<button class="btn ghost small" data-action="record-fixed" data-category="${x.id}" data-amount="${remaining}">Record ${money(remaining)}</button>`:`<span class="tag ${paid?'good-tag':''}">${paid?'Paid':money(remaining)+' left'}</span>`}</div>`;}).join('')}</section>`;
+  return `<div class="section-title"><h2>Recurring obligations</h2><span class="sub">${paidCount} of ${lines.length} covered</span></div><section class="card obligation-list"><div class="sub" style="padding:0 0 10px">Expected obligations appear every funding month, but Wealth OS creates an expense only when you record the payment.</div>${lines.map(x=>{const actual=Number(totals[x.id]||0),planned=Number(x.budgetAmount||0),remaining=Math.max(0,planned-actual),paid=remaining<=0.5;return `<div class="obligation-row"><div class="obligation-status ${paid?'done':''}">${paid?'✓':'•'}</div><div class="obligation-copy"><strong>${esc(x.name)}</strong><div class="sub">Recurring monthly · ${money(actual)} of ${money(planned)}${paid?' · paid':actual>0?' · partially recorded':''}</div></div>${!paid&&!closed?`<button class="btn ghost small" data-action="record-fixed" data-category="${x.id}" data-amount="${remaining}">Record ${money(remaining)}</button>`:`<span class="tag ${paid?'good-tag':''}">${paid?'Paid':money(remaining)+' left'}</span>`}</div>`;}).join('')}</section>`;
 }
 
 function budgetKpi(label,value,sub,bad=false){return `<section class="card budget-kpi"><div class="metric-label">${label}</div><div class="kpi-value ${bad?'bad':''}">${value}</div><div class="sub">${sub}</div></section>`;}
@@ -897,6 +968,19 @@ function forecastView(){
     ${insightKpi('Net-worth change',annual.netWorthChange===null?'—':signedMoney(annual.netWorthChange),annual.netWorthChange===null?'Need 2 recorded snapshots':'From first to latest recorded snapshot')}
   </div>
 
+  <div class="section-title"><h2>Forecast assumptions</h2><span class="sub">What the base forecast is actually using</span></div>
+  <section class="card forecast-assumptions">
+    ${row('Take-home salary baseline',money(salary))}
+    ${row('Current Emergency Fund',money(state.bucketBalances.emergency||0))}
+    ${row('Starting monthly wealth capacity',money(base.monthly))}
+    ${row('Home Travel unlock threshold',money(goal('goal-home-trip')?.prerequisiteAmount||200000))}
+    ${row('Emergency Fund target',money(goal('goal-emergency')?.targetAmount||300000))}
+    ${row('Home Travel monthly routing after unlock',money(goal('goal-home-trip')?.monthlyTarget||10000))}
+    ${row('Current investments',money(latestInvestmentTwd()))}
+    ${row('Raise captured to wealth',`${Number(state.settings.wealthRaisePercent||75)}%`)}
+    <div class="sub" style="margin-top:10px">Emergency cash earns 0% in the model. Investment-return assumptions apply only to IBKR. When Home Travel unlocks, its monthly target temporarily reduces what flows to the Emergency Fund.</div>
+  </section>
+
   <div class="section-title"><h2>Planning scenarios</h2><span class="sub">Salary growth and investment return modeled separately</span></div>
   <div class="grid g3 scenario-grid">
     ${scenarioCard('Conservative',conservative)}
@@ -925,6 +1009,7 @@ function renderModal(){
   if(modal.type==='payday-transfer') return modalWrap('Confirm Payday Transfer',paydayTransferConfirm(modal.periodId,modal.accountId));
   if(modal.type==='close') return modalWrap('Month-End Review',monthCloseView());
   if(modal.type==='settings') return modalWrap('Settings',settingsView());
+  if(modal.type==='data-health') return modalWrap('Data Health',dataHealthView());
   if(modal.type==='investment') return modalWrap('Update IBKR Value',investmentForm());
   if(modal.type==='account-reconcile') return modalWrap(`Update ${physicalAccount(modal.accountId)?.name||'Account'} Balance`,accountReconciliationForm(modal.accountId));
   if(modal.type==='reconcile-preview') return modalWrap('Review Balance Update',reconciliationPreviewView());
@@ -981,26 +1066,41 @@ function paydayTransferConfirm(periodId,accountId){
 }
 function monthCloseView(){
   const p=currentPeriod();if(!p)return'';
-  const c=monthCloseStatus(p.id),closeRecord=state.monthlyCloses.find(x=>x.budgetPeriodId===p.id||x.id===p.id);
+  const c=monthCloseStatus(p.id),closeRecord=state.monthlyCloses.find(x=>x.budgetPeriodId===p.id||x.id===p.id),health=dataHealthReport();
   if(p.state==='closed'){
-    return `<div class="notice"><strong>${monthLabel(p.id)} is closed.</strong><br>This snapshot is read-only until you intentionally reopen the month.</div><div class="grid g2" style="margin-top:14px"><section class="card"><div class="metric-label">Expenses</div><div class="metric">${money(closeRecord?.expenses??totalExpenses(p.id))}</div></section><section class="card"><div class="metric-label">Core wealth contributed</div><div class="metric">${money(closeRecord?.wealthContribution??completedCoreWealth(p.id))}</div></section></div><section class="card" style="margin-top:14px">${row('Closed',esc((closeRecord?.closedAt||p.closedAt||'').slice(0,10)))}${row('Ending Core Wealth',money(closeRecord?.endingCoreWealth??state.wealth.coreWealth))}${row('Ending Financial Net Worth',money(closeRecord?.endingFinancialNetWorth??state.wealth.financialNetWorth))}</section><button class="btn secondary" style="width:100%;margin-top:14px" data-action="reopen-period" data-id="${p.id}">Reopen Month</button>`;
+    const accounts=closeRecord?.endingAccountBalances||{};
+    return `<div class="notice"><strong>${monthLabel(p.id)} is closed.</strong><br>This month-end snapshot is read-only until you intentionally reopen the month.</div>
+    <div class="grid g2" style="margin-top:14px"><section class="card"><div class="metric-label">Expenses</div><div class="metric">${money(closeRecord?.expenses??totalExpenses(p.id))}</div></section><section class="card"><div class="metric-label">Core wealth contributed</div><div class="metric">${money(closeRecord?.wealthContribution??completedCoreWealth(p.id))}</div></section></div>
+    <div class="section-title"><h2>Saved month-end snapshot</h2><span class="tag good-tag">Locked</span></div><section class="card">
+      ${row('Closed',esc((closeRecord?.closedAt||p.closedAt||'').slice(0,10)))}
+      ${row('Ending Core Wealth',money(closeRecord?.endingCoreWealth??state.wealth.coreWealth))}
+      ${row('Ending Financial Net Worth',money(closeRecord?.endingFinancialNetWorth??state.wealth.financialNetWorth))}
+      ${row('CTBC',money(accounts.ctbc??closeRecord?.ctbcActual??0))}
+      ${row('E.SUN',money(accounts.esun??closeRecord?.esunActual??0))}
+      ${row('IBKR (TWD)',money(accounts.ibkrTwd??0))}
+    </section><button class="btn secondary" style="width:100%;margin-top:14px" data-action="reopen-period" data-id="${p.id}">Reopen Month</button>`;
   }
   const fixedText=c.missingFixed.length?`${c.missingFixed.length} fixed obligation${c.missingFixed.length===1?'':'s'} not fully recorded`:'All fixed obligations recorded';
-  const checks=[
-    ['Payday funding',c.fundingOk,c.fundingOk?'Tithe, CTBC reserve allocation and planned wealth routing complete':`${money(c.payday.totalOutstanding)} of payday bank transfers still outstanding`],
-    ['Planned transfers',c.pending.length===0,c.pending.length?`${c.pending.length} still pending`:'None pending'],
-    ['CTBC reconciliation',c.ct.verified&&Math.abs(c.ct.difference)<0.5,c.ct.verified?`Difference ${c.ct.difference>0?'+':''}${money(c.ct.difference)}`:'Not checked'],
-    ['E.SUN reconciliation',c.es.verified&&c.es.bankOk&&c.es.allocationOk,c.es.verified?(c.es.allocationOk?'Bank/ledger needs attention':'Purpose allocation needs attention'):'Not checked'],
-    ['Fixed obligations',c.missingFixed.length===0,fixedText],
-    ['Month-end sweep',c.sweep.available<=0.5&&c.sweep.overSwept<=0.5,c.sweep.overSwept>0?`${money(c.sweep.overSwept)} over-swept`:c.sweep.available>0?`${money(c.sweep.available)} available`:'No remaining sweep']
+  const steps=[
+    ['1','Transactions',c.pending.length===0&&c.missingFixed.length===0,c.pending.length?`${c.pending.length} planned transfer${c.pending.length===1?'':'s'} still pending`:fixedText],
+    ['2','Payday allocations',c.fundingOk,c.fundingOk?'Tithe, CTBC reserves and wealth routing complete':`${money(c.payday.totalOutstanding)} of payday bank transfers still outstanding`],
+    ['3','Account reconciliation',c.bankOk,c.bankOk?'CTBC and E.SUN are reconciled':'Update CTBC/E.SUN and resolve E.SUN purpose allocation'],
+    ['4','Month-end sweep',c.sweep.available<=0.5&&c.sweep.overSwept<=0.5,c.sweep.overSwept>0?`${money(c.sweep.overSwept)} over-swept`:c.sweep.available>0?`${money(c.sweep.available)} still available`:'Sweep is complete'],
+    ['5','Snapshot & lock',c.ready,c.ready?'Ready to save the month-end snapshot and lock the month':'Complete the earlier steps first']
   ];
   let action='';
-  if(c.pending.length) action=`<div class="notice" style="margin-top:14px">Complete all planned transfers before creating or closing the month.</div>`;
+  if(c.pending.length) action=`<div class="notice" style="margin-top:14px">Complete or remove all planned transfers before creating the sweep or closing the month.</div>`;
   else if(c.sweep.overSwept>0.5) action=`<div class="notice danger-notice" style="margin-top:14px"><strong>Sweep correction required.</strong><br>The completed sweep exceeds the amount currently supported by this budget by ${money(c.sweep.overSwept)}. Correct the transactions or record the appropriate reverse movement before closing.</div>`;
   else if(c.sweep.available>0.5) action=`<button class="btn" style="width:100%;margin-top:14px" data-action="create-sweep">Create ${money(c.sweep.available)} Sweep Transfer</button>`;
-  else if(!c.fundingOk||!c.bankOk) action=`<div class="notice" style="margin-top:14px">Resolve the funding and reconciliation checks above before closing the month.</div>`;
-  else action=`${c.missingFixed.length?`<div class="notice" style="margin-top:14px"><strong>Review fixed obligations.</strong><br>${fixedText}. You can still close after confirming this is intentional.</div>`:''}<button class="btn" style="width:100%;margin-top:14px" data-action="close-period">Close & Lock ${monthLabel(p.id)}</button>`;
-  return `<div class="grid g2"><section class="card"><div class="metric-label">Unused flexible + buffer</div><div class="metric">${money(c.sweep.grossUnused)}</div></section><section class="card"><div class="metric-label">Overspending deficits</div><div class="metric ${c.sweep.deficits?'bad':''}">${money(c.sweep.deficits)}</div></section></div><section class="card" style="margin-top:14px"><div class="metric-label">Available month-end sweep</div><div class="metric">${money(c.sweep.available)}</div><div class="sub">Only this funding month is included; next-month income is excluded.</div></section><div class="section-title"><h2>Close checklist</h2></div><section class="card close-checklist">${checks.map(([label,ok,detail])=>`<div class="close-check"><span class="check-dot ${ok?'ok':'attention'}">${ok?'✓':'!'}</span><div><strong>${label}</strong><div class="sub">${detail}</div></div></div>`).join('')}</section>${action}`;
+  else if(!c.fundingOk||!c.bankOk) action=`<div class="notice" style="margin-top:14px">Resolve the funding and reconciliation steps above before closing the month.</div>`;
+  else action=`${c.missingFixed.length?`<div class="notice" style="margin-top:14px"><strong>Review fixed obligations.</strong><br>${fixedText}. You can close only after confirming this is intentional.</div>`:''}<button class="btn" style="width:100%;margin-top:14px" data-action="close-period">Save Snapshot & Close ${monthLabel(p.id)}</button>`;
+  const snapshotRows=`${row('Income',money(periodAllIncome(p.id)))}${row('Expenses',money(totalExpenses(p.id)))}${row('Core wealth contributed',money(completedCoreWealth(p.id)))}${row('Ending Core Wealth',money(state.wealth.coreWealth))}${row('Ending Financial Net Worth',money(state.wealth.financialNetWorth))}${row('CTBC tracked',money(c.ct.actual))}${row('E.SUN tracked',money(c.es.actual))}${row('IBKR',money(latestInvestmentTwd()))}`;
+  const healthText=health.critical?`${health.critical} critical Data Health issue${health.critical===1?'':'s'}`:health.warn?`${health.warn} Data Health warning${health.warn===1?'':'s'}`:'No Data Health warnings';
+  return `<div class="grid g2"><section class="card"><div class="metric-label">Unused flexible + buffer</div><div class="metric">${money(c.sweep.grossUnused)}</div></section><section class="card"><div class="metric-label">Overspending deficits</div><div class="metric ${c.sweep.deficits?'bad':''}">${money(c.sweep.deficits)}</div></section></div>
+  <section class="card" style="margin-top:14px"><div class="metric-label">Available month-end sweep</div><div class="metric">${money(c.sweep.available)}</div><div class="sub">Only this funding month is included; next-month income is excluded.</div></section>
+  <div class="section-title"><h2>Guided close</h2><span class="sub">Five-step month operation</span></div><section class="card close-checklist">${steps.map(([n,label,ok,detail])=>`<div class="close-check"><span class="check-dot ${ok?'ok':'attention'}">${ok?'✓':n}</span><div><strong>${label}</strong><div class="sub">${detail}</div></div></div>`).join('')}</section>
+  <div class="section-title"><h2>Snapshot preview</h2><span class="sub">Saved when you close</span></div><section class="card">${snapshotRows}</section>
+  <div class="notice ${health.critical?'danger-notice':''}" style="margin-top:14px"><strong>Data Health: ${esc(healthText)}</strong><br>Data Health does not automatically change your records. <button class="text-btn" data-action="data-health">Review details</button></div>${action}`;
 }
 function goalEditForm(goalId){
   const g=goal(goalId);if(!g)return `<div class="empty">Goal not found.</div>`;
@@ -1085,7 +1185,7 @@ function settingsView(){
   const backupAge=state.settings.lastBackupAt?Math.floor((Date.now()-new Date(state.settings.lastBackupAt).getTime())/86400000):null;
   const backupStatus=backupAge===null?'No backup yet':backupAge>30?`Backup is ${backupAge} days old`:backupAge===0?'Backed up today':`Backed up ${backupAge} day${backupAge===1?'':'s'} ago`;
   return `<section class="card app-info-card"><div class="split"><div><div class="metric-label">Installed build</div><strong>Wealth OS v${APP_VERSION}</strong><div class="sub">Data model ${DATA_MODEL_VERSION}</div></div><span class="tag good-tag">Local-first</span></div>${row('Last backup',esc(lastBackup))}<div class="sub ${backupAge===null||backupAge>30?'bad':''}" style="margin-top:8px">${esc(backupStatus)}</div><div class="actions settings-export-actions" style="margin-top:12px"><button class="btn secondary" data-action="export-backup">Export Backup</button><label class="btn secondary">Restore Backup<input id="restore-file" type="file" accept="application/json" hidden></label><button class="btn ghost" data-action="export-activity-csv">Activity CSV</button><button class="btn ghost" data-action="export-monthly-csv">Monthly CSV</button></div></section>
-  <div class="section-title"><h2>Reliability tools</h2><span class="sub">Inspect before correcting</span></div><section class="card"><div class="row"><div><strong>CTBC audit trail</strong><div class="sub">Verified baseline + physical movements + virtual reserves</div></div><button class="btn ghost small" type="button" data-action="account-audit" data-id="ctbc">Open</button></div><div class="row"><div><strong>E.SUN audit trail</strong><div class="sub">Bank movements separated from purpose allocations</div></div><button class="btn ghost small" type="button" data-action="account-audit" data-id="esun">Open</button></div></section>
+  <div class="section-title"><h2>Reliability tools</h2><span class="sub">Inspect before correcting</span></div><section class="card"><div class="row"><div><strong>Data Health</strong><div class="sub">Duplicates, stale reconciliations, bucket mismatches and month-state checks</div></div><button class="btn ghost small" type="button" data-action="data-health">Run Check</button></div><div class="row"><div><strong>CTBC audit trail</strong><div class="sub">Verified baseline + physical movements + virtual reserves</div></div><button class="btn ghost small" type="button" data-action="account-audit" data-id="ctbc">Open</button></div><div class="row"><div><strong>E.SUN audit trail</strong><div class="sub">Bank movements separated from purpose allocations</div></div><button class="btn ghost small" type="button" data-action="account-audit" data-id="esun">Open</button></div></section>
   <form id="settings-form"><div class="section-title"><h2>Planning settings</h2></div><div class="form-grid"><div class="field"><label>Fallback forecast salary</label><input name="forecastSalary" type="number" value="${state.settings.forecastSalary}"><div class="sub">Used only when no real paycheck history exists.</div></div><div class="field"><label>USD/TWD rate</label><input name="usdTwdRate" type="number" step="0.0001" value="${state.settings.usdTwdRate}"></div><div class="field"><label>Raise → wealth (%)</label><input name="wealthRaisePercent" type="number" min="0" max="100" value="${state.settings.wealthRaisePercent}"></div></div>
   <div class="section-title"><h2>Forecast assumptions</h2><span class="sub">Salary growth and returns are independent</span></div><div class="grid g3 scenario-settings"><section class="card nested-card"><strong>Conservative</strong><div class="field"><label>Investment return (%)</label><input name="conservativeInvestmentReturn" type="number" step="0.1" value="${state.settings.conservativeInvestmentReturn??4}"></div><div class="field"><label>Salary growth (%)</label><input name="conservativeSalaryGrowth" type="number" step="0.1" value="${state.settings.conservativeSalaryGrowth??1}"></div></section><section class="card nested-card"><strong>Base</strong><div class="field"><label>Investment return (%)</label><input name="forecastInvestmentReturn" type="number" step="0.1" value="${state.settings.forecastInvestmentReturn??7}"></div><div class="field"><label>Salary growth (%)</label><input name="forecastSalaryGrowth" type="number" step="0.1" value="${state.settings.forecastSalaryGrowth??3}"></div></section><section class="card nested-card"><strong>Aggressive</strong><div class="field"><label>Investment return (%)</label><input name="aggressiveInvestmentReturn" type="number" step="0.1" value="${state.settings.aggressiveInvestmentReturn??9}"></div><div class="field"><label>Salary growth (%)</label><input name="aggressiveSalaryGrowth" type="number" step="0.1" value="${state.settings.aggressiveSalaryGrowth??5}"></div></section></div>
   <div class="section-title"><h2>Budget rules</h2></div><div class="notice">Budget-rule changes apply only to funding months created after the change. Existing funding months keep their saved plan.</div>${state.categories.filter(c=>c.ruleType!=='expense_only').map(c=>`<div class="row"><div><strong>${esc(c.name)}</strong><div class="sub">${c.ruleType.replaceAll('_',' ')}</div></div><input name="cat-${c.id}" type="number" step="1" value="${c.defaultAmount}" style="width:120px;padding:9px;border:1px solid #d1d5db;border-radius:9px;text-align:right"></div>`).join('')}<button class="btn" style="width:100%;margin-top:14px">Save Settings</button></form>`;
@@ -1223,9 +1323,9 @@ async function closePeriod(){
   const c=monthCloseStatus(p.id);
   if(c.hardBlockers.length)throw new Error(`Month cannot close yet: ${c.hardBlockers.join('; ')}.`);
   if(c.missingFixed.length&&!confirm(`${c.missingFixed.length} fixed obligation${c.missingFixed.length===1?' is':'s are'} not fully recorded. Close the month anyway?`))return;
-  const stamp=new Date().toISOString(),allIncome=state.incomes.filter(i=>i.budgetPeriodId===p.id&&!i.deletedAt).reduce((sum,i)=>sum+Number(i.amount||0),0);
+  const stamp=new Date().toISOString(),allIncome=state.incomes.filter(i=>i.budgetPeriodId===p.id&&!i.deletedAt).reduce((sum,i)=>sum+Number(i.amount||0),0),regularIncome=periodRegularIncome(p.id),health=dataHealthReport();
   await put('periods',{...p,state:'closed',closedAt:stamp,updatedAt:stamp});
-  await put('monthlyCloses',{id:p.id,budgetPeriodId:p.id,status:'closed',closedAt:stamp,income:periodRegularIncome(p.id),totalIncome:allIncome,eligibleIncome:periodEligibleIncome(p.id),expenses:totalExpenses(p.id),wealthContribution:completedCoreWealth(p.id),goalFunding:completedGoalFunding(p.id),titheAllocated:completedTithe(p.id),sweepAmount:c.sweep.alreadySwept,endingCoreWealth:state.wealth.coreWealth,endingFinancialNetWorth:state.wealth.financialNetWorth,planSnapshot:c.plan,categoryActuals:c.totals,ctbcActual:c.ct.actual,esunActual:c.es.actual,missingFixedIds:c.missingFixed.map(x=>x.id)});
+  await put('monthlyCloses',{id:p.id,budgetPeriodId:p.id,status:'closed',closedAt:stamp,snapshotVersion:1,snapshotDate:today(),income:regularIncome,totalIncome:allIncome,eligibleIncome:periodEligibleIncome(p.id),expenses:totalExpenses(p.id),wealthContribution:completedCoreWealth(p.id),contributionRate:regularIncome>0?completedCoreWealth(p.id)/regularIncome:0,goalFunding:completedGoalFunding(p.id),titheAllocated:completedTithe(p.id),sweepAmount:c.sweep.alreadySwept,endingCoreWealth:state.wealth.coreWealth,endingFinancialNetWorth:state.wealth.financialNetWorth,endingAccountBalances:{ctbc:c.ct.actual,esun:c.es.actual,ibkrTwd:latestInvestmentTwd()},endingBucketBalances:{...state.bucketBalances},endingEmergency:Number(state.bucketBalances.emergency||0),endingTithe:Number(state.bucketBalances.tithe||0),endingHomeTravel:Number(state.bucketBalances['home-trip']||0),endingElectricity:Number(state.bucketBalances.electricity||0),fxRate:Number(state.settings.usdTwdRate||0),dataHealthSummary:{critical:health.critical,warn:health.warn,info:health.info},planSnapshot:c.plan,categoryActuals:c.totals,ctbcActual:c.ct.actual,esunActual:c.es.actual,missingFixedIds:c.missingFixed.map(x=>x.id)});
   modal=null;await load();
 }
 async function reopenPeriod(periodId){
@@ -1384,6 +1484,8 @@ function bind(){
     if(a==='create-sweep')return createSweep();
     if(a==='close-period')return closePeriod();
     if(a==='settings')modal={type:'settings'};
+    if(a==='data-health')modal={type:'data-health'};
+    if(a==='period-step'&&b.dataset.id){selectedPeriodId=b.dataset.id;return render();}
     if(a==='investment-snapshot')modal={type:'investment'};
     if(a==='account-reconcile')modal={type:'account-reconcile',accountId:b.dataset.id};
     if(a==='account-audit')modal={type:'account-audit',accountId:b.dataset.id};

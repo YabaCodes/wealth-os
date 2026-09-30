@@ -15,8 +15,8 @@ export const DEFAULTS = {
     conservativeSalaryGrowth: 1,
     aggressiveInvestmentReturn: 9,
     aggressiveSalaryGrowth: 5,
-    appVersion: '1.6.1',
-    dataModelVersion: 161
+    appVersion: '1.7',
+    dataModelVersion: 170
   },
   accounts: [
     {id:'ctbc', name:'CTBC Operating', type:'checking', role:'operating', currency:'TWD', openingBalance:34850, active:true},
@@ -32,14 +32,14 @@ export const DEFAULTS = {
   ],
   categories: [
     {id:'tithe-cat', name:'Tithe', group:'Giving', ruleType:'percentage', defaultAmount:10, active:true, sort:1},
-    {id:'rent', name:'Rent', group:'Fixed', ruleType:'fixed', defaultAmount:23000, active:true, sort:10},
-    {id:'sister-rent', name:"Sister's Rent", group:'Fixed', ruleType:'fixed', defaultAmount:7600, active:true, sort:11},
-    {id:'family-support', name:'Family Support', group:'Fixed', ruleType:'fixed', defaultAmount:3500, active:true, sort:12},
-    {id:'sim', name:'SIM', group:'Fixed', ruleType:'fixed', defaultAmount:799, active:true, sort:13},
-    {id:'wifi', name:'Wi-Fi', group:'Fixed', ruleType:'fixed', defaultAmount:899, active:true, sort:14},
-    {id:'gym', name:'Gym', group:'Fixed', ruleType:'fixed', defaultAmount:1088, active:true, sort:15},
-    {id:'apple-one', name:'Apple One', group:'Fixed', ruleType:'fixed', defaultAmount:390, active:true, sort:16},
-    {id:'icloud', name:'iCloud', group:'Fixed', ruleType:'fixed', defaultAmount:300, active:true, sort:17},
+    {id:'rent', name:'Rent', group:'Fixed', ruleType:'fixed', expectedEachMonth:true, defaultAmount:23000, active:true, sort:10},
+    {id:'sister-rent', name:"Sister's Rent", group:'Fixed', ruleType:'fixed', expectedEachMonth:true, defaultAmount:7600, active:true, sort:11},
+    {id:'family-support', name:'Family Support', group:'Fixed', ruleType:'fixed', expectedEachMonth:true, defaultAmount:3500, active:true, sort:12},
+    {id:'sim', name:'SIM', group:'Fixed', ruleType:'fixed', expectedEachMonth:true, defaultAmount:799, active:true, sort:13},
+    {id:'wifi', name:'Wi-Fi', group:'Fixed', ruleType:'fixed', expectedEachMonth:true, defaultAmount:899, active:true, sort:14},
+    {id:'gym', name:'Gym', group:'Fixed', ruleType:'fixed', expectedEachMonth:true, defaultAmount:1088, active:true, sort:15},
+    {id:'apple-one', name:'Apple One', group:'Fixed', ruleType:'fixed', expectedEachMonth:true, defaultAmount:390, active:true, sort:16},
+    {id:'icloud', name:'iCloud', group:'Fixed', ruleType:'fixed', expectedEachMonth:true, defaultAmount:300, active:true, sort:17},
     {id:'food', name:'Food', group:'Flexible', ruleType:'cap', defaultAmount:10000, active:true, sort:30},
     {id:'dating-social', name:'Dating / Social', group:'Flexible', ruleType:'cap', defaultAmount:3000, active:true, sort:31},
     {id:'transport', name:'Transportation', group:'Flexible', ruleType:'cap', defaultAmount:1100, active:true, sort:32},

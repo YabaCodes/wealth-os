@@ -48,7 +48,7 @@ async function migrateV131(){
     const amount=Math.max(0,target-already);
     if(amount>0.5){
       const stamp=new Date().toISOString(),tid=uid('tr');
-      await put('transfers',{id:tid,fromAccountId:'ctbc',toAccountId:'ctbc',amount,budgetPeriodId:period.id,status:'completed',plannedDate:period.fundedAt||today(),completedDate:period.fundedAt||today(),completedAt:stamp,transferType:'reserve_allocation',systemGenerated:true,createdAt:stamp,updatedAt:stamp});
+      await put('transfers',{id:tid,fromAccountId:'ctbc',toAccountId:'ctbc',amount,budgetPeriodId:period.id,status:'completed',plannedDate:period.fundedAt||today(),completedDate:period.fundedAt||today(),completedAt:stamp,transferType:'reserve_allocation',affectsPhysicalBalance:false,systemGenerated:true,createdAt:stamp,updatedAt:stamp});
       await put('transferAllocations',{id:uid('ta'),transferId:tid,bucketId:'electricity',amount,goalId:null,label:'Electricity Reserve'});
     }
   }
@@ -56,9 +56,69 @@ async function migrateV131(){
   await put('settings',{...settings,dataModelVersion:131,updatedAt:new Date().toISOString()});
 }
 
+async function migrateV132(){
+  const settings=await getOne('settings','app');
+  if(Number(settings?.dataModelVersion||0)>=132) return;
+
+  // Purpose allocations are bookkeeping only; they must never change a physical bank
+  // balance. Mark every historical internal allocation explicitly so old records cannot
+  // be interpreted as bank movements by future balance logic.
+  const transfers=await getAll('transfers');
+  for(const t of transfers){
+    const purposeOnly=t.fromAccountId===t.toAccountId || ['bucket_allocation','reserve_allocation'].includes(t.transferType);
+    if(purposeOnly && t.affectsPhysicalBalance!==false){
+      await put('transfers',{...t,affectsPhysicalBalance:false,updatedAt:t.updatedAt||new Date().toISOString()});
+    }
+  }
+
+  // Repair the narrow duplicate-purpose-allocation case exposed during the Sep 30 live
+  // migration: an already-assigned reconciliation difference could be assigned a second
+  // time. Only remove a duplicate when (a) the virtual ledger is over the tracked bank
+  // amount by the exact prior reconciliation difference and (b) two identical purpose
+  // allocation records exist. This avoids guessing about legitimate distinct allocations.
+  const recs=(await getAll('reconciliations')).filter(r=>r.accountId==='esun'&&!r.deletedAt)
+    .sort((a,b)=>`${a.date||''}${a.createdAt||''}`.localeCompare(`${b.date||''}${b.createdAt||''}`));
+  const latestRec=recs.at(-1)||null;
+  if(latestRec){
+    const baselineGap=Number(latestRec.actualBalance||0)-Number(latestRec.expectedBalance||0);
+    if(baselineGap>0.5){
+      const absNow=await accountBalances();
+      const rawExpected=Number(absNow.esun||0);
+      const trackedBank=Number(latestRec.actualBalance||0)+(rawExpected-Number(latestRec.expectedBalance||0));
+      const bb=await bucketBalances();
+      const buckets=await getAll('buckets');
+      const virtualTotal=buckets.filter(b=>b.accountId==='esun').reduce((sum,b)=>sum+Number(bb[b.id]||0),0);
+      const over=virtualTotal-trackedBank;
+      if(Math.abs(over-baselineGap)<0.5){
+        const allTransfers=await getAll('transfers');
+        const allAllocs=await getAll('transferAllocations');
+        const candidates=allTransfers.filter(t=>!t.deletedAt&&t.status==='completed'&&t.transferType==='bucket_allocation'&&t.fromAccountId==='esun'&&t.toAccountId==='esun');
+        const signature=t=>allAllocs.filter(a=>a.transferId===t.id).map(a=>`${a.bucketId}:${Number(a.amount||0)}`).sort().join('|');
+        const groups=new Map();
+        for(const t of candidates){
+          if(Math.abs(Number(t.amount||0)-baselineGap)>=0.5) continue;
+          const sig=signature(t); if(!sig) continue;
+          if(!groups.has(sig)) groups.set(sig,[]);
+          groups.get(sig).push(t);
+        }
+        for(const group of groups.values()){
+          if(group.length<2) continue;
+          group.sort((a,b)=>String(a.createdAt||a.completedAt||a.completedDate||'').localeCompare(String(b.createdAt||b.completedAt||b.completedDate||'')));
+          const duplicate=group.at(-1);
+          await put('transfers',{...duplicate,deletedAt:new Date().toISOString(),repairNote:'v1.3.2 removed duplicate E.SUN purpose allocation',updatedAt:new Date().toISOString()});
+          break;
+        }
+      }
+    }
+  }
+
+  await put('settings',{...settings,dataModelVersion:132,updatedAt:new Date().toISOString()});
+}
+
 async function load(){
   await seedIfNeeded();
   await migrateV131();
+  await migrateV132();
   const keys=['accounts','buckets','categories','goals','periods','incomes','expenses','transfers','transferAllocations','investmentSnapshots','reconciliations','adjustments','monthlyCloses'];
   const vals=await Promise.all(keys.map(getAll));
   keys.forEach((k,i)=>state[k]=vals[i]);
@@ -156,16 +216,16 @@ function icon(name,extra=''){
 }
 function latestReconciliation(accountId){return [...state.reconciliations].filter(r=>r.accountId===accountId&&!r.deletedAt).sort((a,b)=>`${a.date||''}${a.createdAt||''}`.localeCompare(`${b.date||''}${b.createdAt||''}`)).at(-1)||null;}
 function accountSnapshot(accountId){
-  const expected=Number(state.accountBalances[accountId]||0);
+  const rawExpected=Number(state.accountBalances[accountId]||0);
   const rec=latestReconciliation(accountId);
-  if(!rec) return {accountId,expected,actual:expected,difference:0,verified:false,reconciliation:null,isEstimated:false,ledgerDeltaSinceCheck:0};
+  if(!rec) return {accountId,expected:rawExpected,rawExpected,actual:rawExpected,difference:0,verified:false,reconciliation:null,isEstimated:false,ledgerDeltaSinceCheck:0};
   const checkedExpected=Number(rec.expectedBalance||0);
-  const ledgerDeltaSinceCheck=expected-checkedExpected;
-  // Start from the last exact bank balance, then roll forward only with activity the
-  // user has recorded in Wealth OS. This keeps balances current without forcing a new
-  // reconciliation after every correctly-recorded expense or transfer.
-  const actual=Number(rec.actualBalance||0)+ledgerDeltaSinceCheck;
-  return {accountId,expected,actual,difference:actual-expected,verified:true,reconciliation:rec,isEstimated:Math.abs(ledgerDeltaSinceCheck)>=0.5,ledgerDeltaSinceCheck};
+  const ledgerDeltaSinceCheck=rawExpected-checkedExpected;
+  // A saved reconciliation establishes a new authoritative physical-bank baseline.
+  // Roll that exact bank amount forward with subsequently recorded physical activity.
+  // Do NOT preserve the old pre-reconciliation gap as a permanent mismatch.
+  const tracked=Number(rec.actualBalance||0)+ledgerDeltaSinceCheck;
+  return {accountId,expected:tracked,rawExpected,actual:tracked,difference:0,verified:true,reconciliation:rec,isEstimated:Math.abs(ledgerDeltaSinceCheck)>=0.5,ledgerDeltaSinceCheck};
 }
 function esunSnapshot(){
   const base=accountSnapshot('esun');
@@ -573,7 +633,7 @@ function goalContributionForm(goalId){
   return `<form id="goal-contribution-form" data-goal="${g.id}"><div class="notice">This records a real transfer into ${esc(g.name)}. Confirm completion only after you actually move the money.</div><div class="field" style="margin-top:14px"><label>Contribution amount</label><input name="amount" type="number" min="1" step="1" required></div><div class="form-grid"><div class="field"><label>Date</label><input name="date" type="date" value="${today()}" required></div><div class="field"><label>Funding month (optional)</label><select name="period"><option value="">None</option>${openPeriods.map(p=>`<option value="${p.id}" ${p.id===selectedPeriodId?'selected':''}>${monthLabel(p.id)}</option>`).join('')}</select></div></div><label><input name="completed" type="checkbox"> Transfer already completed</label><button class="btn" style="width:100%;margin-top:14px">Save Goal Contribution</button></form>`;
 }
 function investmentForm(){const snap=[...state.investmentSnapshots].sort((a,b)=>String(a.date).localeCompare(String(b.date))).at(-1),estimated=Number(state.accountBalances?.ibkr??snap?.value??3536);return `<form id="investment-form"><div class="notice">Enter the total portfolio value shown in IBKR. This snapshot replaces the interim estimate from any contributions recorded since the previous snapshot.</div><div class="field" style="margin-top:14px"><label>IBKR portfolio value (USD)</label><input name="value" type="number" step="0.01" value="${estimated.toFixed(2)}" required></div><div class="form-grid"><div class="field"><label>Date</label><input name="date" type="date" value="${today()}" required></div><div class="field"><label>USD/TWD rate</label><input name="fx" type="number" step="0.0001" value="${state.settings.usdTwdRate}" required></div></div><button class="btn" style="width:100%">Save Snapshot</button></form>`;}
-function accountReconciliationForm(accountId){const a=physicalAccount(accountId),snap=accountId==='esun'?esunSnapshot():accountSnapshot(accountId);return `<form id="account-reconcile-form" data-account="${accountId}"><div class="notice">Enter the exact balance shown in your ${esc(a?.name||'bank')} app. Wealth OS will compare it with the transaction ledger.</div><div class="field" style="margin-top:14px"><label>Actual bank balance</label><input name="actualBalance" type="number" step="1" min="0" value="${Math.round(snap.actual)}" required></div><div class="form-grid"><div class="field"><label>Date checked</label><input name="date" type="date" value="${today()}" required></div><div class="field"><label>Ledger expected</label><input type="text" value="${money(snap.expected)}" disabled></div></div><div class="field"><label>Note (optional)</label><input name="note" placeholder="Checked in bank app"></div><button class="btn" style="width:100%">Save Actual Balance</button></form>`;}
+function accountReconciliationForm(accountId){const a=physicalAccount(accountId),snap=accountId==='esun'?esunSnapshot():accountSnapshot(accountId);return `<form id="account-reconcile-form" data-account="${accountId}"><div class="notice">Enter the exact balance shown in your ${esc(a?.name||'bank')} app. Saving it establishes the new bank baseline; recorded physical activity will roll forward from there.</div><div class="field" style="margin-top:14px"><label>Actual bank balance</label><input name="actualBalance" type="number" step="1" min="0" value="${Math.round(snap.actual)}" required></div><div class="form-grid"><div class="field"><label>Date checked</label><input name="date" type="date" value="${today()}" required></div><div class="field"><label>Ledger expected</label><input type="text" value="${money(snap.expected)}" disabled></div></div><div class="field"><label>Note (optional)</label><input name="note" placeholder="Checked in bank app"></div><button class="btn" style="width:100%">Save Actual Balance</button></form>`;}
 function accountAdjustmentForm(accountId){const snap=accountSnapshot(accountId);return `<form id="account-adjustment-form" data-account="${accountId}"><div class="notice">Use an adjustment only when the difference is real and is not better recorded as an expense, income or transfer.</div><div class="field" style="margin-top:14px"><label>Adjustment amount</label><input name="amount" type="number" step="1" value="${Math.round(snap.difference)||''}" placeholder="Use + to add or − to subtract" required></div><div class="form-grid"><div class="field"><label>Date</label><input name="date" type="date" value="${today()}" required></div><div class="field"><label>Current bank vs ledger</label><input type="text" value="${snap.difference>0?'+':''}${money(snap.difference)}" disabled></div></div><div class="field"><label>Reason</label><input name="note" placeholder="Bank interest, correction, opening-balance fix..." required></div><button class="btn" style="width:100%">Save Adjustment</button></form>`;}
 function esunAllocationForm(){const es=esunSnapshot();const diff=Number(modal.amount??es.unassigned);const reducing=diff<0;const amount=Math.abs(diff);return `<form id="esun-allocation-form"><div class="notice"><strong>${reducing?'Reduce':'Assign'} ${money(amount)}</strong><br>${reducing?'Choose which virtual buckets should be reduced.':'Choose what the unassigned E.SUN money is for.'} You can split it across several buckets or leave part unassigned.</div><div class="allocation-fields">${state.buckets.filter(b=>b.accountId==='esun').map(b=>`<div class="allocation-row"><div><strong>${esc(b.name)}</strong><div class="sub">Current ${money(state.bucketBalances[b.id]||0)}</div></div><input name="bucket-${b.id}" type="number" min="0" step="1" value="0" ${reducing?`max="${Math.max(0,Math.floor(state.bucketBalances[b.id]||0))}"`:''}></div>`).join('')}</div><input type="hidden" name="direction" value="${reducing?'-1':'1'}"><input type="hidden" name="limit" value="${amount}"><div class="sub" style="margin:10px 0">Maximum to ${reducing?'reduce':'assign'} now: ${money(amount)}</div><button class="btn" style="width:100%">Save Purpose Allocation</button></form>`;}
 
@@ -606,7 +666,7 @@ async function createPaycheck(form){
   const ctbcReserveLines=plan.lines.filter(x=>x.ruleType==='sinking_contribution'&&x.bucketId&&bucket(x.bucketId)?.accountId==='ctbc'&&Number(x.budgetAmount||0)>0);
   if(ctbcReserveLines.length){
     const total=ctbcReserveLines.reduce((sum,x)=>sum+Number(x.budgetAmount||0),0),tid=uid('tr');
-    await put('transfers',{id:tid,fromAccountId:'ctbc',toAccountId:'ctbc',amount:total,budgetPeriodId:periodId,status:'completed',plannedDate:date,completedDate:date,completedAt:stamp,transferType:'reserve_allocation',systemGenerated:true,createdAt:stamp,updatedAt:stamp});
+    await put('transfers',{id:tid,fromAccountId:'ctbc',toAccountId:'ctbc',amount:total,budgetPeriodId:periodId,status:'completed',plannedDate:date,completedDate:date,completedAt:stamp,transferType:'reserve_allocation',affectsPhysicalBalance:false,systemGenerated:true,createdAt:stamp,updatedAt:stamp});
     await bulkPut('transferAllocations',ctbcReserveLines.map(x=>({id:uid('ta'),transferId:tid,bucketId:x.bucketId,amount:Number(x.budgetAmount||0),goalId:null,label:x.name})));
   }
 
@@ -722,7 +782,7 @@ async function saveEsunAllocation(form){
   for(const b of state.buckets.filter(b=>b.accountId==='esun')){const v=Number(fd.get(`bucket-${b.id}`)||0);if(v>0)allocations.push({bucketId:b.id,amount:v*direction,label:direction>0?'Purpose allocation':'Purpose reduction'});}
   const total=allocations.reduce((s,a)=>s+Math.abs(Number(a.amount)),0);if(total<=0)throw new Error('Enter at least one allocation amount.');if(total>limit+0.5)throw new Error(`Allocation cannot exceed ${money(limit)}.`);
   if(direction<0){for(const a of allocations){if(Math.abs(a.amount)>Number(state.bucketBalances[a.bucketId]||0)+0.5)throw new Error(`Cannot reduce ${bucket(a.bucketId)?.name} below zero.`);}}
-  const tid=uid('tr');await put('transfers',{id:tid,fromAccountId:'esun',toAccountId:'esun',amount:total,budgetPeriodId:null,status:'completed',plannedDate:today(),completedDate:today(),transferType:'bucket_allocation',createdAt:new Date().toISOString()});
+  const tid=uid('tr');await put('transfers',{id:tid,fromAccountId:'esun',toAccountId:'esun',amount:total,budgetPeriodId:null,status:'completed',plannedDate:today(),completedDate:today(),transferType:'bucket_allocation',affectsPhysicalBalance:false,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()});
   await bulkPut('transferAllocations',allocations.map(a=>({id:uid('ta'),transferId:tid,bucketId:a.bucketId,amount:a.amount,goalId:null,label:a.label})));
   modal=null;await load();
 }

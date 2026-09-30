@@ -89,6 +89,12 @@ export async function accountBalances(){
   for(const i of incomes){ if(!i.deletedAt) out[i.accountId]=(out[i.accountId]||0)+Number(i.amount||0); }
   for(const e of expenses){ if(!e.deletedAt) out[e.accountId]=(out[e.accountId]||0)-Number(e.amount||0); }
   for(const t of transfers.filter(t=>t.status==='completed'&&!t.deletedAt)){
+    // Purpose-only allocations move no money between physical accounts. Historical
+    // versions represented them as transfer records for audit/activity purposes, so
+    // explicitly exclude them from physical account balances even if old records have
+    // malformed from/to account fields.
+    const purposeOnly=t.affectsPhysicalBalance===false || t.fromAccountId===t.toAccountId || ['bucket_allocation','reserve_allocation'].includes(t.transferType);
+    if(purposeOnly) continue;
     out[t.fromAccountId]=(out[t.fromAccountId]||0)-Number(t.amount||0);
     out[t.toAccountId]=(out[t.toAccountId]||0)+Number(t.amount||0);
   }
@@ -105,6 +111,8 @@ export async function accountBalances(){
       const snapStamp=String(latest.createdAt||`${latest.date||''}T00:00:00`);
       let value=Number(latest.value||0);
       for(const t of transfers.filter(t=>t.status==='completed'&&!t.deletedAt)){
+        const purposeOnly=t.affectsPhysicalBalance===false || t.fromAccountId===t.toAccountId || ['bucket_allocation','reserve_allocation'].includes(t.transferType);
+        if(purposeOnly) continue;
         const stamp=String(t.completedAt||t.updatedAt||t.createdAt||`${t.completedDate||''}T00:00:00`);
         if(stamp<=snapStamp) continue;
         if(t.toAccountId===ibkr.id) value+=Number(t.amount||0)/(ibkr.currency==='USD'?Number(settings?.usdTwdRate||1):1);

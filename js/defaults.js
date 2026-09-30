@@ -2,15 +2,21 @@ export const DEFAULTS = {
   settings: {
     primaryCurrency: 'TWD',
     investmentCurrency: 'USD',
-    forecastSalary: 82500,
+    forecastSalary: 0,
     tithePercent: 10,
     operatingBuffer: 3000,
     emergencyTarget: 300000,
     wealthRaisePercent: 75,
     usdTwdRate: 31.78,
     lastBackupAt: null,
-    appVersion: '1.4',
-    dataModelVersion: 140
+    forecastInvestmentReturn: 7,
+    forecastSalaryGrowth: 3,
+    conservativeInvestmentReturn: 4,
+    conservativeSalaryGrowth: 1,
+    aggressiveInvestmentReturn: 9,
+    aggressiveSalaryGrowth: 5,
+    appVersion: '1.5',
+    dataModelVersion: 150
   },
   accounts: [
     {id:'ctbc', name:'CTBC Operating', type:'checking', role:'operating', currency:'TWD', openingBalance:34850, active:true},

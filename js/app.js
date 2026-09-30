@@ -1,6 +1,6 @@
 import { seedIfNeeded,getAll,getOne,put,bulkPut,remove,uid,exportData,importData,bucketBalances,accountBalances,wealthMetrics } from './db.js';
 import { INCOME_TYPES } from './defaults.js';
-import { money,pct,monthLabel,buildBudgetPlan,aggregateExpenses,budgetSummary,calculateSweep,allocateGoalSurplus,activeGoal,forecastMonthsToTarget,simulateWealthStrategy } from './calc.js';
+import { money,pct,monthLabel,buildBudgetPlan,aggregateExpenses,budgetSummary,calculateSweep,allocateGoalSurplus,activeGoal,forecastMonthsToTarget,simulateWealthStrategy,simulateWealthStrategyWithGrowth } from './calc.js';
 
 const root=document.querySelector('#app');
 let tab='home';
@@ -8,8 +8,8 @@ let state={};
 let modal=null;
 let selectedPeriodId=null;
 let activityFilter='all';
-const APP_VERSION='1.4';
-const DATA_MODEL_VERSION=140;
+const APP_VERSION='1.5';
+const DATA_MODEL_VERSION=150;
 
 const today=(d=new Date())=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 const esc=s=>String(s??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
@@ -181,10 +181,28 @@ async function migrateV133(){
 
 async function migrateV140(){
   const settings=await getOne('settings','app');
-  if(Number(settings?.dataModelVersion||0)>=DATA_MODEL_VERSION) return;
+  if(Number(settings?.dataModelVersion||0)>=140) return;
   // Reliability release only: do not mutate balances, transactions, reconciliations,
   // allocations, goals, or funding months during this upgrade.
-  await put('settings',{...settings,dataModelVersion:DATA_MODEL_VERSION,appVersion:APP_VERSION,updatedAt:new Date().toISOString()});
+  await put('settings',{...settings,dataModelVersion:140,appVersion:'1.4',updatedAt:new Date().toISOString()});
+}
+
+async function migrateV150(){
+  const settings=await getOne('settings','app');
+  if(Number(settings?.dataModelVersion||0)>=DATA_MODEL_VERSION) return;
+  const next={
+    ...settings,
+    forecastInvestmentReturn:Number.isFinite(Number(settings?.forecastInvestmentReturn))?Number(settings.forecastInvestmentReturn):7,
+    forecastSalaryGrowth:Number.isFinite(Number(settings?.forecastSalaryGrowth))?Number(settings.forecastSalaryGrowth):3,
+    conservativeInvestmentReturn:Number.isFinite(Number(settings?.conservativeInvestmentReturn))?Number(settings.conservativeInvestmentReturn):4,
+    conservativeSalaryGrowth:Number.isFinite(Number(settings?.conservativeSalaryGrowth))?Number(settings.conservativeSalaryGrowth):1,
+    aggressiveInvestmentReturn:Number.isFinite(Number(settings?.aggressiveInvestmentReturn))?Number(settings.aggressiveInvestmentReturn):9,
+    aggressiveSalaryGrowth:Number.isFinite(Number(settings?.aggressiveSalaryGrowth))?Number(settings.aggressiveSalaryGrowth):5,
+    dataModelVersion:DATA_MODEL_VERSION,
+    appVersion:APP_VERSION,
+    updatedAt:new Date().toISOString()
+  };
+  await put('settings',next);
 }
 
 async function load(){
@@ -193,6 +211,7 @@ async function load(){
   await migrateV132();
   await migrateV133();
   await migrateV140();
+  await migrateV150();
   const keys=['accounts','buckets','categories','goals','periods','incomes','expenses','transfers','transferAllocations','investmentSnapshots','reconciliations','adjustments','monthlyCloses'];
   const vals=await Promise.all(keys.map(getAll));
   keys.forEach((k,i)=>state[k]=vals[i]);
@@ -249,7 +268,7 @@ function monthCloseStatus(periodId){
   const missingFixed=fixedLines.filter(x=>Number(totals[x.id]||0)+0.5<Number(x.budgetAmount||0));
   const ct=accountSnapshot('ctbc'),es=esunSnapshot();
   const reserveFunded=plan.lines.filter(x=>x.ruleType==='sinking_contribution').reduce((sum,x)=>sum+completedAllocationToBucket(periodId,x.bucketId),0);
-  const titheAllocated=completedTithe(periodId);
+  const titheAllocated=completedTithe(periodId),titheExpected=expectedTithe(periodId);
   const payday=paydayRequirements(periodId);
   const fundingOk=reserveFunded+0.5>=plan.sinking && payday.totalOutstanding<=0.5;
   const bankOk=ct.verified&&Math.abs(ct.difference)<0.5&&es.verified&&es.bankOk&&es.allocationOk;
@@ -258,8 +277,9 @@ function monthCloseStatus(periodId){
   if(sweep.available>0.5)hardBlockers.push(`${money(sweep.available)} still available to sweep`);
   if(sweep.overSwept>0.5)hardBlockers.push(`${money(sweep.overSwept)} was swept beyond the current available amount`);
   if(!fundingOk)hardBlockers.push('payday allocations are incomplete');
+  if(titheAllocated+0.5<titheExpected)hardBlockers.push(`${money(titheExpected-titheAllocated)} of tithe is not yet allocated`);
   if(!bankOk)hardBlockers.push('bank reconciliation or E.SUN purpose allocation is incomplete');
-  return {p,plan,totals,sweep,pending,missingFixed,ct,es,reserveFunded,titheAllocated,payday,fundingOk,bankOk,hardBlockers,ready:hardBlockers.length===0};
+  return {p,plan,totals,sweep,pending,missingFixed,ct,es,reserveFunded,titheAllocated,titheExpected,payday,fundingOk,bankOk,hardBlockers,ready:hardBlockers.length===0};
 }
 function latestInvestmentTwd(){
   const usd=Number(state.accountBalances?.ibkr||0);
@@ -273,6 +293,100 @@ function goalStatus(g){
   if(g.prerequisiteGoalId){const pg=goal(g.prerequisiteGoalId);if(pg&&goalBal(pg)<Number(g.prerequisiteAmount||0))return {key:'waiting',label:'Waiting',className:'warn-tag'};}
   return {key:'active',label:'Active',className:'good-tag'};
 }
+function periodAllIncome(periodId){return state.incomes.filter(i=>i.budgetPeriodId===periodId&&!i.deletedAt).reduce((a,b)=>a+Number(b.amount||0),0);}
+function periodRecord(periodId){
+  const p=state.periods.find(x=>x.id===periodId);if(!p)return null;
+  const close=state.monthlyCloses.find(x=>(x.budgetPeriodId===periodId||x.id===periodId)&&x.status==='closed');
+  const regularIncome=close?Number(close.income||0):periodRegularIncome(periodId);
+  const totalIncome=close?Number(close.totalIncome??close.income??0):periodAllIncome(periodId);
+  const expenses=close?Number(close.expenses||0):totalExpenses(periodId);
+  const wealthContribution=close?Number(close.wealthContribution||0):completedCoreWealth(periodId);
+  const actuals=close?.categoryActuals||expenseTotals(periodId);
+  const contributionRate=regularIncome>0?wealthContribution/regularIncome:0;
+  const latestId=[...state.periods].sort((a,b)=>a.id.localeCompare(b.id)).at(-1)?.id||null;
+  const coreWealth=close?Number(close.endingCoreWealth||0):(periodId===latestId?Number(state.wealth.coreWealth||0):null);
+  const financialNetWorth=close?Number(close.endingFinancialNetWorth||0):(periodId===latestId?Number(state.wealth.financialNetWorth||0):null);
+  return {id:periodId,state:p.state,closed:!!close,regularIncome,totalIncome,expenses,wealthContribution,contributionRate,actuals,coreWealth,financialNetWorth};
+}
+function historyRecords(){return [...state.periods].sort((a,b)=>a.id.localeCompare(b.id)).map(p=>periodRecord(p.id)).filter(Boolean);}
+function recentHistory(n=3){return historyRecords().slice(-n);}
+function averageCoreContribution(n=3){const xs=recentHistory(n).filter(x=>x.regularIncome>0);return xs.length?xs.reduce((s,x)=>s+x.wealthContribution,0)/xs.length:0;}
+function averageGoalContribution(bucketId,n=3){const xs=recentHistory(n);if(!xs.length)return 0;return xs.reduce((sum,x)=>sum+completedAllocationToBucket(x.id,bucketId),0)/xs.length;}
+function dateAfterMonths(months){
+  if(months===null||months===undefined||!isFinite(months))return '—';
+  const d=new Date();d.setDate(1);d.setMonth(d.getMonth()+Math.max(0,Math.ceil(months)));
+  return new Intl.DateTimeFormat('en-US',{month:'short',year:'numeric'}).format(d);
+}
+function completedAllocationInYear(bucketId,year){
+  const completed=new Map(state.transfers.filter(t=>!t.deletedAt&&t.status==='completed').map(t=>[t.id,t]));
+  return state.transferAllocations.reduce((sum,a)=>{
+    const t=completed.get(a.transferId);if(!t)return sum;
+    const d=String(t.completedDate||t.plannedDate||'');
+    if(!d.startsWith(String(year))||a.bucketId!==bucketId||Number(a.amount||0)<=0)return sum;
+    return sum+Number(a.amount||0);
+  },0);
+}
+function completedContributionToBucketInYear(bucketId,year){
+  const nonContributionTypes=new Set(['bucket_allocation','purpose_reallocation','allocation_reversal']);
+  const completed=new Map(state.transfers.filter(t=>!t.deletedAt&&t.status==='completed').map(t=>[t.id,t]));
+  return state.transferAllocations.reduce((sum,a)=>{
+    const t=completed.get(a.transferId);if(!t||nonContributionTypes.has(t.transferType))return sum;
+    const d=String(t.completedDate||t.plannedDate||'');
+    if(!d.startsWith(String(year))||a.bucketId!==bucketId||Number(a.amount||0)<=0)return sum;
+    return sum+Number(a.amount||0);
+  },0);
+}
+function yearSummary(year){
+  const prefix=String(year);
+  const income=state.incomes.filter(x=>!x.deletedAt&&String(x.dateReceived||'').startsWith(prefix)).reduce((s,x)=>s+Number(x.amount||0),0);
+  const regularIncome=state.incomes.filter(x=>!x.deletedAt&&x.incomeType==='regular_income'&&String(x.dateReceived||'').startsWith(prefix)).reduce((s,x)=>s+Number(x.amount||0),0);
+  const expenses=state.expenses.filter(x=>!x.deletedAt&&String(x.date||'').startsWith(prefix)).reduce((s,x)=>s+Number(x.amount||0),0);
+  const tithe=completedAllocationInYear('tithe',year);
+  const emergency=completedContributionToBucketInYear('emergency',year);
+  const investments=state.transfers.filter(t=>!t.deletedAt&&t.status==='completed'&&t.toAccountId==='ibkr'&&t.fromAccountId!=='ibkr'&&String(t.completedDate||t.plannedDate||'').startsWith(prefix)).reduce((s,t)=>s+Number(t.amount||0),0);
+  const coreBucketIds=new Set(state.buckets.filter(b=>b.countsTowardCoreWealth).map(b=>b.id));
+  const coreBuckets=[...coreBucketIds].reduce((sum,id)=>sum+completedContributionToBucketInYear(id,year),0);
+  const wealth=coreBuckets+investments;
+  const points=historyRecords().filter(x=>x.id.startsWith(prefix)&&x.financialNetWorth!==null).map(x=>x.financialNetWorth);
+  const netWorthChange=points.length>=2?points.at(-1)-points[0]:null;
+  return {income,regularIncome,expenses,tithe,emergency,investments,wealth,netWorthChange,months:historyRecords().filter(x=>x.id.startsWith(prefix)).length};
+}
+function trendSvg(records,key,{percent=false}={}){
+  const pts=records.filter(x=>Number.isFinite(Number(x[key])));if(pts.length<2)return '';
+  const vals=pts.map(x=>Number(x[key]));const min=Math.min(...vals),max=Math.max(...vals),span=Math.max(1,max-min);
+  const coords=vals.map((v,i)=>`${10+(i/(vals.length-1))*300},${90-((v-min)/span)*72}`).join(' ');
+  const dots=vals.map((v,i)=>`<circle cx="${10+(i/(vals.length-1))*300}" cy="${90-((v-min)/span)*72}" r="3"/>`).join('');
+  return `<div class="trend-wrap"><svg class="trend-svg" viewBox="0 0 320 100" preserveAspectRatio="none"><line x1="10" y1="90" x2="310" y2="90"/><polyline points="${coords}"/>${dots}</svg><div class="trend-labels">${pts.map(x=>`<span>${esc(monthLabel(x.id).split(' ')[0].slice(0,3))}</span>`).join('')}</div></div>`;
+}
+function contributionBars(records){
+  if(!records.length)return '';
+  const max=Math.max(.01,...records.map(x=>x.contributionRate));
+  return `<div class="history-bars">${records.map(x=>`<div class="history-bar-item"><div class="history-bar-track"><span style="height:${Math.max(3,(x.contributionRate/max)*100)}%"></span></div><strong>${pct(x.contributionRate)}</strong><small>${esc(monthLabel(x.id).split(' ')[0].slice(0,3))}</small></div>`).join('')}</div>`;
+}
+function signedMoney(v){const n=Number(v||0);return `${n>0?'+':''}${money(n)}`;}
+function deltaClass(v){return Number(v)>0?'good':Number(v)<0?'bad':'';}
+function currentPaceMonthly(){const avg=averageCoreContribution(3);const p=currentPeriod();const planned=p?Math.max(0,planFor(p.id).immediateWealth):0;return avg>0?avg:planned;}
+function latestRegularTakeHome(){
+  const xs=historyRecords().filter(x=>Number(x.regularIncome||0)>0);
+  return Number(xs.at(-1)?.regularIncome||0);
+}
+function forecastBaselineSalary(){return latestRegularTakeHome()||Number(state.settings.forecastSalary||0);}
+function goalPaceText(g){
+  const bal=goalBal(g),remaining=Math.max(0,Number(g.targetAmount||0)-bal);if(remaining<=0)return 'Complete';
+  let pace=averageGoalContribution(g.bucketId,3);
+  if(g.id==='goal-emergency'&&pace<=0)pace=currentPaceMonthly();
+  if(pace<=0)return 'Need contribution history';
+  const months=Math.ceil(remaining/pace);return `At current pace: ${dateAfterMonths(months)} · ~${money(pace)}/mo`;
+}
+function scenarioFor(returnPct,growthPct,extra=0,salaryOverride=null){
+  const salary=Number((salaryOverride??forecastBaselineSalary()) || 0);
+  const plan=buildBudgetPlan({income:salary,categories:state.categories,settings:state.settings});
+  const monthly=Math.max(0,plan.immediateWealth+Number(extra||0)),em=goal('goal-emergency'),trip=goal('goal-home-trip');
+  const targets=[1000000,3000000,5000000,10000000,30000000];
+  const sim=simulateWealthStrategyWithGrowth({emergencyStart:Number(state.bucketBalances.emergency||0),travelStart:Number(state.bucketBalances['home-trip']||0),investmentStart:latestInvestmentTwd(),monthlyCapacity:monthly,startingSalary:salary,annualSalaryGrowth:Number(growthPct||0)/100,raiseCaptureRate:Number(state.settings.wealthRaisePercent||75)/100,annualReturn:Number(returnPct||0)/100,emergencyUnlock:Number(trip?.prerequisiteAmount||200000),emergencyTarget:Number(em?.targetAmount||300000),travelTarget:Number(trip?.targetAmount||100000),travelMonthly:Number(trip?.monthlyTarget||10000),months:600,milestones:targets});
+  return {salary,monthly,targets,sim,returnPct:Number(returnPct||0),growthPct:Number(growthPct||0)};
+}
+
 function icon(name,extra=''){
   const paths={
     home:'<path d="M3 11.5 12 4l9 7.5"/><path d="M5.5 10.5V20h13v-9.5"/><path d="M9.5 20v-6h5v6"/>',
@@ -371,6 +485,7 @@ function completedAllocationToBucket(periodId,bucketId){
   return state.transferAllocations.filter(a=>complete.has(a.transferId)&&a.bucketId===bucketId).reduce((s,a)=>s+Number(a.amount||0),0);
 }
 function completedTithe(periodId){return completedAllocationToBucket(periodId,'tithe');}
+function expectedTithe(periodId){return Math.round(periodEligibleIncome(periodId)*Number(state.settings.tithePercent||10)/100);}
 function paydayRequirements(periodId){
   const p=state.periods.find(x=>x.id===periodId);
   if(!p) return {groups:[],totalOutstanding:0,items:[]};
@@ -453,11 +568,12 @@ function homeView(){
   const active=activeGoal(state.goals,state.bucketBalances);
   const nonCore=state.wealth.financialNetWorth-state.wealth.coreWealth;
   if(!p){return `<section class="card hero-action"><div class="metric-label">Start here</div><div class="metric">Create your first funding month</div><p class="sub">Enter the exact paycheck that lands in your account. Wealth OS will allocate it using your rules.</p><button class="btn" data-action="new-paycheck">Enter Paycheck</button></section>${wealthStrip()}`;}
-  const plan=planFor(p.id), spent=totalExpenses(p.id), core=completedCoreWealth(p.id), goalFunding=completedGoalFunding(p.id);
+  const plan=planFor(p.id), spent=totalExpenses(p.id), core=completedCoreWealth(p.id), goalFunding=completedGoalFunding(p.id), contributionRate=plan.salary>0?core/plan.salary:0;
   const expTotals=expenseTotals(p.id);const sweep=sweepInfo(p.id);
   const payday=paydayRequirements(p.id);
   const paydayGroup=payday.groups.find(g=>g.amount>0.5);
   const pending=state.transfers.find(t=>t.budgetPeriodId===p.id&&t.status==='planned'&&!['payday','investment_contribution'].includes(t.transferType));
+  const unroutedSupplemental=state.incomes.find(i=>!i.deletedAt&&i.budgetPeriodId===p.id&&i.incomeType!=='regular_income'&&i.incomeType!=='reimbursement'&&!routingTransfersForIncome(i.id).length);
   let action=`<button class="btn" data-action="add-expense">Add Expense</button>`;
   let actionText='Keep the ledger current';let actionSub='Record spending as it happens.';let actionMetric=money(sweep.available);
   if(p.state==='closed'){
@@ -471,6 +587,9 @@ function homeView(){
     action=`<button class="btn" data-action="payday-transfer" data-account="${paydayGroup.accountId}" data-period="${p.id}">Record Transfer Completed</button>`;
   } else if(pending){
     actionText=`Transfer ${money(pending.amount)} pending`;actionSub=`Move the money physically, then confirm it here.`;actionMetric=money(pending.amount);action=`<button class="btn" data-action="complete-transfer" data-id="${pending.id}">Mark Transfer Completed</button>`;
+  } else if(unroutedSupplemental){
+    const due=unroutedSupplemental.titheEligible?Math.round(Number(unroutedSupplemental.amount||0)*Number(state.settings.tithePercent||10)/100):0;
+    actionText='Route supplemental income';actionSub=`${INCOME_TYPES.find(t=>t[0]===unroutedSupplemental.incomeType)?.[1]||'Supplemental income'} ${money(unroutedSupplemental.amount)}${due?` · tithe due ${money(due)}`:''}. Decide what the remainder should do.`;actionMetric=money(unroutedSupplemental.amount);action=`<button class="btn" data-action="route-income" data-id="${unroutedSupplemental.id}">Open Routing Assistant</button>`;
   }
   const em=goal('goal-emergency');const eb=em?goalBal(em):0;const ep=em?Math.min(1,eb/em.targetAmount):0;
   const food=plan.lines.find(x=>x.id==='food'), foodSpent=expTotals.food||0;
@@ -485,7 +604,7 @@ function homeView(){
   <div class="grid g3" style="margin-top:14px">
     <section class="card"><div class="metric-label">Income</div><div class="metric">${money(plan.salary)}</div><div class="sub">Exact regular income entered</div></section>
     <section class="card"><div class="metric-label">Spent</div><div class="metric">${money(spent)}</div><div class="sub">Actual expenses only</div></section>
-    <section class="card"><div class="metric-label">Wealth contributed</div><div class="metric">${money(core)}</div><div class="sub">Completed transfers to core wealth</div></section>
+    <section class="card"><div class="metric-label">Wealth contributed</div><div class="metric">${money(core)}</div><div class="sub">${pct(contributionRate)} of take-home</div></section>
   </div>
   <div class="section-title"><h2>Flexible budget</h2><span class="sub">Potential month-end sweep ${money(sweep.available)}</span></div>
   <section class="card">${budgetMini('Food',food?.budgetAmount||0,foodSpent)}${budgetMini('Dating / Social',social?.budgetAmount||0,socialSpent)}</section>
@@ -526,7 +645,7 @@ function budgetView(){
   </div>
   <div class="section-title"><h2>Monthly flow</h2><span class="sub">What this paycheck is doing</span></div>
   <section class="card flow-card">
-    ${row('Tithe',`${money(titheAllocated)} / ${money(plan.tithe)}`)}
+    ${row('Tithe',`${money(titheAllocated)} / ${money(expectedTithe(p.id))}`)}
     ${row('Fixed obligations',`${money(fixedActual)} / ${money(plan.fixed)}`)}
     ${row('Flexible spending',`${money(flexActual)} / ${money(plan.caps)}`)}
     ${row('Reserve funding',`${money(reserveFunded)} / ${money(plan.sinking)}`)}
@@ -566,7 +685,7 @@ function budgetCategoryRow(x,periodId){
   if(x.ruleType==='buffer'){
     return `<div class="budget-category"><div class="split"><div><strong>${esc(x.name)}</strong><div class="sub">Held for variability and month-end sweep</div></div><div class="budget-numbers"><strong>${money(x.budgetAmount)}</strong><span>planned</span></div></div><div class="progress"><span style="width:0%"></span></div></div>`;
   }
-  const budget=Number(x.budgetAmount||0),remaining=budget-actual,ratio=budget?Math.max(0,Math.min(1,actual/budget)):0;
+  const budget=x.ruleType==='percentage'?expectedTithe(periodId):Number(x.budgetAmount||0),remaining=budget-actual,ratio=budget?Math.max(0,Math.min(1,actual/budget)):0;
   return `<div class="budget-category"><div class="split"><div><strong>${esc(x.name)}</strong><div class="sub">${actualLabel} ${money(actual)} · ${remaining>=0?`${money(remaining)} left`:`${money(Math.abs(remaining))} over`}</div></div><div class="budget-numbers"><strong class="${remaining<0?'bad':''}">${money(actual)} / ${money(budget)}</strong><span>${pct(ratio)}</span></div></div><div class="progress ${remaining<0?'over':''}"><span style="width:${Math.min(100,ratio*100)}%"></span></div></div>`;
 }
 
@@ -592,26 +711,30 @@ function txLine(x){
   const protectedIncome=x._kind==='income'&&x.systemGenerated===true;
   const plannedTransfer=x._kind==='transfer'&&x.status==='planned';
   const canEdit=!protectedIncome&&(x._kind!=='transfer'||x.transferType==='manual');
-  const canDelete=!protectedIncome&&(x._kind!=='transfer'||x.transferType==='bucket_allocation'||(plannedTransfer&&['manual','goal_contribution'].includes(x.transferType)));
+  const canDelete=!protectedIncome&&(x._kind!=='transfer'||x.transferType==='bucket_allocation'||(plannedTransfer&&['manual','goal_contribution','supplemental_income_routing'].includes(x.transferType)));
   const canComplete=plannedTransfer;
+  const canRoute=x._kind==='income'&&x.incomeType!=='regular_income'&&!routingTransfersForIncome(x.id).length&&!isClosedPeriod(x.budgetPeriodId);
   const amount=money(x._amount);
-  return `<div class="tx"><div class="tx-main"><div class="tx-title">${esc(x._title)}</div><div class="tx-meta">${esc(meta)}</div><div class="tx-actions">${canComplete?`<button class="text-btn" data-action="complete-transfer" data-id="${x.id}">Complete</button>`:''}${canEdit?`<button class="text-btn" data-action="edit-transaction" data-kind="${x._kind}" data-id="${x.id}">Edit</button>`:''}${canDelete?`<button class="text-btn danger-text" data-action="delete-transaction" data-kind="${x._kind}" data-id="${x.id}">Delete</button>`:''}</div></div><div class="right"><div class="amount ${x._kind==='income'?'good':x._kind==='expense'?'bad':''}">${x._kind==='transfer'?'↔ ':''}${amount}</div><span class="tag ${plannedTransfer?'warn-tag':''}">${plannedTransfer?'planned':x._kind}</span></div></div>`;
+  return `<div class="tx"><div class="tx-main"><div class="tx-title">${esc(x._title)}</div><div class="tx-meta">${esc(meta)}</div><div class="tx-actions">${canComplete?`<button class="text-btn" data-action="complete-transfer" data-id="${x.id}">Complete</button>`:''}${canRoute?`<button class="text-btn" data-action="route-income" data-id="${x.id}">Route</button>`:''}${canEdit?`<button class="text-btn" data-action="edit-transaction" data-kind="${x._kind}" data-id="${x.id}">Edit</button>`:''}${canDelete?`<button class="text-btn danger-text" data-action="delete-transaction" data-kind="${x._kind}" data-id="${x.id}">Delete</button>`:''}</div></div><div class="right"><div class="amount ${x._kind==='income'?'good':x._kind==='expense'?'bad':''}">${x._kind==='transfer'?'↔ ':''}${amount}</div><span class="tag ${plannedTransfer?'warn-tag':''}">${plannedTransfer?'planned':x._kind}</span></div></div>`;
 }
 
 function goalsView(){
   const emergency=goal('goal-emergency'),travel=goal('goal-home-trip');
   const emergencyBal=emergency?goalBal(emergency):0,travelBal=travel?goalBal(travel):0;
-  const active=activeGoal(state.goals,state.bucketBalances);
+  const active=activeGoal(state.goals,state.bucketBalances),pace=currentPaceMonthly();
+  const strategyForecast=scenarioFor(Number(state.settings.forecastInvestmentReturn||7),Number(state.settings.forecastSalaryGrowth||3),0,forecastBaselineSalary());
   const cards=[...state.goals].sort((a,b)=>a.priority-b.priority).map(g=>{
     const b=goalBal(g),target=Number(g.targetAmount||0),p=target?Math.min(1,b/target):0,remaining=Math.max(0,target-b),status=goalStatus(g);
     let rule='Manual goal';
     if(g.id==='goal-emergency')rule='Primary core-wealth goal';
     if(g.id==='goal-home-trip')rule=`Unlocks at ${money(g.prerequisiteAmount||0)} Emergency Fund · then ${money(g.monthlyTarget||0)}/month`;
     if(g.id==='goal-equipment')rule='Paused unless you deliberately activate it';
-    return `<section class="card goal-card"><div class="split"><div><strong>${esc(g.name)}</strong><div class="sub">${esc(rule)}</div></div><span class="tag ${status.className}">${status.label}</span></div><div class="goal-metric-row"><div><div class="metric">${money(b)}</div><div class="sub">${money(remaining)} remaining</div></div><div class="right"><strong>${pct(p)}</strong><div class="sub">of ${money(target)}</div></div></div><div class="progress"><span style="width:${p*100}%"></span></div>${g.targetDate?`<div class="sub">Target date: ${esc(g.targetDate)}</div>`:''}<div class="actions goal-actions"><button class="btn secondary" data-action="goal-contribution" data-id="${g.id}">Add Contribution</button><button class="btn ghost" data-action="edit-goal" data-id="${g.id}">Edit Goal</button></div></section>`;
+    let paceText=goalPaceText(g);
+    if(g.id==='goal-home-trip'&&status.key==='waiting')paceText=`Expected unlock: ${dateAfterMonths(strategyForecast.sim.events.travelUnlockMonth)}`;
+    return `<section class="card goal-card"><div class="split"><div><strong>${esc(g.name)}</strong><div class="sub">${esc(rule)}</div></div><span class="tag ${status.className}">${status.label}</span></div><div class="goal-metric-row"><div><div class="metric">${money(b)}</div><div class="sub">${money(remaining)} remaining</div></div><div class="right"><strong>${pct(p)}</strong><div class="sub">of ${money(target)}</div></div></div><div class="progress"><span style="width:${p*100}%"></span></div><div class="goal-pace">${esc(paceText)}</div>${g.targetDate?`<div class="sub">Target date: ${esc(g.targetDate)}</div>`:''}<div class="actions goal-actions"><button class="btn secondary" data-action="goal-contribution" data-id="${g.id}">Add Contribution</button><button class="btn ghost" data-action="edit-goal" data-id="${g.id}">Edit Goal</button></div></section>`;
   }).join('');
-  return `<div><h2 style="margin:0">Goals</h2><div class="sub">Your wealth priorities and planned-use funds.</div></div>
-  <section class="card strategy-card" style="margin-top:14px"><div class="metric-label">Current routing strategy</div><strong>${esc(active?.name||'Core cash goals complete')}</strong><div class="strategy-steps"><span class="${emergencyBal<200000?'active-step':''}">1. Emergency to ${money(200000)}</span><span class="${emergencyBal>=200000&&travelBal<(travel?.targetAmount||100000)?'active-step':''}">2. Home Travel ${money(travel?.monthlyTarget||10000)}/mo + continue Emergency</span><span class="${emergencyBal>=(emergency?.targetAmount||300000)?'active-step':''}">3. After Emergency target, remaining surplus becomes investable</span></div></section>
+  return `<div><h2 style="margin:0">Goals</h2><div class="sub">Your wealth priorities, pace and planned-use funds.</div></div>
+  <section class="card strategy-card" style="margin-top:14px"><div class="split"><div><div class="metric-label">Current routing strategy</div><strong>${esc(active?.name||'Core cash goals complete')}</strong></div><div class="right"><strong>${money(pace)}</strong><div class="sub">recent monthly core-wealth pace</div></div></div><div class="strategy-steps"><span class="${emergencyBal<200000?'active-step':''}">1. Emergency to ${money(200000)}</span><span class="${emergencyBal>=200000&&travelBal<(travel?.targetAmount||100000)?'active-step':''}">2. Home Travel ${money(travel?.monthlyTarget||10000)}/mo + continue Emergency</span><span class="${emergencyBal>=(emergency?.targetAmount||300000)?'active-step':''}">3. After Emergency target, remaining surplus becomes investable</span></div></section>
   <div class="grid g2 goals-grid" style="margin-top:14px">${cards}</div>`;
 }
 
@@ -669,24 +792,76 @@ function accountHealthRow(name,value,status,statusClass=''){return `<div class="
 
 
 function forecastView(){
-  const salary=Number(state.settings.forecastSalary||82500),annual=.07;
-  const plan=buildBudgetPlan({income:salary,categories:state.categories,settings:state.settings});
-  const monthly=Math.max(0,plan.immediateWealth),em=goal('goal-emergency'),trip=goal('goal-home-trip');
-  const targets=[1000000,3000000,5000000,10000000,30000000];
-  const sim=simulateWealthStrategy({emergencyStart:Number(state.bucketBalances.emergency||0),travelStart:Number(state.bucketBalances['home-trip']||0),investmentStart:latestInvestmentTwd(),monthlyCapacity:monthly,annualReturn:annual,emergencyUnlock:Number(trip?.prerequisiteAmount||200000),emergencyTarget:Number(em?.targetAmount||300000),travelTarget:Number(trip?.targetAmount||100000),travelMonthly:Number(trip?.monthlyTarget||10000),months:600,milestones:targets});
-  const contributionRate=salary>0?monthly/salary:0;
-  return `<div><h2 style="margin:0">Forecast</h2><div class="sub">Strategy-based projections for planning, not guaranteed outcomes.</div></div>
-  <div class="grid g3 summary-grid" style="margin-top:14px"><section class="card"><div class="metric-label">Planning income</div><div class="metric">${money(salary)}</div><div class="sub">Editable in Settings</div></section><section class="card"><div class="metric-label">Monthly wealth capacity</div><div class="metric">${money(monthly)}</div><div class="sub">${pct(contributionRate)} of take-home</div></section><section class="card"><div class="metric-label">Current core wealth</div><div class="metric">${money(state.wealth.coreWealth)}</div><div class="sub">Emergency + investments</div></section></div>
-  <div class="section-title"><h2>Strategy milestones</h2><span class="sub">7% investment return assumption</span></div><section class="card forecast-events">${row(`Home Travel unlock · Emergency ${money(trip?.prerequisiteAmount||200000)}`,formatMonths(sim.events.travelUnlockMonth))}${row(`Emergency Fund complete · ${money(em?.targetAmount||300000)}`,formatMonths(sim.events.emergencyCompleteMonth))}${row('Home Travel funded',formatMonths(sim.events.travelCompleteMonth))}</section>
-  <div class="section-title"><h2>Core wealth milestones</h2></div><section class="card">${targets.map(t=>row(money(t),formatMonths(sim.hits[t]))).join('')}</section>
-  <div class="section-title"><h2>Long-range checkpoints</h2><span class="sub">Emergency cash earns 0%; return applies to investments</span></div><div class="grid g2 forecast-checkpoints">${sim.snapshots.map(x=>`<section class="card"><div class="metric-label">Year ${x.month/12}</div><div class="metric">${money(x.coreWealth)}</div><div class="sub">Emergency ${money(x.emergency)} · Investments ${money(x.investment)}</div></section>`).join('')}</div>
-  <div class="section-title"><h2>Scenario lab</h2></div><section class="card"><div class="notice">Test a different take-home salary, investment return, or additional monthly wealth contribution without changing your real budget.</div><div class="form-grid" style="margin-top:12px"><div class="field"><label>Take-home salary</label><input id="scenario-salary" type="number" value="${Math.round(salary)}"></div><div class="field"><label>Annual investment return (%)</label><input id="scenario-return" type="number" step="0.1" value="7"></div></div><div class="field"><label>Extra monthly wealth contribution</label><input id="scenario-extra" type="number" step="1" value="0"></div><button class="btn" data-action="run-scenario">Run Scenario</button><div id="scenario-result" style="margin-top:12px"></div></section>`;
+  const records=historyRecords(),recent=records.slice(-6),current=records.at(-1)||null,previous=records.length>1?records.at(-2):null;
+  const year=today().slice(0,4),annual=yearSummary(year),recent3=records.slice(-3),avgRate=recent3.length?recent3.reduce((s,x)=>s+x.contributionRate,0)/recent3.length:0;
+  const salary=Number(current?.regularIncome||forecastBaselineSalary()||0);
+  const base=scenarioFor(Number(state.settings.forecastInvestmentReturn||7),Number(state.settings.forecastSalaryGrowth||3),0,salary);
+  const conservative=scenarioFor(Number(state.settings.conservativeInvestmentReturn||4),Number(state.settings.conservativeSalaryGrowth||1),0,salary);
+  const aggressive=scenarioFor(Number(state.settings.aggressiveInvestmentReturn||9),Number(state.settings.aggressiveSalaryGrowth||5),0,salary);
+  const currentRate=current?.contributionRate||0;
+  const netWorthRecords=records.filter(x=>x.financialNetWorth!==null),coreRecords=records.filter(x=>x.coreWealth!==null);
+  const compare=previous&&current?`<section class="card comparison-card">
+    ${comparisonLine('Income',current.totalIncome,previous.totalIncome,false)}
+    ${comparisonLine('Spending',current.expenses,previous.expenses,true)}
+    ${comparisonLine('Core wealth contributed',current.wealthContribution,previous.wealthContribution,false)}
+    ${comparisonLine('Contribution rate',current.contributionRate,previous.contributionRate,false,true)}
+  </section>`:`<div class="notice"><strong>Monthly comparison needs one more funding month.</strong><br>Once two months exist, Wealth OS will show what changed in income, spending and wealth contributions.</div>`;
+  const flexCats=state.categories.filter(c=>c.ruleType==='cap');
+  const catRows=flexCats.map(c=>{
+    const samples=recent3.map(r=>Number(r.actuals?.[c.id]||0));const avg=samples.length?samples.reduce((a,b)=>a+b,0)/samples.length:0;const cur=Number(current?.actuals?.[c.id]||0),budget=Number((planFor(current?.id||currentPeriod()?.id)?.lines?.find(x=>x.id===c.id)?.budgetAmount??c.defaultAmount) || 0);
+    return {c,avg,cur,budget};
+  }).sort((a,b)=>b.avg-a.avg);
+  const catHistory=records.length<2?`<div class="notice"><strong>Category trends are still building.</strong><br>After another month, 3-month averages and recurring over/under-budget patterns will appear here.</div>`:`<section class="card insight-list">${catRows.map(x=>`<div class="insight-row"><div><strong>${esc(x.c.name)}</strong><div class="sub">Current ${money(x.cur)} · ${Math.min(3,recent3.length)}-mo avg ${money(x.avg)}</div></div><div class="right"><strong class="${x.avg>x.budget?'bad':x.avg<x.budget*.8?'good':''}">${money(x.budget)}</strong><div class="sub">monthly cap</div></div></div>`).join('')}</section>`;
+  return `<div><h2 style="margin:0">Insights & Forecast</h2><div class="sub">Use actual history to understand the month, then model what comes next.</div></div>
+  <div class="grid g3 summary-grid" style="margin-top:14px">
+    <section class="card"><div class="metric-label">Current contribution rate</div><div class="metric">${pct(currentRate)}</div><div class="sub">Core wealth ÷ regular take-home</div></section>
+    <section class="card"><div class="metric-label">Recent average</div><div class="metric">${pct(avgRate)}</div><div class="sub">${recent3.length}-month contribution rate</div></section>
+    <section class="card"><div class="metric-label">${year} wealth contributed</div><div class="metric">${money(annual.wealth)}</div><div class="sub">Recorded core-wealth contributions</div></section>
+  </div>
+
+  <div class="section-title"><h2>Monthly comparison</h2><span class="sub">Latest vs previous funding month</span></div>${compare}
+
+  <div class="section-title"><h2>Contribution history</h2><span class="sub">Completed core-wealth transfers</span></div>
+  <section class="card">${recent.length?contributionBars(recent):'<div class="empty compact-empty"><strong>No funding-month history yet.</strong></div>'}</section>
+
+  <div class="section-title"><h2>Core wealth trend</h2><span class="sub">Month-end snapshots + current month</span></div>
+  <section class="card">${coreRecords.length>=2?trendSvg(coreRecords,'coreWealth'):`<div class="empty compact-empty"><strong>Not enough snapshots yet.</strong><span>Close another month to build a meaningful wealth trend.</span></div>`}</section>
+
+  <div class="section-title"><h2>Flexible spending trends</h2><span class="sub">Recent behavior vs your caps</span></div>${catHistory}
+
+  <div class="section-title"><h2>${year} recorded summary</h2><span class="sub">Only data entered in Wealth OS</span></div>
+  <div class="grid g2 annual-grid">
+    ${insightKpi('Income',annual.income,'All recorded income')}
+    ${insightKpi('Expenses',annual.expenses,'Actual spending')}
+    ${insightKpi('Tithe allocated',annual.tithe,'Completed Tithe allocations')}
+    ${insightKpi('Emergency added',annual.emergency,'Completed Emergency contributions')}
+    ${insightKpi('Invested',annual.investments,'Transfers into IBKR')}
+    ${insightKpi('Net-worth change',annual.netWorthChange===null?'—':signedMoney(annual.netWorthChange),annual.netWorthChange===null?'Need 2 recorded snapshots':'From first to latest recorded snapshot')}
+  </div>
+
+  <div class="section-title"><h2>Planning scenarios</h2><span class="sub">Salary growth and investment return modeled separately</span></div>
+  <div class="grid g3 scenario-grid">
+    ${scenarioCard('Conservative',conservative)}
+    ${scenarioCard('Base',base,true)}
+    ${scenarioCard('Aggressive',aggressive)}
+  </div>
+  <div class="section-title"><h2>Base milestones</h2><span class="sub">${base.returnPct}% return · ${base.growthPct}% annual salary growth</span></div>
+  <section class="card forecast-events">${row(`Home Travel unlock · Emergency ${money(goal('goal-home-trip')?.prerequisiteAmount||200000)}`,formatMonths(base.sim.events.travelUnlockMonth))}${row(`Emergency Fund complete · ${money(goal('goal-emergency')?.targetAmount||300000)}`,formatMonths(base.sim.events.emergencyCompleteMonth))}${row('Home Travel funded',formatMonths(base.sim.events.travelCompleteMonth))}${base.targets.map(t=>row(money(t),formatMonths(base.sim.hits[t]))).join('')}</section>
+
+  <div class="section-title"><h2>Long-range checkpoints</h2><span class="sub">Base scenario; return applies only to investments</span></div>
+  <div class="grid g2 forecast-checkpoints">${base.sim.snapshots.map(x=>`<section class="card"><div class="metric-label">Year ${x.month/12}</div><div class="metric">${money(x.coreWealth)}</div><div class="sub">Emergency ${money(x.emergency)} · Investments ${money(x.investment)}</div><div class="sub">Modeled salary ${money(x.salary)}</div></section>`).join('')}</div>
+
+  <div class="section-title"><h2>Scenario lab</h2></div><section class="card"><div class="notice">Test take-home salary, annual salary growth, investment return, or an extra monthly wealth contribution. This never changes your real budget.</div><div class="form-grid" style="margin-top:12px"><div class="field"><label>Take-home salary</label><input id="scenario-salary" type="number" value="${Math.round(salary)}"></div><div class="field"><label>Annual salary growth (%)</label><input id="scenario-growth" type="number" step="0.1" value="${Number(state.settings.forecastSalaryGrowth||3)}"></div><div class="field"><label>Annual investment return (%)</label><input id="scenario-return" type="number" step="0.1" value="${Number(state.settings.forecastInvestmentReturn||7)}"></div><div class="field"><label>Extra monthly wealth contribution</label><input id="scenario-extra" type="number" step="1" value="0"></div></div><button class="btn" data-action="run-scenario">Run Scenario</button><div id="scenario-result" style="margin-top:12px"></div></section>`;
 }
+function insightKpi(label,value,sub){return `<section class="card insight-kpi"><div class="metric-label">${esc(label)}</div><div class="kpi-value">${typeof value==='number'?money(value):value}</div><div class="sub">${esc(sub)}</div></section>`;}
+function comparisonLine(label,current,previous,lowerIsBetter=false,isPercent=false){const delta=Number(current||0)-Number(previous||0),good=lowerIsBetter?delta<0:delta>0,bad=lowerIsBetter?delta>0:delta<0;const value=isPercent?pct(current):money(current),deltaText=isPercent?`${delta>0?'+':''}${(delta*100).toFixed(1)} pp`:signedMoney(delta);return `<div class="comparison-line"><div><strong>${esc(label)}</strong><div class="sub">Previous ${isPercent?pct(previous):money(previous)}</div></div><div class="right"><strong>${value}</strong><div class="sub ${good?'good':bad?'bad':''}">${deltaText}</div></div></div>`;}
+function scenarioCard(label,s,featured=false){return `<section class="card scenario-card ${featured?'featured':''}"><div class="split"><strong>${esc(label)}</strong>${featured?'<span class="tag good-tag">Base</span>':''}</div><div class="scenario-assumptions">${s.returnPct}% investment return · ${s.growthPct}% salary growth</div><div class="scenario-milestone"><span>Emergency complete</span><strong>${formatMonths(s.sim.events.emergencyCompleteMonth)}</strong></div><div class="scenario-milestone"><span>${money(1000000)}</span><strong>${formatMonths(s.sim.hits[1000000])}</strong></div><div class="scenario-milestone"><span>${money(5000000)}</span><strong>${formatMonths(s.sim.hits[5000000])}</strong></div></section>`;}
 
 function renderModal(){
   if(modal.type==='paycheck') return modalWrap('New Paycheck',paycheckForm());
   if(modal.type==='expense') return modalWrap(modal.id?'Edit Expense':'Add Expense',expenseForm(modal.id?state.expenses.find(x=>x.id===modal.id):null));
   if(modal.type==='income') return modalWrap(modal.id?'Edit Income':'Add Income',incomeForm(modal.id?state.incomes.find(x=>x.id===modal.id):null));
+  if(modal.type==='income-routing') return modalWrap('Route Supplemental Income',incomeRoutingView(modal.incomeId));
   if(modal.type==='manual-transfer'){const x=modal.draft?{id:modal.draft.id||'',amount:modal.draft.amount,fromAccountId:modal.draft.from,toAccountId:modal.draft.to,budgetPeriodId:modal.draft.periodId,status:modal.draft.status,plannedDate:modal.draft.date,completedDate:modal.draft.status==='completed'?modal.draft.date:null,_bucketId:modal.draft.bucketId}:modal.id?state.transfers.find(x=>x.id===modal.id):null;return modalWrap(modal.id?'Edit Transfer':'Record Transfer',manualTransferForm(x));}
   if(modal.type==='transfer') return modalWrap('Confirm Transfer',transferConfirm(modal.id));
   if(modal.type==='payday-transfer') return modalWrap('Confirm Payday Transfer',paydayTransferConfirm(modal.periodId,modal.accountId));
@@ -714,13 +889,23 @@ function expenseForm(x=null){
   const catId=x?.categoryId||'food',accountId=x?.accountId||'ctbc',bucketId=x?.fundingBucketId||'';
   return `<form id="expense-form"><input type="hidden" name="id" value="${x?.id||''}"><div class="field"><label>Amount</label><input name="amount" type="number" min="0" step="1" value="${x?.amount||''}" required></div><div class="field"><label>Category</label><select name="category">${state.categories.filter(c=>['fixed','cap','expense_only'].includes(c.ruleType)).map(c=>`<option value="${c.id}" ${c.id===catId?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div><div class="form-grid"><div class="field"><label>Date</label><input name="date" type="date" value="${x?.date||today()}" required></div><div class="field"><label>Account used</label><select name="account">${state.accounts.filter(a=>a.role!=='investment').map(a=>`<option value="${a.id}" ${a.id===accountId?'selected':''}>${esc(a.name)}</option>`).join('')}</select></div></div><div class="field"><label>Funding bucket (optional)</label><select name="fundingBucket"><option value="">Operating cash</option>${state.buckets.filter(b=>b.bucketType!=='restricted').map(b=>`<option value="${b.id}" ${b.id===bucketId?'selected':''}>${esc(b.name)}</option>`).join('')}</select></div><div class="field"><label>Description (optional)</label><input name="description" value="${esc(x?.description||'')}" placeholder="Lunch, rent, electricity..."></div><button class="btn" style="width:100%">${x?'Save Changes':'Save Expense'}</button></form>`;
 }
+function routingTransfersForIncome(incomeId){return state.transfers.filter(t=>!t.deletedAt&&t.sourceIncomeId===incomeId);}
 function incomeForm(x=null){
   const p=currentPeriod(),type=x?.incomeType||'bonus',accountId=x?.accountId||'ctbc',period=x?.budgetPeriodId||p?.id||'';
   if(x&&isClosedPeriod(x.budgetPeriodId))return `<div class="notice"><strong>${monthLabel(x.budgetPeriodId)} is closed.</strong><br>Reopen the month before editing this income entry.</div>`;
   const periods=state.periods.filter(y=>y.state!=='closed'||y.id===period);
   if(!periods.length)return `<div class="empty">Create or reopen a funding month first.</div>`;
-  return `<form id="income-form"><input type="hidden" name="id" value="${x?.id||''}"><div class="field"><label>Amount</label><input name="amount" type="number" min="0" step="1" value="${x?.amount||''}" required></div><div class="field"><label>Income type</label><select name="type">${INCOME_TYPES.map(t=>`<option value="${t[0]}" ${t[0]===type?'selected':''}>${t[1]}</option>`).join('')}</select></div><div class="form-grid"><div class="field"><label>Date received</label><input name="date" type="date" value="${x?.dateReceived||today()}" required></div><div class="field"><label>Budget period</label><select name="period">${periods.map(y=>`<option value="${y.id}" ${y.id===period?'selected':''}>${monthLabel(y.id)}</option>`).join('')}</select></div></div><div class="field"><label>Account</label><select name="account">${state.accounts.filter(a=>a.role!=='investment').map(a=>`<option value="${a.id}" ${a.id===accountId?'selected':''}>${esc(a.name)}</option>`).join('')}</select></div><div class="field"><label>Description</label><input name="description" value="${esc(x?.description||'')}" placeholder="e.g. Camera sale"></div><label><input name="tithe" type="checkbox" ${x?.titheEligible?'checked':''}> Tithe eligible</label><button class="btn" style="width:100%;margin-top:14px">${x?'Save Changes':'Save Income'}</button></form>`;
+  const defaultTithe=x?!!x.titheEligible:['regular_income','bonus'].includes(type);
+  const hasRouting=x?routingTransfersForIncome(x.id).length>0:false;
+  return `<form id="income-form"><input type="hidden" name="id" value="${x?.id||''}"><div class="field"><label>Amount</label><input name="amount" type="number" min="0" step="1" value="${x?.amount||''}" required></div><div class="field"><label>Income type</label><select name="type" id="income-type">${INCOME_TYPES.map(t=>`<option value="${t[0]}" ${t[0]===type?'selected':''}>${t[1]}</option>`).join('')}</select></div><div class="form-grid"><div class="field"><label>Date received</label><input name="date" type="date" value="${x?.dateReceived||today()}" required></div><div class="field"><label>Budget period</label><select name="period">${periods.map(y=>`<option value="${y.id}" ${y.id===period?'selected':''}>${monthLabel(y.id)}</option>`).join('')}</select></div></div><div class="field"><label>Account</label><select name="account">${state.accounts.filter(a=>a.role!=='investment').map(a=>`<option value="${a.id}" ${a.id===accountId?'selected':''}>${esc(a.name)}</option>`).join('')}</select></div><div class="field"><label>Description</label><input name="description" value="${esc(x?.description||'')}" placeholder="e.g. Bonus or camera sale"></div><label class="check-line"><input id="income-tithe" name="tithe" type="checkbox" ${defaultTithe?'checked':''}> Tithe eligible</label>${!x?`<label class="check-line"><input id="income-routing" name="routing" type="checkbox" ${type!=='regular_income'&&type!=='reimbursement'?'checked':''}> Open routing assistant after saving</label>`:''}${hasRouting?`<div class="notice"><strong>This income already has routing records.</strong><br>Delete any uncompleted routing transfers before changing the amount, type or tithe eligibility.</div>`:''}<button class="btn" style="width:100%;margin-top:14px">${x?'Save Changes':'Save Income'}</button></form>`;
 }
+function incomeRoutingView(incomeId){
+  const i=state.incomes.find(x=>x.id===incomeId&&!x.deletedAt);if(!i)return '<div class="empty">Income record not found.</div>';
+  const existing=routingTransfersForIncome(incomeId);if(existing.length)return `<div class="notice"><strong>Routing already exists for this income.</strong><br>${existing.length} routing record${existing.length===1?'':'s'} are already linked to it. Manage planned transfers from Activity.</div>`;
+  const pctValue=Number(state.settings.tithePercent||10),tithe=i.titheEligible?Math.round(Number(i.amount||0)*pctValue/100):0,available=Math.max(0,Number(i.amount||0)-tithe),active=activeGoal(state.goals,state.bucketBalances);
+  return `<div class="notice"><strong>Nothing moves automatically.</strong><br>This assistant creates a clear plan for supplemental income. Physical transfers remain planned until you mark them completed.</div><section class="card routing-summary" style="margin-top:14px">${row('Income',money(i.amount))}${row('Tithe',i.titheEligible?`${money(tithe)} · ${pctValue}%`:'Not applicable')}${row('Available after tithe',money(available))}${row('Current priority',esc(active?.name||'Investments'))}</section><form id="income-routing-form" data-income="${i.id}"><div class="field"><label>What should the after-tithe money do?</label><select name="strategy"><option value="priority">Current wealth priority</option><option value="emergency">Emergency Fund</option><option value="home-trip">Home Travel Fund</option><option value="equipment">Equipment Fund</option><option value="invest">Investments</option><option value="keep">Keep in operating cash</option></select></div><div class="field"><label>Amount to route after tithe</label><input name="routeAmount" type="number" min="0" step="1" max="${Math.round(available)}" value="${Math.round(available)}"></div><div class="sub">Any un-routed remainder stays in the income account as operating cash.</div><button class="btn" style="width:100%;margin-top:14px">Create Routing Plan</button><button class="btn secondary" type="button" style="width:100%;margin-top:8px" data-action="skip-income-routing">Skip for Now</button></form>`;
+}
+
 function manualTransferForm(x=null){
   const p=currentPeriod(),period=x?.budgetPeriodId||p?.id||'';
   if(x&&x.budgetPeriodId&&isClosedPeriod(x.budgetPeriodId))return `<div class="notice"><strong>${monthLabel(x.budgetPeriodId)} is closed.</strong><br>Reopen the month before editing this transfer.</div>`;
@@ -840,7 +1025,9 @@ function settingsView(){
   const lastBackup=state.settings.lastBackupAt?new Date(state.settings.lastBackupAt).toLocaleString():'Never';
   return `<section class="card app-info-card"><div class="split"><div><div class="metric-label">Installed build</div><strong>Wealth OS v${APP_VERSION}</strong><div class="sub">Data model ${DATA_MODEL_VERSION}</div></div><span class="tag good-tag">Local-first</span></div>${row('Last backup',esc(lastBackup))}<div class="actions" style="margin-top:12px"><button class="btn secondary" data-action="export-backup">Export Backup</button><label class="btn secondary">Restore Backup<input id="restore-file" type="file" accept="application/json" hidden></label></div></section>
   <div class="section-title"><h2>Reliability tools</h2><span class="sub">Inspect before correcting</span></div><section class="card"><div class="row"><div><strong>CTBC audit trail</strong><div class="sub">Verified baseline + physical movements + virtual reserves</div></div><button class="btn ghost small" type="button" data-action="account-audit" data-id="ctbc">Open</button></div><div class="row"><div><strong>E.SUN audit trail</strong><div class="sub">Bank movements separated from purpose allocations</div></div><button class="btn ghost small" type="button" data-action="account-audit" data-id="esun">Open</button></div></section>
-  <form id="settings-form"><div class="section-title"><h2>Planning settings</h2></div><div class="form-grid"><div class="field"><label>Forecast salary</label><input name="forecastSalary" type="number" value="${state.settings.forecastSalary}"></div><div class="field"><label>USD/TWD rate</label><input name="usdTwdRate" type="number" step="0.0001" value="${state.settings.usdTwdRate}"></div><div class="field"><label>Raise → wealth (%)</label><input name="wealthRaisePercent" type="number" value="${state.settings.wealthRaisePercent}"></div></div><div class="section-title"><h2>Budget rules</h2></div><div class="notice">Budget-rule changes apply only to funding months created after the change. Existing funding months keep their saved plan.</div>${state.categories.filter(c=>c.ruleType!=='expense_only').map(c=>`<div class="row"><div><strong>${esc(c.name)}</strong><div class="sub">${c.ruleType.replaceAll('_',' ')}</div></div><input name="cat-${c.id}" type="number" step="1" value="${c.defaultAmount}" style="width:120px;padding:9px;border:1px solid #d1d5db;border-radius:9px;text-align:right"></div>`).join('')}<button class="btn" style="width:100%;margin-top:14px">Save Settings</button></form>`;
+  <form id="settings-form"><div class="section-title"><h2>Planning settings</h2></div><div class="form-grid"><div class="field"><label>Fallback forecast salary</label><input name="forecastSalary" type="number" value="${state.settings.forecastSalary}"><div class="sub">Used only when no real paycheck history exists.</div></div><div class="field"><label>USD/TWD rate</label><input name="usdTwdRate" type="number" step="0.0001" value="${state.settings.usdTwdRate}"></div><div class="field"><label>Raise → wealth (%)</label><input name="wealthRaisePercent" type="number" min="0" max="100" value="${state.settings.wealthRaisePercent}"></div></div>
+  <div class="section-title"><h2>Forecast assumptions</h2><span class="sub">Salary growth and returns are independent</span></div><div class="grid g3 scenario-settings"><section class="card nested-card"><strong>Conservative</strong><div class="field"><label>Investment return (%)</label><input name="conservativeInvestmentReturn" type="number" step="0.1" value="${state.settings.conservativeInvestmentReturn??4}"></div><div class="field"><label>Salary growth (%)</label><input name="conservativeSalaryGrowth" type="number" step="0.1" value="${state.settings.conservativeSalaryGrowth??1}"></div></section><section class="card nested-card"><strong>Base</strong><div class="field"><label>Investment return (%)</label><input name="forecastInvestmentReturn" type="number" step="0.1" value="${state.settings.forecastInvestmentReturn??7}"></div><div class="field"><label>Salary growth (%)</label><input name="forecastSalaryGrowth" type="number" step="0.1" value="${state.settings.forecastSalaryGrowth??3}"></div></section><section class="card nested-card"><strong>Aggressive</strong><div class="field"><label>Investment return (%)</label><input name="aggressiveInvestmentReturn" type="number" step="0.1" value="${state.settings.aggressiveInvestmentReturn??9}"></div><div class="field"><label>Salary growth (%)</label><input name="aggressiveSalaryGrowth" type="number" step="0.1" value="${state.settings.aggressiveSalaryGrowth??5}"></div></section></div>
+  <div class="section-title"><h2>Budget rules</h2></div><div class="notice">Budget-rule changes apply only to funding months created after the change. Existing funding months keep their saved plan.</div>${state.categories.filter(c=>c.ruleType!=='expense_only').map(c=>`<div class="row"><div><strong>${esc(c.name)}</strong><div class="sub">${c.ruleType.replaceAll('_',' ')}</div></div><input name="cat-${c.id}" type="number" step="1" value="${c.defaultAmount}" style="width:120px;padding:9px;border:1px solid #d1d5db;border-radius:9px;text-align:right"></div>`).join('')}<button class="btn" style="width:100%;margin-top:14px">Save Settings</button></form>`;
 }
 
 
@@ -900,8 +1087,46 @@ async function commitManualTransfer(){
 async function saveIncome(form){
   const fd=new FormData(form),id=fd.get('id'),type=fd.get('type'),existing=id?state.incomes.find(x=>x.id===id):null,periodId=fd.get('period');
   assertPeriodEditable(periodId||existing?.budgetPeriodId||null);
-  await put('incomes',{...(existing||{}),id:existing?.id||uid('inc'),amount:Number(fd.get('amount')),incomeType:type,dateReceived:fd.get('date'),accountId:fd.get('account'),budgetPeriodId:periodId,description:fd.get('description')||'',titheEligible:fd.get('tithe')==='on',includedInRegularIncomeMetrics:type==='regular_income',createdAt:existing?.createdAt||new Date().toISOString(),updatedAt:new Date().toISOString(),deletedAt:null});modal=null;await load();
+  const amount=Number(fd.get('amount')),titheEligible=fd.get('tithe')==='on';
+  if(existing&&routingTransfersForIncome(existing.id).length){
+    const changed=amount!==Number(existing.amount||0)||type!==existing.incomeType||titheEligible!==!!existing.titheEligible||fd.get('account')!==existing.accountId||periodId!==existing.budgetPeriodId;
+    if(changed)throw new Error('This income already has routing records. Delete any uncompleted routing transfers before changing the amount, type, account, period or tithe eligibility.');
+  }
+  const incomeId=existing?.id||uid('inc');
+  await put('incomes',{...(existing||{}),id:incomeId,amount,incomeType:type,dateReceived:fd.get('date'),accountId:fd.get('account'),budgetPeriodId:periodId,description:fd.get('description')||'',titheEligible,includedInRegularIncomeMetrics:type==='regular_income',createdAt:existing?.createdAt||new Date().toISOString(),updatedAt:new Date().toISOString(),deletedAt:null});
+  if(!existing&&type!=='regular_income'&&fd.get('routing')==='on'){modal={type:'income-routing',incomeId};await load();return;}
+  modal=null;await load();
 }
+async function saveIncomeRouting(form){
+  const incomeId=form.dataset.income,i=state.incomes.find(x=>x.id===incomeId&&!x.deletedAt);if(!i)throw new Error('Income record not found.');
+  assertPeriodEditable(i.budgetPeriodId||null);
+  if(routingTransfersForIncome(incomeId).length)throw new Error('Routing already exists for this income.');
+  const fd=new FormData(form),strategy=fd.get('strategy'),tithePct=Number(state.settings.tithePercent||10),tithe=i.titheEligible?Math.round(Number(i.amount||0)*tithePct/100):0,available=Math.max(0,Number(i.amount||0)-tithe),routeAmount=Number(fd.get('routeAmount')||0);
+  if(routeAmount<0||routeAmount>available+0.5)throw new Error(`After-tithe routing cannot exceed ${money(available)}.`);
+  const routes=[];
+  if(tithe>0)routes.push({accountId:'esun',bucketId:'tithe',amount:tithe,label:'Tithe'});
+  if(strategy!=='keep'&&routeAmount>0.5){
+    if(strategy==='priority'){
+      const allocations=allocateGoalSurplus({amount:routeAmount,goals:state.goals,bucketBalances:state.bucketBalances});
+      for(const a of allocations){if(a.bucketId)routes.push({accountId:bucket(a.bucketId)?.accountId,bucketId:a.bucketId,amount:Number(a.amount||0),label:a.label||bucket(a.bucketId)?.name||'Goal'});else if(a.accountId)routes.push({accountId:a.accountId,bucketId:null,amount:Number(a.amount||0),label:a.label||'Investments'});}
+    }else if(strategy==='invest')routes.push({accountId:'ibkr',bucketId:null,amount:routeAmount,label:'Investments'});
+    else{
+      const targetBucket=bucket(strategy);if(!targetBucket)throw new Error('Selected routing destination is not available.');
+      const g=state.goals.find(x=>x.bucketId===strategy),room=g?Math.max(0,Number(g.targetAmount||0)-goalBal(g)):Infinity;
+      if(Number.isFinite(room)&&routeAmount>room+0.5)throw new Error(`${g.name} only has ${money(room)} remaining to its target.`);
+      routes.push({accountId:targetBucket.accountId,bucketId:strategy,amount:routeAmount,label:targetBucket.name});
+    }
+  }
+  const groups=new Map();for(const r of routes.filter(r=>r.accountId&&r.amount>0.5)){if(!groups.has(r.accountId))groups.set(r.accountId,[]);groups.get(r.accountId).push(r);}
+  const stamp=new Date().toISOString(),date=i.dateReceived||today();
+  for(const [dest,items] of groups){
+    const total=items.reduce((sum,x)=>sum+Number(x.amount||0),0),same=dest===i.accountId,tid=uid('tr');
+    await put('transfers',{id:tid,fromAccountId:i.accountId,toAccountId:dest,amount:total,budgetPeriodId:i.budgetPeriodId,status:same?'completed':'planned',plannedDate:date,completedDate:same?date:null,completedAt:same?stamp:null,transferType:same?'supplemental_income_allocation':'supplemental_income_routing',affectsPhysicalBalance:!same,sourceIncomeId:i.id,systemGenerated:true,createdAt:stamp,updatedAt:stamp});
+    const allocs=items.filter(x=>x.bucketId);if(allocs.length)await bulkPut('transferAllocations',allocs.map(x=>({id:uid('ta'),transferId:tid,bucketId:x.bucketId,amount:Number(x.amount||0),goalId:state.goals.find(g=>g.bucketId===x.bucketId)?.id||null,label:x.label})));
+  }
+  modal=null;await load();
+}
+
 async function completeTransfer(id){
   const t=state.transfers.find(x=>x.id===id);if(!t)return;
   assertPeriodEditable(t.budgetPeriodId||null);
@@ -1050,16 +1275,21 @@ async function deleteTransaction(kind,id){
   if(kind==='transfer')await put('transfers',{...x,deletedAt:new Date().toISOString()});
   await load();
 }
-async function saveSettings(form){const fd=new FormData(form);await put('settings',{...state.settings,forecastSalary:Number(fd.get('forecastSalary')),usdTwdRate:Number(fd.get('usdTwdRate')),operatingBuffer:Number(state.categories.find(c=>c.id==='operating-buffer')?.defaultAmount||3000),wealthRaisePercent:Number(fd.get('wealthRaisePercent')),updatedAt:new Date().toISOString()});for(const c of state.categories){const v=fd.get(`cat-${c.id}`);if(v!==null)await put('categories',{...c,defaultAmount:Number(v),updatedAt:new Date().toISOString()});}const ob=fd.get('cat-operating-buffer');if(ob!==null)await put('settings',{...(await getOne('settings','app')),operatingBuffer:Number(ob),updatedAt:new Date().toISOString()});modal=null;await load();}
+async function saveSettings(form){
+  const fd=new FormData(form);
+  await put('settings',{...state.settings,forecastSalary:Number(fd.get('forecastSalary')),usdTwdRate:Number(fd.get('usdTwdRate')),operatingBuffer:Number(state.categories.find(c=>c.id==='operating-buffer')?.defaultAmount||3000),wealthRaisePercent:Number(fd.get('wealthRaisePercent')),forecastInvestmentReturn:Number(fd.get('forecastInvestmentReturn')),forecastSalaryGrowth:Number(fd.get('forecastSalaryGrowth')),conservativeInvestmentReturn:Number(fd.get('conservativeInvestmentReturn')),conservativeSalaryGrowth:Number(fd.get('conservativeSalaryGrowth')),aggressiveInvestmentReturn:Number(fd.get('aggressiveInvestmentReturn')),aggressiveSalaryGrowth:Number(fd.get('aggressiveSalaryGrowth')),appVersion:APP_VERSION,dataModelVersion:DATA_MODEL_VERSION,updatedAt:new Date().toISOString()});
+  for(const c of state.categories){const v=fd.get(`cat-${c.id}`);if(v!==null)await put('categories',{...c,defaultAmount:Number(v),updatedAt:new Date().toISOString()});}
+  const ob=fd.get('cat-operating-buffer');if(ob!==null)await put('settings',{...(await getOne('settings','app')),operatingBuffer:Number(ob),updatedAt:new Date().toISOString()});
+  modal=null;await load();
+}
 async function backup(){const data=await exportData();const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`wealth-os-backup-${today()}.json`;a.click();URL.revokeObjectURL(a.href);await put('settings',{...state.settings,lastBackupAt:new Date().toISOString()});await load();}
 async function restore(file){const text=await file.text();await importData(JSON.parse(text));modal=null;selectedPeriodId=null;await load();}
 function runScenario(){
-  const salary=Number(document.querySelector('#scenario-salary').value||0),annual=Number(document.querySelector('#scenario-return').value||0)/100,extra=Number(document.querySelector('#scenario-extra').value||0);
-  const p=buildBudgetPlan({income:salary,categories:state.categories,settings:state.settings}),monthly=Math.max(0,p.immediateWealth+extra),em=goal('goal-emergency'),trip=goal('goal-home-trip');
-  const targets=[1000000,5000000,10000000];
-  const sim=simulateWealthStrategy({emergencyStart:Number(state.bucketBalances.emergency||0),travelStart:Number(state.bucketBalances['home-trip']||0),investmentStart:latestInvestmentTwd(),monthlyCapacity:monthly,annualReturn:annual,emergencyUnlock:Number(trip?.prerequisiteAmount||200000),emergencyTarget:Number(em?.targetAmount||300000),travelTarget:Number(trip?.targetAmount||100000),travelMonthly:Number(trip?.monthlyTarget||10000),months:600,milestones:targets});
-  document.querySelector('#scenario-result').innerHTML=`<div class="notice"><strong>${money(monthly)}/month</strong> modeled wealth capacity.<br>Emergency target: <strong>${formatMonths(sim.events.emergencyCompleteMonth)}</strong><br>${money(1000000)}: <strong>${formatMonths(sim.hits[1000000])}</strong> · ${money(5000000)}: <strong>${formatMonths(sim.hits[5000000])}</strong> · ${money(10000000)}: <strong>${formatMonths(sim.hits[10000000])}</strong><br><span class="sub">Return applies to investments only; Emergency Fund cash is modeled at 0%.</span></div>`;
+  const salary=Number(document.querySelector('#scenario-salary').value||0),annual=Number(document.querySelector('#scenario-return').value||0),growth=Number(document.querySelector('#scenario-growth').value||0),extra=Number(document.querySelector('#scenario-extra').value||0);
+  const result=scenarioFor(annual,growth,extra,salary),sim=result.sim;
+  document.querySelector('#scenario-result').innerHTML=`<div class="notice"><strong>${money(result.monthly)}/month</strong> starting modeled wealth capacity.<br>Salary growth: <strong>${growth.toFixed(1)}%</strong> · Investment return: <strong>${annual.toFixed(1)}%</strong><br>Emergency target: <strong>${formatMonths(sim.events.emergencyCompleteMonth)}</strong><br>${money(1000000)}: <strong>${formatMonths(sim.hits[1000000])}</strong> · ${money(5000000)}: <strong>${formatMonths(sim.hits[5000000])}</strong> · ${money(10000000)}: <strong>${formatMonths(sim.hits[10000000])}</strong><br><span class="sub">${Number(state.settings.wealthRaisePercent||75)}% of modeled salary raises is added to wealth capacity. Investment return applies only to investments.</span></div>`;
 }
+
 function bind(){
   document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{tab=b.dataset.tab;render();});
   const ps=document.querySelector('#period-select');if(ps)ps.onchange=()=>{selectedPeriodId=ps.value;render();};
@@ -1067,6 +1297,8 @@ function bind(){
     if(a==='new-paycheck')modal={type:'paycheck'};
     if(a==='add-expense')modal={type:'expense'};
     if(a==='add-income')modal={type:'income'};
+    if(a==='route-income')modal={type:'income-routing',incomeId:b.dataset.id};
+    if(a==='skip-income-routing'){modal=null;return render();}
     if(a==='manual-transfer')modal={type:'manual-transfer'};
     if(a==='complete-transfer')modal={type:'transfer',id:b.dataset.id};
     if(a==='payday-transfer')modal={type:'payday-transfer',periodId:b.dataset.period,accountId:b.dataset.account};
@@ -1111,7 +1343,8 @@ function bind(){
   }catch(err){alert(err.message||String(err));}});
   const pf=document.querySelector('#paycheck-form');if(pf)pf.onsubmit=e=>{e.preventDefault();createPaycheck(pf).catch(err=>alert(err.message));};
   const ef=document.querySelector('#expense-form');if(ef)ef.onsubmit=e=>{e.preventDefault();saveExpense(ef).catch(err=>alert(err.message));};
-  const inf=document.querySelector('#income-form');if(inf)inf.onsubmit=e=>{e.preventDefault();saveIncome(inf).catch(err=>alert(err.message));};
+  const inf=document.querySelector('#income-form');if(inf){inf.onsubmit=e=>{e.preventDefault();saveIncome(inf).catch(err=>alert(err.message));};const it=inf.querySelector('#income-type'),tc=inf.querySelector('#income-tithe'),rc=inf.querySelector('#income-routing');if(it&&!inf.querySelector('input[name=id]').value)it.onchange=()=>{if(tc)tc.checked=['regular_income','bonus'].includes(it.value);if(rc)rc.checked=!['regular_income','reimbursement'].includes(it.value);};}
+  const irf=document.querySelector('#income-routing-form');if(irf)irf.onsubmit=e=>{e.preventDefault();saveIncomeRouting(irf).catch(err=>alert(err.message));};
   const mtf=document.querySelector('#manual-transfer-form');if(mtf)mtf.onsubmit=e=>{e.preventDefault();try{prepareManualTransfer(mtf);}catch(err){alert(err.message);}};
   const inv=document.querySelector('#investment-form');if(inv)inv.onsubmit=e=>{e.preventDefault();saveInvestment(inv).catch(err=>alert(err.message));};
   const arf=document.querySelector('#account-reconcile-form');if(arf)arf.onsubmit=e=>{e.preventDefault();try{prepareAccountReconciliation(arf);}catch(err){alert(err.message);}};

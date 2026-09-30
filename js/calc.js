@@ -149,6 +149,74 @@ export function simulateWealthStrategy({
   return {emergency,travel,investment,coreWealth:emergency+investment,hits,events,snapshots};
 }
 
+
+export function simulateWealthStrategyWithGrowth({
+  emergencyStart=0,
+  travelStart=0,
+  investmentStart=0,
+  monthlyCapacity=0,
+  startingSalary=0,
+  annualSalaryGrowth=0.03,
+  raiseCaptureRate=0.75,
+  annualReturn=0.07,
+  emergencyUnlock=200000,
+  emergencyTarget=300000,
+  travelTarget=100000,
+  travelMonthly=10000,
+  months=600,
+  milestones=[]
+}) {
+  let emergency=Math.max(0,Number(emergencyStart||0));
+  let travel=Math.max(0,Number(travelStart||0));
+  let investment=Math.max(0,Number(investmentStart||0));
+  let capacity=Math.max(0,Number(monthlyCapacity||0));
+  let salary=Math.max(0,Number(startingSalary||0));
+  const salaryGrowth=Math.max(-0.99,Number(annualSalaryGrowth||0));
+  const capture=Math.max(0,Math.min(1,Number(raiseCaptureRate||0)));
+  const r=Math.max(-0.99,Number(annualReturn||0))/12;
+  const hits={};
+  const events={travelUnlockMonth: emergency>=emergencyUnlock?0:null, emergencyCompleteMonth: emergency>=emergencyTarget?0:null, travelCompleteMonth: travel>=travelTarget?0:null};
+  const snapshots=[];
+  const orderedMilestones=[...milestones].sort((a,b)=>a-b);
+
+  const recordHits=(m)=>{
+    const core=emergency+investment;
+    for(const t of orderedMilestones){ if(hits[t]===undefined && core>=t) hits[t]=m; }
+    if(events.travelUnlockMonth===null && emergency>=emergencyUnlock) events.travelUnlockMonth=m;
+    if(events.emergencyCompleteMonth===null && emergency>=emergencyTarget) events.emergencyCompleteMonth=m;
+    if(events.travelCompleteMonth===null && travel>=travelTarget) events.travelCompleteMonth=m;
+  };
+
+  recordHits(0);
+  for(let m=1;m<=months;m++){
+    if(m>1 && (m-1)%12===0 && salary>0){
+      const nextSalary=salary*(1+salaryGrowth);
+      const monthlyRaise=nextSalary-salary;
+      capacity=Math.max(0,capacity+monthlyRaise*capture);
+      salary=nextSalary;
+    }
+    investment=Math.max(0,investment*(1+r));
+    let available=capacity;
+
+    if(emergency>=emergencyUnlock && travel<travelTarget && available>0){
+      const toTravel=Math.min(available,travelMonthly,travelTarget-travel);
+      travel+=toTravel;
+      available-=toTravel;
+    }
+
+    if(emergency<emergencyTarget && available>0){
+      const toEmergency=Math.min(available,emergencyTarget-emergency);
+      emergency+=toEmergency;
+      available-=toEmergency;
+    }
+
+    if(available>0) investment+=available;
+    recordHits(m);
+    if([12,36,60,120].includes(m)) snapshots.push({month:m,coreWealth:emergency+investment,emergency,travel,investment,monthlyCapacity:capacity,salary});
+  }
+  return {emergency,travel,investment,coreWealth:emergency+investment,hits,events,snapshots,endingMonthlyCapacity:capacity,endingSalary:salary};
+}
+
 export function aggregateExpenses(expenses, periodId) {
   const out = {};
   for (const e of expenses.filter(x=>x.budgetPeriodId===periodId && !x.deletedAt)) {

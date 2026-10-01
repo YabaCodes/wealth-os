@@ -9,8 +9,8 @@ let modal=null;
 let selectedPeriodId=null;
 let activityFilter='all';
 let activitySearch='';
-const APP_VERSION='1.7';
-const DATA_MODEL_VERSION=170;
+const APP_VERSION='1.7.1';
+const DATA_MODEL_VERSION=171;
 
 const today=(d=new Date())=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 const esc=s=>String(s??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
@@ -239,6 +239,13 @@ async function migrateV170(){
   await put('settings',{...settings,dataModelVersion:170,appVersion:'1.7',updatedAt:new Date().toISOString()});
 }
 
+async function migrateV171(){
+  const settings=await getOne('settings','app');
+  if(Number(settings?.dataModelVersion||0)>=171) return;
+  // v1.7.1 is a branding/PWA-icon update only. No financial records are modified.
+  await put('settings',{...settings,dataModelVersion:171,appVersion:'1.7.1',updatedAt:new Date().toISOString()});
+}
+
 async function load(){
   await seedIfNeeded();
   await migrateV131();
@@ -249,6 +256,7 @@ async function load(){
   await migrateV160();
   await migrateV161();
   await migrateV170();
+  await migrateV171();
   const keys=['accounts','buckets','categories','goals','periods','incomes','expenses','transfers','transferAllocations','investmentSnapshots','reconciliations','adjustments','monthlyCloses'];
   const vals=await Promise.all(keys.map(getAll));
   keys.forEach((k,i)=>state[k]=vals[i]);

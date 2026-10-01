@@ -1,119 +1,68 @@
-# Wealth OS — v1.7
+# Wealth OS — v1.7.1
 
 A local-first PWA for paycheck allocation, monthly budgeting, account reconciliation, virtual purpose buckets, wealth contributions, goals, investments, month-end close, and personal financial planning.
 
 ## Release focus
 
-v1.7 is the **Month Operations & Data Health** release. It strengthens the end-of-month workflow and makes historical data easier to trust without changing any existing financial balances or transactions during the upgrade.
+v1.7.1 is a **branding / PWA icon update**. It integrates the selected Wealth OS wealth-symbol logo without changing the accounting engine or any financial data.
 
-## What is new in v1.7
+## What is new in v1.7.1
 
-### Guided five-step month close
+### New Wealth OS app icon
 
-The Month-End Review now walks through the close in a fixed order:
+The selected teal/navy wealth-symbol artwork is now used for:
 
-1. Transactions and recurring obligations
-2. Payday allocations
-3. CTBC / E.SUN reconciliation
-4. Month-end sweep
-5. Snapshot and lock
+- iPhone/iPad Home Screen via `apple-touch-icon`
+- PWA manifest icons
+- browser/favicon display
+- Android/other installable PWA surfaces that use the web manifest
 
-The app still blocks closure when required transfers, reconciliation, or sweep work is incomplete. Missing fixed obligations remain visible for explicit review rather than being silently converted into expenses.
+The source artwork is cropped to a full-bleed square before resizing so the operating system can apply its own rounded icon mask without leaving white corner artifacts.
 
-### Rich month-end snapshots
+Included icon assets:
 
-When a month is closed, Wealth OS now stores a richer read-only snapshot containing:
+- `icons/icon-32.png`
+- `icons/icon-180.png`
+- `icons/icon-192.png`
+- `icons/icon-512.png`
+- `icons/icon-1024.png`
 
-- regular and total income
-- expenses
-- Core Wealth contribution and contribution rate
-- ending Core Wealth
-- ending Financial Net Worth
-- CTBC tracked balance
-- E.SUN tracked balance
-- IBKR value in TWD
-- all virtual bucket balances
-- Emergency Fund, Tithe, Home Travel and Electricity Reserve balances
-- FX rate used at close
-- budget plan and category actuals
-- a Data Health summary
+### PWA cache refresh
 
-This makes future trend and year-over-year reporting less dependent on reconstructing old balances from today's ledger.
-
-### Data Health
-
-Settings now includes **Data Health**. It is a read-only diagnostic that checks for:
-
-- missing or stale CTBC/E.SUN reconciliations
-- E.SUN purpose-allocation mismatch
-- negative virtual buckets
-- planned transfers still pending
-- supplemental income that still needs routing
-- exact duplicate-record patterns
-- old funding months that are still open
-- closed months missing a close snapshot
-- stale or missing JSON backup
-
-Data Health never changes or deletes records automatically. It tells you what needs review and links to the relevant account audit where appropriate.
-
-### Funding-month navigation
-
-Month selectors now include older/newer controls so you can move through funding months without reopening the dropdown each time. Month state remains visible in the selector.
-
-### Recurring-obligation clarity
-
-The Budget screen now labels fixed items as **Recurring obligations**. They automatically appear as expectations in each new funding month, but Wealth OS still creates a real expense only when you record the payment. This preserves the rule that planned obligations are not fake spending.
-
-### Forecast transparency
-
-The Forecast screen now shows exactly what the Base forecast is using before presenting milestone dates:
-
-- take-home salary baseline
-- current Emergency Fund
-- starting monthly wealth capacity
-- Emergency Fund target
-- NT$200,000 Home Travel unlock threshold
-- Home Travel monthly routing after unlock
-- current investment balance
-- percentage of future salary raises captured into wealth
-
-It also explicitly states that Emergency Fund cash earns 0% in the model and investment-return assumptions apply only to IBKR.
+The service-worker cache is bumped to `wealth-os-v1-7-1` and includes the new PNG icon assets.
 
 ## Data safety
 
-The v1.7 migration advances the installed build to **Data model 170** and marks existing fixed-budget categories as monthly expected obligations. It does **not** alter:
+The v1.7.1 migration advances the installed build to **Data model 171** only so Settings can confirm the deployed release. It does **not** alter:
 
 - CTBC or E.SUN balances
 - income or expenses
 - transfers
-- purpose allocations
+- virtual allocations
 - reconciliations or adjustments
 - goals
-- existing funding months
-- IBKR snapshots
+- funding months
+- snapshots
+- IBKR records
 
-Existing closed-month snapshots remain valid. New richer snapshot fields are added only when a month is closed under v1.7.
+## Upgrade from v1.7
 
-## Upgrade from v1.6.1
-
-1. Replace the existing repository files with the v1.7 files.
+1. Replace the existing repository files with the v1.7.1 files.
 2. Commit to `main` and wait for GitHub Pages deployment.
-3. Fully close the installed Home Screen PWA.
-4. Reopen it.
-5. Open **Settings** and confirm:
-   - **Wealth OS v1.7**
-   - **Data model 170**
-6. Confirm CTBC, E.SUN, Tithe, Emergency Fund and IBKR values are unchanged.
-7. Open **Settings → Data Health** and review the result.
+3. Fully close and reopen the installed PWA.
+4. Open **Settings** and confirm:
+   - **Wealth OS v1.7.1**
+   - **Data model 171**
+5. Confirm your financial balances are unchanged.
 
-Your IndexedDB data remains on the same GitHub Pages origin.
+### Important for the iPhone Home Screen icon
 
-## Recommended first test
+iOS can keep the old icon cached even after the website updates. If the Home Screen still shows the old `W` icon after deployment, remove only the Home Screen shortcut/app icon and add the site to Home Screen again. Your Wealth OS IndexedDB data remains associated with the same GitHub Pages origin, but exporting a JSON backup first is still recommended before removing/re-adding the PWA.
 
-Do not close the real October month early. Instead:
+## Recommended verification
 
-1. Open **Budget → Month-End Review** and inspect the five-step checklist.
-2. Confirm the snapshot preview matches the current ledger.
-3. Open **Settings → Data Health** and confirm any warnings are understandable and actionable.
-4. Continue using October normally.
-5. At actual month-end, reconcile CTBC and E.SUN, complete the sweep, then save the snapshot and close the month.
+After deployment:
+
+1. Confirm Settings reports v1.7.1 / Data model 171.
+2. Confirm CTBC, E.SUN, Tithe, Emergency Fund, IBKR, and the current funding month are unchanged.
+3. Confirm the new Wealth OS icon appears after re-adding the PWA to the Home Screen if iOS retained the old cached icon.

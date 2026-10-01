@@ -1,8 +1,8 @@
-const CACHE = 'wealth-os-v1-7';
+const CACHE = 'wealth-os-v1-7-1';
 const ASSETS = [
   './', './index.html', './styles.css', './manifest.webmanifest',
   './js/app.js', './js/db.js', './js/calc.js', './js/defaults.js',
-  './icons/icon-192.svg', './icons/icon-512.svg'
+  './icons/icon-32.png', './icons/icon-180.png', './icons/icon-192.png', './icons/icon-512.png'
 ];
 
 self.addEventListener('install', event => {

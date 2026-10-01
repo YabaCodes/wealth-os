@@ -15,13 +15,15 @@ export const DEFAULTS = {
     conservativeSalaryGrowth: 1,
     aggressiveInvestmentReturn: 9,
     aggressiveSalaryGrowth: 5,
-    appVersion: '1.7.2',
-    dataModelVersion: 172
+    appVersion: '1.7.3',
+    dataModelVersion: 173,
+    privacyMode: false
   },
   accounts: [
     {id:'ctbc', name:'CTBC Operating', type:'checking', role:'operating', currency:'TWD', openingBalance:34850, active:true},
     {id:'esun', name:'E.SUN Reserved', type:'savings', role:'reserved', currency:'TWD', openingBalance:55000, active:true},
-    {id:'ibkr', name:'IBKR', type:'brokerage', role:'investment', currency:'USD', openingBalance:3536, active:true}
+    {id:'ibkr', name:'IBKR', type:'brokerage', role:'investment', currency:'USD', openingBalance:3536, active:true},
+    {id:'cash', name:'Cash Wallet', type:'cash', role:'cash', currency:'TWD', openingBalance:0, active:true}
   ],
   buckets: [
     {id:'tithe', name:'Tithe', accountId:'esun', bucketType:'restricted', openingBalance:55000, countsTowardCoreWealth:false, countsTowardNetWorth:false, active:true},

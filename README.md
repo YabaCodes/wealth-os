@@ -1,47 +1,53 @@
-# Wealth OS — v1.7.2
+# Wealth OS — v1.7.3
 
-A local-first PWA for paycheck allocation, budgeting, account reconciliation, purpose buckets, wealth tracking, goals, month close, and financial planning.
+A local-first PWA for budgeting, account reconciliation, cash handling, purpose buckets, wealth tracking, goals, month close, and financial planning.
 
 ## Release focus
 
-v1.7.2 is an **iPhone Home Screen icon cache-busting patch**. It does not change the accounting engine or any financial records.
+v1.7.3 adds **Cash Wallet** and **Privacy Mode**. Existing financial records are not rewritten.
 
-The v1.7.1 artwork was correct, but it reused the same icon filenames (`icon-180.png`, `icon-192.png`, etc.). Safari/iOS can retain those icon URLs aggressively even after the Home Screen web app is removed and added again.
+## Cash Wallet
 
-## What changed
+Cash is treated as a physical account, not an expense category.
 
-### Unique icon URLs
+- **Withdraw Cash:** CTBC Operating → Cash Wallet. Spending impact: NT$0.
+- **Spend Cash:** choose **Cash Wallet** as the account on an expense. Only then does the amount count as spending.
+- **Deposit Cash:** Cash Wallet → CTBC Operating. Income impact: NT$0.
+- Cash Wallet can only move to/from **CTBC Operating** through the dedicated cash controls.
+- You can use **Count Cash** to establish an exact physical-cash baseline when needed.
+- If an ATM fee exists, record the fee separately as a real expense.
 
-The selected Wealth OS logo is now published with completely new filenames:
+Cash Wallet is included in Financial Net Worth because moving money from CTBC to cash does not change total wealth.
 
-- `icons/wealth-os-v172-32.png`
-- `icons/wealth-os-v172-180.png`
-- `icons/wealth-os-v172-192.png`
-- `icons/wealth-os-v172-512.png`
-- `icons/wealth-os-v172-1024.png`
+## Privacy Mode
 
-`index.html` now points the Apple touch icon directly to the new 180 px filename.
+A persistent eye/eye-off control now appears beside Settings.
 
-### New manifest URL
+When Privacy Mode is enabled, displayed currency amounts are masked across the app while labels, dates, percentages, progress bars and statuses remain visible. The preference is stored locally and remains active when the PWA is reopened.
 
-The PWA now uses `manifest-v172.webmanifest` instead of reusing the old manifest URL. The manifest includes 192, 512 and high-resolution 1024 px opaque full-bleed icons and an explicit app `id`.
+Form inputs are not altered, so normal data entry still works.
 
-### New service-worker cache
+## Data model
 
-The cache is now `wealth-os-v1-7-2` and references only the new icon/manifest URLs.
-
-## Data safety
-
-The v1.7.2 migration advances Settings to **Data model 172** only. It does not modify balances, transactions, allocations, reconciliations, goals, months, snapshots, or investment records.
+- App version: **1.7.3**
+- Data model: **173**
+- A zero-balance `Cash Wallet` account is added if it does not already exist.
+- `privacyMode` is added to local Settings.
+- Existing balances, transactions, allocations, reconciliations, goals and funding months are left unchanged.
 
 ## Upgrade
 
-1. Replace/upload the v1.7.2 repository files and commit to `main`.
-2. Wait for GitHub Pages to finish deploying.
-3. Open Wealth OS in normal Safari and refresh once.
-4. Open Settings and confirm **Wealth OS v1.7.2 / Data model 172**.
-5. Optional verification before re-adding: open `icons/wealth-os-v172-180.png` from the deployed site and confirm the teal/navy Wealth OS symbol appears.
-6. Remove the existing Wealth OS Home Screen web app.
-7. From the refreshed Safari page, choose **Add to Home Screen** again.
+1. Replace the repository files with this release and commit to `main`.
+2. Wait for GitHub Pages to deploy.
+3. Fully close and reopen the Home Screen PWA.
+4. Confirm **Settings → Wealth OS v1.7.3 / Data model 173**.
+5. Open **Wealth → Cash Wallet**. It should start at **NT$0** unless you record a withdrawal.
+6. Test Privacy Mode with the eye icon in the top-right header.
 
-Because the icon and manifest URLs are new, iOS should no longer be able to satisfy the request with the old `W` icon cached under the previous filenames.
+## Quick cash test
+
+1. Record a NT$1,000 cash withdrawal.
+2. CTBC should fall by NT$1,000 and Cash Wallet should rise by NT$1,000.
+3. Financial Net Worth should not change.
+4. Record a NT$200 Food expense using Cash Wallet.
+5. Cash Wallet should become NT$800 and expenses should increase by NT$200.

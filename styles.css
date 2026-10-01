@@ -17,7 +17,7 @@ button,input,select,textarea{font:inherit}button{cursor:pointer}
 .section-title{display:flex;align-items:center;justify-content:space-between;margin:22px 2px 10px;gap:10px}.section-title h2{font-size:16px;margin:0}
 .btn{border:0;background:var(--accent);color:white;padding:10px 14px;border-radius:12px;font-weight:700;min-height:44px;display:inline-flex;align-items:center;justify-content:center;gap:7px}
 .btn.secondary{background:#eef2f7;color:#111827}.btn.ghost{background:transparent;color:#111827;border:1px solid var(--line)}.btn.danger{background:#991b1b}.btn.small{padding:7px 10px;border-radius:10px;font-size:13px;min-height:40px}
-.settings-btn .ui-icon{width:16px;height:16px}.actions{display:flex;gap:8px;flex-wrap:wrap}
+.topbar-actions{display:flex;align-items:center;gap:8px}.settings-btn .ui-icon,.privacy-btn .ui-icon{width:16px;height:16px}.actions{display:flex;gap:8px;flex-wrap:wrap}
 .progress{height:10px;background:#e5e7eb;border-radius:999px;overflow:hidden;margin:9px 0}.progress>span{display:block;height:100%;background:#111827;border-radius:999px}
 .row{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:10px 0;border-bottom:1px solid var(--line)}.row:last-child{border-bottom:0}.row strong{font-weight:700}.amount{font-variant-numeric:tabular-nums;font-weight:700}
 .good{color:var(--good)}.warn{color:var(--warn)}.bad{color:var(--bad)}.warn-tag{background:#fff7ed;color:var(--warn)}.good-tag{background:#ecfdf5;color:var(--good)}
@@ -45,10 +45,10 @@ button,input,select,textarea{font:inherit}button{cursor:pointer}
 .account-balance-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.reconcile-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:16px}.reconcile-grid>div{background:#f8fafc;border:1px solid #eef2f7;border-radius:14px;padding:12px;display:flex;flex-direction:column;gap:3px}.reconcile-grid strong{font-variant-numeric:tabular-nums}.account-actions{margin-top:14px}.account-actions .btn{flex:1}.esun-card .metric{margin-top:3px}
 
 @media(max-width:700px){
-  .g2,.g3,.form-grid{grid-template-columns:1fr}.metric{font-size:24px}.shell{padding:14px 12px calc(100px + env(safe-area-inset-bottom,0px))}.card{padding:15px}.budget-line,.list-head{grid-template-columns:1.3fr .75fr .75fr}.budget-line>*:nth-child(3),.list-head>*:nth-child(3){display:none}.tab{font-size:9.5px;min-height:58px}.tab-icon .ui-icon{width:20px;height:20px}.tabs-inner{padding-left:calc(7px + env(safe-area-inset-left,0px));padding-right:calc(7px + env(safe-area-inset-right,0px))}.topbar{align-items:flex-start}.brand p{max-width:230px}.summary-grid{grid-template-columns:1fr}.reconcile-grid{grid-template-columns:1fr 1fr}.activity-action-card{grid-template-columns:42px 1fr auto;padding:13px 14px;min-height:80px}.action-icon{width:42px;height:42px}.settings-btn{padding-left:9px;padding-right:9px}
+  .g2,.g3,.form-grid{grid-template-columns:1fr}.metric{font-size:24px}.shell{padding:14px 12px calc(100px + env(safe-area-inset-bottom,0px))}.card{padding:15px}.budget-line,.list-head{grid-template-columns:1.3fr .75fr .75fr}.budget-line>*:nth-child(3),.list-head>*:nth-child(3){display:none}.tab{font-size:9.5px;min-height:58px}.tab-icon .ui-icon{width:20px;height:20px}.tabs-inner{padding-left:calc(7px + env(safe-area-inset-left,0px));padding-right:calc(7px + env(safe-area-inset-right,0px))}.topbar{align-items:flex-start}.brand p{max-width:230px}.summary-grid{grid-template-columns:1fr}.reconcile-grid{grid-template-columns:1fr 1fr}.activity-action-card{grid-template-columns:42px 1fr auto;padding:13px 14px;min-height:80px}.action-icon{width:42px;height:42px}.settings-btn,.privacy-btn{padding-left:9px;padding-right:9px}
 }
 @media(max-width:390px){
-  .tab{font-size:9px}.tabs-inner{padding-left:10px;padding-right:10px}.tab-icon .ui-icon{width:19px;height:19px}.reconcile-grid{grid-template-columns:1fr}.settings-btn span{display:none}.settings-btn{width:42px;padding:0}.brand p{max-width:245px}
+  .tab{font-size:9px}.tabs-inner{padding-left:10px;padding-right:10px}.tab-icon .ui-icon{width:19px;height:19px}.reconcile-grid{grid-template-columns:1fr}.settings-btn span,.privacy-btn span{display:none}.settings-btn,.privacy-btn{width:42px;padding:0}.brand p{max-width:245px}
 }
 
 /* v1.2 budget dashboard, account health and activity controls */
@@ -220,3 +220,6 @@ button,input,select,textarea{font:inherit}button{cursor:pointer}
 .period-step{width:34px;height:34px;border-radius:10px;border:1px solid var(--line);background:var(--panel);color:var(--text);font-size:22px;line-height:1;display:grid;place-items:center;padding:0}
 .period-step:disabled{opacity:.3}
 .period-nav select{max-width:min(280px,64vw)}
+
+/* v1.7.3 Cash Wallet + Privacy Mode */
+.cash-card .actions{margin-top:14px}.cash-card .notice{border-left-color:#0f766e}.privacy-btn[aria-pressed="true"]{background:#111827;color:white;border-color:#111827}

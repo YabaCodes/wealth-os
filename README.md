@@ -1,68 +1,47 @@
-# Wealth OS — v1.7.1
+# Wealth OS — v1.7.2
 
-A local-first PWA for paycheck allocation, monthly budgeting, account reconciliation, virtual purpose buckets, wealth contributions, goals, investments, month-end close, and personal financial planning.
+A local-first PWA for paycheck allocation, budgeting, account reconciliation, purpose buckets, wealth tracking, goals, month close, and financial planning.
 
 ## Release focus
 
-v1.7.1 is a **branding / PWA icon update**. It integrates the selected Wealth OS wealth-symbol logo without changing the accounting engine or any financial data.
+v1.7.2 is an **iPhone Home Screen icon cache-busting patch**. It does not change the accounting engine or any financial records.
 
-## What is new in v1.7.1
+The v1.7.1 artwork was correct, but it reused the same icon filenames (`icon-180.png`, `icon-192.png`, etc.). Safari/iOS can retain those icon URLs aggressively even after the Home Screen web app is removed and added again.
 
-### New Wealth OS app icon
+## What changed
 
-The selected teal/navy wealth-symbol artwork is now used for:
+### Unique icon URLs
 
-- iPhone/iPad Home Screen via `apple-touch-icon`
-- PWA manifest icons
-- browser/favicon display
-- Android/other installable PWA surfaces that use the web manifest
+The selected Wealth OS logo is now published with completely new filenames:
 
-The source artwork is cropped to a full-bleed square before resizing so the operating system can apply its own rounded icon mask without leaving white corner artifacts.
+- `icons/wealth-os-v172-32.png`
+- `icons/wealth-os-v172-180.png`
+- `icons/wealth-os-v172-192.png`
+- `icons/wealth-os-v172-512.png`
+- `icons/wealth-os-v172-1024.png`
 
-Included icon assets:
+`index.html` now points the Apple touch icon directly to the new 180 px filename.
 
-- `icons/icon-32.png`
-- `icons/icon-180.png`
-- `icons/icon-192.png`
-- `icons/icon-512.png`
-- `icons/icon-1024.png`
+### New manifest URL
 
-### PWA cache refresh
+The PWA now uses `manifest-v172.webmanifest` instead of reusing the old manifest URL. The manifest includes 192, 512 and high-resolution 1024 px opaque full-bleed icons and an explicit app `id`.
 
-The service-worker cache is bumped to `wealth-os-v1-7-1` and includes the new PNG icon assets.
+### New service-worker cache
+
+The cache is now `wealth-os-v1-7-2` and references only the new icon/manifest URLs.
 
 ## Data safety
 
-The v1.7.1 migration advances the installed build to **Data model 171** only so Settings can confirm the deployed release. It does **not** alter:
+The v1.7.2 migration advances Settings to **Data model 172** only. It does not modify balances, transactions, allocations, reconciliations, goals, months, snapshots, or investment records.
 
-- CTBC or E.SUN balances
-- income or expenses
-- transfers
-- virtual allocations
-- reconciliations or adjustments
-- goals
-- funding months
-- snapshots
-- IBKR records
+## Upgrade
 
-## Upgrade from v1.7
+1. Replace/upload the v1.7.2 repository files and commit to `main`.
+2. Wait for GitHub Pages to finish deploying.
+3. Open Wealth OS in normal Safari and refresh once.
+4. Open Settings and confirm **Wealth OS v1.7.2 / Data model 172**.
+5. Optional verification before re-adding: open `icons/wealth-os-v172-180.png` from the deployed site and confirm the teal/navy Wealth OS symbol appears.
+6. Remove the existing Wealth OS Home Screen web app.
+7. From the refreshed Safari page, choose **Add to Home Screen** again.
 
-1. Replace the existing repository files with the v1.7.1 files.
-2. Commit to `main` and wait for GitHub Pages deployment.
-3. Fully close and reopen the installed PWA.
-4. Open **Settings** and confirm:
-   - **Wealth OS v1.7.1**
-   - **Data model 171**
-5. Confirm your financial balances are unchanged.
-
-### Important for the iPhone Home Screen icon
-
-iOS can keep the old icon cached even after the website updates. If the Home Screen still shows the old `W` icon after deployment, remove only the Home Screen shortcut/app icon and add the site to Home Screen again. Your Wealth OS IndexedDB data remains associated with the same GitHub Pages origin, but exporting a JSON backup first is still recommended before removing/re-adding the PWA.
-
-## Recommended verification
-
-After deployment:
-
-1. Confirm Settings reports v1.7.1 / Data model 171.
-2. Confirm CTBC, E.SUN, Tithe, Emergency Fund, IBKR, and the current funding month are unchanged.
-3. Confirm the new Wealth OS icon appears after re-adding the PWA to the Home Screen if iOS retained the old cached icon.
+Because the icon and manifest URLs are new, iOS should no longer be able to satisfy the request with the old `W` icon cached under the previous filenames.

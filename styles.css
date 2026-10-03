@@ -236,3 +236,14 @@ button,input,select,textarea{font:inherit}button{cursor:pointer}
 .pace-metrics{gap:8px;margin-top:4px}.pace-metrics>div{padding:9px 10px;border:1px solid var(--line);border-radius:10px;background:#fbfcfd}.pace-metrics span{display:block;color:var(--muted);font-size:10.5px;margin-bottom:4px}.pace-metrics strong{font-size:13px;font-variant-numeric:tabular-nums}.pace-note{margin-top:10px;color:var(--muted);font-size:11.5px;line-height:1.45}.compact-notice{margin-top:12px}.bad-tag{background:#fff1f0;color:#b42318;border-color:#fecdca}
 @media(max-width:700px){.pace-grid-cards{grid-template-columns:1fr}.pace-metrics{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:390px){.pace-metrics{grid-template-columns:1fr}.pace-bars{grid-template-columns:1fr}}
+
+/* v1.8 special projects + reimbursement settlement */
+.quick-action-grid.project-ready{grid-template-columns:repeat(4,minmax(0,1fr))}
+.project-empty{display:flex;justify-content:space-between;align-items:center;gap:14px}
+.project-strip{padding-top:4px;padding-bottom:4px}.project-strip-row{width:100%;border:0;background:transparent;color:var(--text);display:flex;justify-content:space-between;align-items:center;text-align:left;gap:12px;padding:12px 0;border-bottom:1px solid var(--line)}.project-strip-row:last-child{border-bottom:0}.project-strip-row>span{font-size:24px;color:#94a3b8}
+.project-list{padding-top:4px;padding-bottom:4px}.project-list-row{width:100%;border:0;background:transparent;color:var(--text);display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center;text-align:left;padding:13px 0;border-bottom:1px solid var(--line)}.project-list-row:last-child{border-bottom:0}.project-chevron{font-size:25px;color:#94a3b8}.split.tight{justify-content:flex-start;gap:8px}
+.project-title{margin:0;font-size:18px}.project-summary-grid .metric{font-size:22px}.project-top-actions{flex-wrap:wrap}
+.project-expense-list{padding-top:4px;padding-bottom:4px}.project-expense-line{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:flex-start;padding:13px 0;border-bottom:1px solid var(--line)}.project-expense-line:last-child{border-bottom:0}.project-line-actions{display:flex;gap:8px;align-items:center}.settlement-card .row{padding:9px 0}
+.project-summary-grid strong{font-variant-numeric:tabular-nums}
+@media(max-width:700px){.quick-action-grid.project-ready{grid-template-columns:repeat(2,minmax(0,1fr))}.project-empty{align-items:flex-start;flex-direction:column}.project-empty .btn{width:100%}.project-expense-line{grid-template-columns:1fr}.project-line-actions{justify-content:flex-start}.project-top-actions .btn{flex:1 1 calc(50% - 8px)}}
+@media(max-width:390px){.project-top-actions .btn{flex:1 1 100%}}

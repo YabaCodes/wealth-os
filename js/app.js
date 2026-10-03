@@ -9,8 +9,8 @@ let modal=null;
 let selectedPeriodId=null;
 let activityFilter='all';
 let activitySearch='';
-const APP_VERSION='1.7.3';
-const DATA_MODEL_VERSION=173;
+const APP_VERSION='1.7.4';
+const DATA_MODEL_VERSION=174;
 
 const today=(d=new Date())=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 const esc=s=>String(s??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
@@ -265,6 +265,14 @@ async function migrateV173(){
   await put('settings',{...settings,privacyMode:settings?.privacyMode===true,dataModelVersion:173,appVersion:'1.7.3',updatedAt:new Date().toISOString()});
 }
 
+async function migrateV174(){
+  const settings=await getOne('settings','app');
+  if(Number(settings?.dataModelVersion||0)>=174) return;
+  // v1.7.4 adds current-month budget syncing and spending-pace insights.
+  // No expenses, transfers, reconciliations, allocations or closed-month plans are rewritten.
+  await put('settings',{...settings,applyBudgetChangesToCurrentMonth:settings?.applyBudgetChangesToCurrentMonth!==false,dataModelVersion:174,appVersion:'1.7.4',updatedAt:new Date().toISOString()});
+}
+
 async function load(){
   await seedIfNeeded();
   await migrateV131();
@@ -278,6 +286,7 @@ async function load(){
   await migrateV171();
   await migrateV172();
   await migrateV173();
+  await migrateV174();
   const keys=['accounts','buckets','categories','goals','periods','incomes','expenses','transfers','transferAllocations','investmentSnapshots','reconciliations','adjustments','monthlyCloses'];
   const vals=await Promise.all(keys.map(getAll));
   keys.forEach((k,i)=>state[k]=vals[i]);
@@ -705,7 +714,7 @@ function shell(content){
   bind();
 }
 function nav(){
-  const items=[['home','home','Home'],['budget','budget','Budget'],['transactions','activity','Activity'],['goals','goals','Goals'],['wealth','wealth','Wealth'],['forecast','forecast','Forecast']];
+  const items=[['home','home','Home'],['budget','budget','Budget'],['transactions','activity','Activity'],['goals','goals','Goals'],['wealth','wealth','Wealth'],['forecast','forecast','Insights']];
   return `<nav class="tabs"><div class="tabs-inner">${items.map(([id,ic,label])=>`<button class="tab ${tab===id?'active':''}" data-tab="${id}" aria-label="${label}"><span class="tab-icon">${icon(ic)}</span><span class="tab-label">${label}</span></button>`).join('')}</div></nav>`;
 }
 
@@ -974,6 +983,61 @@ function wealthView(){
 function accountHealthRow(name,value,status,statusClass=''){return `<div class="account-health-row"><div><strong>${esc(name)}</strong><div class="sub">${money(value)}</div></div><span class="tag${statusClass}">${esc(status)}</span></div>`;}
 
 
+
+function monthPaceContext(periodId){
+  if(!periodId)return {days:30,elapsed:0,remaining:30,isCurrent:false,isPast:false,isFuture:false};
+  const [year,month]=periodId.split('-').map(Number),days=new Date(year,month,0).getDate(),currentMonth=today().slice(0,7);
+  let elapsed=0;
+  if(periodId<currentMonth)elapsed=days;
+  else if(periodId===currentMonth)elapsed=Math.min(days,Number(today().slice(8,10))||1);
+  const remaining=Math.max(0,days-elapsed);
+  return {days,elapsed,remaining,isCurrent:periodId===currentMonth,isPast:periodId<currentMonth,isFuture:periodId>currentMonth};
+}
+function spendingPaceStatus({spent,budget,elapsed,days}){
+  if(budget<=0)return {key:'neutral',label:'No cap',detail:'No monthly cap is set.'};
+  if(spent>budget+0.5)return {key:'bad',label:'Over budget',detail:`Already ${money(spent-budget)} above the monthly cap.`};
+  if(elapsed<=0)return {key:'neutral',label:'Not started',detail:'This funding month has not started yet.'};
+  const used=spent/budget,elapsedPct=elapsed/days,pace=elapsedPct>0?used/elapsedPct:0;
+  // Early-month spending is noisy. Use wider bands through day 5 so one purchase does not trigger a harsh forecast.
+  if(elapsed<=5){
+    if(pace<=0.75)return {key:'good',label:'Under pace',detail:'Spending is comfortably below the calendar pace.'};
+    if(pace<=1.30)return {key:'neutral',label:'On track',detail:'Early-month pace is close to the budget path.'};
+    if(pace<=1.70)return {key:'warn',label:'Ahead of pace',detail:'A little fast, but confidence is still low this early.'};
+    return {key:'warn',label:'Watch pace',detail:'Spending is running fast; early-month confidence is still low.'};
+  }
+  if(pace<=0.85)return {key:'good',label:'Under pace',detail:'Current spending is below the calendar budget pace.'};
+  if(pace<=1.10)return {key:'neutral',label:'On track',detail:'Current spending is close to the calendar budget pace.'};
+  if(pace<=1.30)return {key:'warn',label:'Ahead of pace',detail:'Spending is running ahead of the budget path.'};
+  return {key:'bad',label:'Likely over',detail:'At the current pace, this category is likely to finish over budget.'};
+}
+function spendingPaceFor(periodId,line){
+  const ctx=monthPaceContext(periodId),budget=Number(line?.budgetAmount||0);
+  const cutoff=ctx.elapsed?`${periodId}-${String(ctx.elapsed).padStart(2,'0')}`:`${periodId}-00`;
+  const expenses=state.expenses.filter(e=>!e.deletedAt&&e.budgetPeriodId===periodId&&e.categoryId===line.id&&String(e.date||'')<=cutoff);
+  const spent=expenses.reduce((sum,e)=>sum+Number(e.amount||0),0),expected=ctx.days?budget*(ctx.elapsed/ctx.days):0;
+  const projected=ctx.elapsed>0?spent/ctx.elapsed*ctx.days:0,remainingBudget=Math.max(0,budget-spent),safeDaily=ctx.remaining>0?remainingBudget/ctx.remaining:remainingBudget;
+  const status=spendingPaceStatus({spent,budget,elapsed:ctx.elapsed,days:ctx.days});
+  const confidence=ctx.elapsed<=5?'Low':ctx.elapsed<=12?'Developing':ctx.elapsed<ctx.days?'Moderate':'Final';
+  return {...ctx,budget,spent,expected,projected,remainingBudget,safeDaily,status,confidence,expenses};
+}
+function spendingPaceSvg(periodId,line,pace){
+  if(pace.days<=0||pace.budget<=0)return '';
+  const w=320,h=92,pad=8,maxY=Math.max(pace.budget,pace.projected,pace.spent,1)*1.08;
+  const x=d=>pad+((Math.max(0,d)/pace.days)*(w-pad*2)),y=v=>h-pad-(Math.max(0,v)/maxY)*(h-pad*2);
+  const daily=new Map();for(const e of pace.expenses){const d=Number(String(e.date||'').slice(8,10));if(d>=1&&d<=pace.days)daily.set(d,(daily.get(d)||0)+Number(e.amount||0));}
+  let cum=0;const pts=[[0,0]];for(let d=1;d<=pace.elapsed;d++){cum+=daily.get(d)||0;pts.push([d,cum]);}
+  const actual=pts.map(([d,v],i)=>`${i?'L':'M'} ${x(d).toFixed(1)} ${y(v).toFixed(1)}`).join(' ');
+  const projectionEnd=Math.min(maxY,pace.projected);
+  return `<svg class="pace-chart" viewBox="0 0 ${w} ${h}" role="img" aria-label="${esc(line.name)} spending pace"><line class="pace-grid" x1="${pad}" y1="${y(pace.budget)}" x2="${w-pad}" y2="${y(pace.budget)}"/><path class="pace-target" d="M ${x(0)} ${y(0)} L ${x(pace.days)} ${y(pace.budget)}"/><path class="pace-actual" d="${actual}"/>${pace.elapsed>0&&pace.elapsed<pace.days?`<path class="pace-projection" d="M ${x(pace.elapsed)} ${y(pace.spent)} L ${x(pace.days)} ${y(projectionEnd)}"/>`:''}<circle class="pace-dot" cx="${x(pace.elapsed)}" cy="${y(pace.spent)}" r="3.5"/></svg>`;
+}
+function spendingPaceInsights(){
+  const p=currentPeriod();if(!p)return `<div class="notice"><strong>No active funding month.</strong><br>Create a funding month to see spending pace.</div>`;
+  const plan=planFor(p.id),caps=plan.lines.filter(x=>x.ruleType==='cap'&&Number(x.budgetAmount||0)>0),ctx=monthPaceContext(p.id);
+  if(!caps.length)return `<div class="notice"><strong>No flexible caps found.</strong><br>Add capped categories in Settings to use spending pace.</div>`;
+  const cards=caps.map(line=>{const pace=spendingPaceFor(p.id,line),used=pace.budget?pace.spent/pace.budget:0,elapsed=pace.days?pace.elapsed/pace.days:0,tag=pace.status.key==='good'?'good-tag':pace.status.key==='bad'?'bad-tag':pace.status.key==='warn'?'warn-tag':'';return `<section class="card pace-card"><div class="split"><div><strong>${esc(line.name)}</strong><div class="sub">${money(pace.spent)} of ${money(pace.budget)} · ${pct(used)} used</div></div><span class="tag ${tag}">${pace.status.label}</span></div>${spendingPaceSvg(p.id,line,pace)}<div class="pace-bars"><div><div class="split tiny"><span>Budget used</span><span>${pct(used)}</span></div><div class="progress"><span style="width:${Math.min(100,used*100)}%"></span></div></div><div><div class="split tiny"><span>Month elapsed</span><span>${pct(elapsed)}</span></div><div class="progress muted-progress"><span style="width:${Math.min(100,elapsed*100)}%"></span></div></div></div><div class="grid g3 pace-metrics"><div><span>Expected by now</span><strong>${money(pace.expected)}</strong></div><div><span>Projected month-end</span><strong class="${pace.projected>pace.budget?'bad':''}">${money(pace.projected)}</strong></div><div><span>Safe daily from now</span><strong>${pace.remaining>0?money(pace.safeDaily):'—'}</strong></div></div><div class="pace-note">${pace.status.detail} · ${pace.remaining} day${pace.remaining===1?'':'s'} remaining · ${pace.confidence} forecast confidence.</div></section>`;}).join('');
+  return `<div class="pace-summary"><div><strong>${monthLabel(p.id)} spending pace</strong><div class="sub">Day ${ctx.elapsed} of ${ctx.days}. Target pace assumes each capped budget is spread evenly across the month.</div></div></div><div class="pace-grid-cards">${cards}</div><div class="notice compact-notice">Daily pace is most useful for frequent spending such as Food and Transportation. Irregular categories such as Gas or Water can naturally look uneven during the month.</div>`;
+}
+
 function forecastView(){
   const records=historyRecords(),recent=records.slice(-6),current=records.at(-1)||null,previous=records.length>1?records.at(-2):null;
   const year=today().slice(0,4),annual=yearSummary(year),recent3=records.slice(-3),avgRate=recent3.length?recent3.reduce((s,x)=>s+x.contributionRate,0)/recent3.length:0;
@@ -995,8 +1059,11 @@ function forecastView(){
     return {c,avg,cur,budget};
   }).sort((a,b)=>b.avg-a.avg);
   const catHistory=records.length<2?`<div class="notice"><strong>Category trends are still building.</strong><br>After another month, 3-month averages and recurring over/under-budget patterns will appear here.</div>`:`<section class="card insight-list">${catRows.map(x=>`<div class="insight-row"><div><strong>${esc(x.c.name)}</strong><div class="sub">Current ${money(x.cur)} · ${Math.min(3,recent3.length)}-mo avg ${money(x.avg)}</div></div><div class="right"><strong class="${x.avg>x.budget?'bad':x.avg<x.budget*.8?'good':''}">${money(x.budget)}</strong><div class="sub">monthly cap</div></div></div>`).join('')}</section>`;
-  return `<div><h2 style="margin:0">Insights & Forecast</h2><div class="sub">Use actual history to understand the month, then model what comes next.</div></div>
-  <div class="grid g3 summary-grid" style="margin-top:14px">
+  return `<div><h2 style="margin:0">Insights</h2><div class="sub">See whether this month's spending is on pace, then use history and forecasts for longer-term planning.</div></div>
+  <div class="section-title"><h2>Spending pace</h2><span class="sub">Flexible caps vs days elapsed</span></div>
+  ${spendingPaceInsights()}
+  <div class="section-title"><h2>Wealth & history</h2><span class="sub">Contribution and month-to-month trends</span></div>
+  <div class="grid g3 summary-grid">
     <section class="card"><div class="metric-label">Current contribution rate</div><div class="metric">${pct(currentRate)}</div><div class="sub">Core wealth ÷ regular take-home</div></section>
     <section class="card"><div class="metric-label">Recent average</div><div class="metric">${pct(avgRate)}</div><div class="sub">${recent3.length}-month contribution rate</div></section>
     <section class="card"><div class="metric-label">${year} wealth contributed</div><div class="metric">${money(annual.wealth)}</div><div class="sub">Recorded core-wealth contributions</div></section>
@@ -1250,7 +1317,7 @@ function settingsView(){
   <div class="section-title"><h2>Reliability tools</h2><span class="sub">Inspect before correcting</span></div><section class="card"><div class="row"><div><strong>Data Health</strong><div class="sub">Duplicates, stale reconciliations, bucket mismatches and month-state checks</div></div><button class="btn ghost small" type="button" data-action="data-health">Run Check</button></div><div class="row"><div><strong>CTBC audit trail</strong><div class="sub">Verified baseline + physical movements + virtual reserves</div></div><button class="btn ghost small" type="button" data-action="account-audit" data-id="ctbc">Open</button></div><div class="row"><div><strong>E.SUN audit trail</strong><div class="sub">Bank movements separated from purpose allocations</div></div><button class="btn ghost small" type="button" data-action="account-audit" data-id="esun">Open</button></div></section>
   <form id="settings-form"><div class="section-title"><h2>Planning settings</h2></div><div class="form-grid"><div class="field"><label>Fallback forecast salary</label><input name="forecastSalary" type="number" value="${state.settings.forecastSalary}"><div class="sub">Used only when no real paycheck history exists.</div></div><div class="field"><label>USD/TWD rate</label><input name="usdTwdRate" type="number" step="0.0001" value="${state.settings.usdTwdRate}"></div><div class="field"><label>Raise → wealth (%)</label><input name="wealthRaisePercent" type="number" min="0" max="100" value="${state.settings.wealthRaisePercent}"></div></div>
   <div class="section-title"><h2>Forecast assumptions</h2><span class="sub">Salary growth and returns are independent</span></div><div class="grid g3 scenario-settings"><section class="card nested-card"><strong>Conservative</strong><div class="field"><label>Investment return (%)</label><input name="conservativeInvestmentReturn" type="number" step="0.1" value="${state.settings.conservativeInvestmentReturn??4}"></div><div class="field"><label>Salary growth (%)</label><input name="conservativeSalaryGrowth" type="number" step="0.1" value="${state.settings.conservativeSalaryGrowth??1}"></div></section><section class="card nested-card"><strong>Base</strong><div class="field"><label>Investment return (%)</label><input name="forecastInvestmentReturn" type="number" step="0.1" value="${state.settings.forecastInvestmentReturn??7}"></div><div class="field"><label>Salary growth (%)</label><input name="forecastSalaryGrowth" type="number" step="0.1" value="${state.settings.forecastSalaryGrowth??3}"></div></section><section class="card nested-card"><strong>Aggressive</strong><div class="field"><label>Investment return (%)</label><input name="aggressiveInvestmentReturn" type="number" step="0.1" value="${state.settings.aggressiveInvestmentReturn??9}"></div><div class="field"><label>Salary growth (%)</label><input name="aggressiveSalaryGrowth" type="number" step="0.1" value="${state.settings.aggressiveSalaryGrowth??5}"></div></section></div>
-  <div class="section-title"><h2>Budget rules</h2></div><div class="notice">Budget-rule changes apply only to funding months created after the change. Existing funding months keep their saved plan.</div>${state.categories.filter(c=>c.ruleType!=='expense_only').map(c=>`<div class="row"><div><strong>${esc(c.name)}</strong><div class="sub">${c.ruleType.replaceAll('_',' ')}</div></div><input name="cat-${c.id}" type="number" step="1" value="${c.defaultAmount}" style="width:120px;padding:9px;border:1px solid #d1d5db;border-radius:9px;text-align:right"></div>`).join('')}<button class="btn" style="width:100%;margin-top:14px">Save Settings</button></form>`;
+  <div class="section-title"><h2>Budget rules</h2></div><div class="notice">These values become the defaults for future funding months. You can also sync the changed limits into the currently selected open month. Actual expenses, transfers and closed months are never rewritten.</div>${currentPeriod()&&currentPeriod().state!=='closed'?`<label class="sync-budget-option"><input type="checkbox" name="applyCurrentMonth" ${state.settings.applyBudgetChangesToCurrentMonth!==false?'checked':''}><span><strong>Apply changes to ${monthLabel(currentPeriod().id)}</strong><small>Refresh this open month's budget thresholds and plan only. Existing transactions stay exactly as recorded.</small></span></label>`:`<div class="sub" style="margin:10px 0">No open selected funding month is available to sync.</div>`}${state.categories.filter(c=>c.ruleType!=='expense_only').map(c=>`<div class="row"><div><strong>${esc(c.name)}</strong><div class="sub">${c.ruleType.replaceAll('_',' ')}</div></div><input name="cat-${c.id}" type="number" step="1" value="${c.defaultAmount}" style="width:120px;padding:9px;border:1px solid #d1d5db;border-radius:9px;text-align:right"></div>`).join('')}<button class="btn" style="width:100%;margin-top:14px">Save Settings</button></form>`;
 }
 
 
@@ -1512,10 +1579,23 @@ async function deleteTransaction(kind,id){
   await load();
 }
 async function saveSettings(form){
-  const fd=new FormData(form);
-  await put('settings',{...state.settings,forecastSalary:Number(fd.get('forecastSalary')),usdTwdRate:Number(fd.get('usdTwdRate')),operatingBuffer:Number(state.categories.find(c=>c.id==='operating-buffer')?.defaultAmount||3000),wealthRaisePercent:Number(fd.get('wealthRaisePercent')),forecastInvestmentReturn:Number(fd.get('forecastInvestmentReturn')),forecastSalaryGrowth:Number(fd.get('forecastSalaryGrowth')),conservativeInvestmentReturn:Number(fd.get('conservativeInvestmentReturn')),conservativeSalaryGrowth:Number(fd.get('conservativeSalaryGrowth')),aggressiveInvestmentReturn:Number(fd.get('aggressiveInvestmentReturn')),aggressiveSalaryGrowth:Number(fd.get('aggressiveSalaryGrowth')),appVersion:APP_VERSION,dataModelVersion:DATA_MODEL_VERSION,updatedAt:new Date().toISOString()});
-  for(const c of state.categories){const v=fd.get(`cat-${c.id}`);if(v!==null)await put('categories',{...c,defaultAmount:Number(v),updatedAt:new Date().toISOString()});}
-  const ob=fd.get('cat-operating-buffer');if(ob!==null)await put('settings',{...(await getOne('settings','app')),operatingBuffer:Number(ob),updatedAt:new Date().toISOString()});
+  const fd=new FormData(form),stamp=new Date().toISOString(),applyField=form.querySelector('input[name=\"applyCurrentMonth\"]'),syncCurrent=!!applyField&&applyField.checked,selected=currentPeriod();
+  const updatedSettings={...state.settings,forecastSalary:Number(fd.get('forecastSalary')),usdTwdRate:Number(fd.get('usdTwdRate')),wealthRaisePercent:Number(fd.get('wealthRaisePercent')),forecastInvestmentReturn:Number(fd.get('forecastInvestmentReturn')),forecastSalaryGrowth:Number(fd.get('forecastSalaryGrowth')),conservativeInvestmentReturn:Number(fd.get('conservativeInvestmentReturn')),conservativeSalaryGrowth:Number(fd.get('conservativeSalaryGrowth')),aggressiveInvestmentReturn:Number(fd.get('aggressiveInvestmentReturn')),aggressiveSalaryGrowth:Number(fd.get('aggressiveSalaryGrowth')),applyBudgetChangesToCurrentMonth:applyField?syncCurrent:state.settings.applyBudgetChangesToCurrentMonth!==false,appVersion:APP_VERSION,dataModelVersion:DATA_MODEL_VERSION,updatedAt:stamp};
+  const updatedCategories=[];
+  for(const c of state.categories){const v=fd.get(`cat-${c.id}`);updatedCategories.push(v!==null?{...c,defaultAmount:Number(v),updatedAt:stamp}:c);}
+  const ob=fd.get('cat-operating-buffer');if(ob!==null)updatedSettings.operatingBuffer=Number(ob);else updatedSettings.operatingBuffer=Number(updatedCategories.find(c=>c.id==='operating-buffer')?.defaultAmount||3000);
+  await put('settings',updatedSettings);
+  for(const c of updatedCategories)await put('categories',c);
+
+  // Optional current-month sync updates only the open month's plan snapshot. It never edits
+  // transactions, completed transfers, allocations or any closed-month snapshot.
+  if(syncCurrent&&selected&&selected.state!=='closed'){
+    const salary=periodRegularIncome(selected.id),newPlan=buildBudgetPlan({income:salary,categories:updatedCategories,settings:updatedSettings});
+    const preBalances={...state.bucketBalances};
+    for(const b of state.buckets)preBalances[b.id]=Number(preBalances[b.id]||0)-completedAllocationToBucket(selected.id,b.id);
+    const goalAllocs=allocateGoalSurplus({amount:Math.max(0,Math.round(newPlan.immediateWealth)),goals:state.goals,bucketBalances:preBalances});
+    await put('periods',{...selected,planSnapshot:newPlan,paydayRoutingSnapshot:{goalAllocs:goalAllocs.map(a=>({...a})),createdAt:stamp,reason:'budget_sync'},budgetRulesUpdatedAt:stamp,budgetRevision:Number(selected.budgetRevision||0)+1,updatedAt:stamp});
+  }
   modal=null;await load();
 }
 async function backup(){const data=await exportData();const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`wealth-os-backup-${today()}.json`;a.click();URL.revokeObjectURL(a.href);await put('settings',{...state.settings,lastBackupAt:new Date().toISOString()});await load();}

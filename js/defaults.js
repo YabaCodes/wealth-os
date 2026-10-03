@@ -15,9 +15,10 @@ export const DEFAULTS = {
     conservativeSalaryGrowth: 1,
     aggressiveInvestmentReturn: 9,
     aggressiveSalaryGrowth: 5,
-    appVersion: '1.7.3',
-    dataModelVersion: 173,
-    privacyMode: false
+    appVersion: '1.7.4',
+    dataModelVersion: 174,
+    privacyMode: false,
+    applyBudgetChangesToCurrentMonth: true
   },
   accounts: [
     {id:'ctbc', name:'CTBC Operating', type:'checking', role:'operating', currency:'TWD', openingBalance:34850, active:true},
@@ -36,7 +37,7 @@ export const DEFAULTS = {
     {id:'tithe-cat', name:'Tithe', group:'Giving', ruleType:'percentage', defaultAmount:10, active:true, sort:1},
     {id:'rent', name:'Rent', group:'Fixed', ruleType:'fixed', expectedEachMonth:true, defaultAmount:23000, active:true, sort:10},
     {id:'sister-rent', name:"Sister's Rent", group:'Fixed', ruleType:'fixed', expectedEachMonth:true, defaultAmount:7600, active:true, sort:11},
-    {id:'family-support', name:'Family Support', group:'Fixed', ruleType:'fixed', expectedEachMonth:true, defaultAmount:3500, active:true, sort:12},
+    {id:'family-support', name:'Family Support', group:'Fixed', ruleType:'fixed', expectedEachMonth:true, defaultAmount:3600, active:true, sort:12},
     {id:'sim', name:'SIM', group:'Fixed', ruleType:'fixed', expectedEachMonth:true, defaultAmount:799, active:true, sort:13},
     {id:'wifi', name:'Wi-Fi', group:'Fixed', ruleType:'fixed', expectedEachMonth:true, defaultAmount:899, active:true, sort:14},
     {id:'gym', name:'Gym', group:'Fixed', ruleType:'fixed', expectedEachMonth:true, defaultAmount:1088, active:true, sort:15},

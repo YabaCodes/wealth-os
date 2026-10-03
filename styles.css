@@ -223,3 +223,16 @@ button,input,select,textarea{font:inherit}button{cursor:pointer}
 
 /* v1.7.3 Cash Wallet + Privacy Mode */
 .cash-card .actions{margin-top:14px}.cash-card .notice{border-left-color:#0f766e}.privacy-btn[aria-pressed="true"]{background:#111827;color:white;border-color:#111827}
+
+
+/* v1.7.4 current-month budget sync + spending pace insights */
+.sync-budget-option{display:flex;align-items:flex-start;gap:11px;margin:12px 0 6px;padding:13px 14px;border:1px solid var(--line);border-radius:12px;background:#fafbfc;cursor:pointer}
+.sync-budget-option input{width:18px;height:18px;margin-top:2px;accent-color:#111827;flex:0 0 auto}
+.sync-budget-option span{display:flex;flex-direction:column;gap:3px}.sync-budget-option small{color:var(--muted);line-height:1.35}
+.pace-summary{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:10px}.pace-grid-cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.pace-card{overflow:hidden}.pace-chart{display:block;width:100%;height:96px;margin:12px 0 6px;overflow:visible}
+.pace-target{stroke:#aeb7c5;stroke-width:1.6;stroke-dasharray:5 4;fill:none}.pace-actual{stroke:#111827;stroke-width:2.4;fill:none}.pace-projection{stroke:#657386;stroke-width:1.7;stroke-dasharray:3 4;fill:none}.pace-grid{stroke:#e5e9f0;stroke-width:1}.pace-dot{fill:#111827}
+.pace-bars{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:4px 0 12px}.split.tiny{font-size:11px;color:var(--muted);margin-bottom:5px}.muted-progress span{background:#8b95a5!important}
+.pace-metrics{gap:8px;margin-top:4px}.pace-metrics>div{padding:9px 10px;border:1px solid var(--line);border-radius:10px;background:#fbfcfd}.pace-metrics span{display:block;color:var(--muted);font-size:10.5px;margin-bottom:4px}.pace-metrics strong{font-size:13px;font-variant-numeric:tabular-nums}.pace-note{margin-top:10px;color:var(--muted);font-size:11.5px;line-height:1.45}.compact-notice{margin-top:12px}.bad-tag{background:#fff1f0;color:#b42318;border-color:#fecdca}
+@media(max-width:700px){.pace-grid-cards{grid-template-columns:1fr}.pace-metrics{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:390px){.pace-metrics{grid-template-columns:1fr}.pace-bars{grid-template-columns:1fr}}

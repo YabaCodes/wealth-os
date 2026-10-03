@@ -1,53 +1,35 @@
-# Wealth OS — v1.7.3
+# Wealth OS — v1.7.4
 
-A local-first PWA for budgeting, account reconciliation, cash handling, purpose buckets, wealth tracking, goals, month close, and financial planning.
+## Budget Sync + Spending Insights
 
-## Release focus
+v1.7.4 keeps the v1.7.3 accounting model intact and adds two usability improvements.
 
-v1.7.3 adds **Cash Wallet** and **Privacy Mode**. Existing financial records are not rewritten.
+### Current-month budget sync
+- Settings remain the default template for future funding months.
+- When the selected funding month is still open, **Apply changes to the current month** can refresh that month's saved budget plan.
+- Existing expenses, income, transfers, reconciliations, allocations and closed months are never rewritten.
+- This fixes cases such as raising Family Support from NT$3,500 to NT$3,600 while October is already active.
+- Rebuilding the open plan also refreshes the planned immediate-wealth target; completed transfers remain historical facts and are not reversed automatically.
 
-## Cash Wallet
+### Spending pace insights
+The bottom **Forecast** tab is now labeled **Insights** and starts with a Spending Pace section for flexible capped categories. Each category shows:
+- monthly cap and spending to date
+- budget used vs month elapsed
+- expected spend by today on an even calendar pace
+- current run-rate projection for month end
+- safe daily spending for the remaining days
+- status: Under pace, On track, Ahead of pace, Watch pace, Likely over, or Over budget
+- forecast confidence that is deliberately softer during the first five days of the month
+- a compact cumulative-spending chart showing target pace, actual spending, and current projection
 
-Cash is treated as a physical account, not an expense category.
+Daily pace is directional for irregular categories such as Gas or Water; it is most useful for recurring flexible spending such as Food and Transportation.
 
-- **Withdraw Cash:** CTBC Operating → Cash Wallet. Spending impact: NT$0.
-- **Spend Cash:** choose **Cash Wallet** as the account on an expense. Only then does the amount count as spending.
-- **Deposit Cash:** Cash Wallet → CTBC Operating. Income impact: NT$0.
-- Cash Wallet can only move to/from **CTBC Operating** through the dedicated cash controls.
-- You can use **Count Cash** to establish an exact physical-cash baseline when needed.
-- If an ATM fee exists, record the fee separately as a real expense.
+### Release metadata
+- App version: **1.7.4**
+- Data model: **174**
+- Service-worker cache: **wealth-os-v1-7-4**
+- Manifest: **manifest-v174.webmanifest**
+- No automatic financial-record migrations are performed.
 
-Cash Wallet is included in Financial Net Worth because moving money from CTBC to cash does not change total wealth.
-
-## Privacy Mode
-
-A persistent eye/eye-off control now appears beside Settings.
-
-When Privacy Mode is enabled, displayed currency amounts are masked across the app while labels, dates, percentages, progress bars and statuses remain visible. The preference is stored locally and remains active when the PWA is reopened.
-
-Form inputs are not altered, so normal data entry still works.
-
-## Data model
-
-- App version: **1.7.3**
-- Data model: **173**
-- A zero-balance `Cash Wallet` account is added if it does not already exist.
-- `privacyMode` is added to local Settings.
-- Existing balances, transactions, allocations, reconciliations, goals and funding months are left unchanged.
-
-## Upgrade
-
-1. Replace the repository files with this release and commit to `main`.
-2. Wait for GitHub Pages to deploy.
-3. Fully close and reopen the Home Screen PWA.
-4. Confirm **Settings → Wealth OS v1.7.3 / Data model 173**.
-5. Open **Wealth → Cash Wallet**. It should start at **NT$0** unless you record a withdrawal.
-6. Test Privacy Mode with the eye icon in the top-right header.
-
-## Quick cash test
-
-1. Record a NT$1,000 cash withdrawal.
-2. CTBC should fall by NT$1,000 and Cash Wallet should rise by NT$1,000.
-3. Financial Net Worth should not change.
-4. Record a NT$200 Food expense using Cash Wallet.
-5. Cash Wallet should become NT$800 and expenses should increase by NT$200.
+### Upgrade
+Replace the repository files with this package, commit to `main`, wait for GitHub Pages to deploy, then fully close and reopen the installed PWA. Confirm **Settings → Wealth OS v1.7.4 / Data model 174**.

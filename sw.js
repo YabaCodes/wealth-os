@@ -1,6 +1,6 @@
-const CACHE = 'wealth-os-v1-8';
+const CACHE = 'wealth-os-v1-8-1';
 const ASSETS = [
-  './', './index.html', './styles.css', './manifest-v180.webmanifest',
+  './', './index.html', './styles.css', './manifest-v181.webmanifest',
   './js/app.js', './js/db.js', './js/calc.js', './js/defaults.js',
   './icons/wealth-os-v173-32.png', './icons/wealth-os-v173-180.png', './icons/wealth-os-v173-192.png', './icons/wealth-os-v173-512.png', './icons/wealth-os-v173-1024.png'
 ];

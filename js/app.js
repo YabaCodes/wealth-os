@@ -9,13 +9,15 @@ let modal=null;
 let selectedPeriodId=null;
 let activityFilter='all';
 let activitySearch='';
-const APP_VERSION='1.8';
-const DATA_MODEL_VERSION=180;
+const APP_VERSION='1.8.1';
+const DATA_MODEL_VERSION=181;
 const PROJECT_CATEGORIES=['Hotel','Car Rental','Food','Gas','Transport','Business','Other'];
 const PROJECT_CURRENCIES=['EUR','TWD','USD','GBP','CHF','JPY'];
 
 const today=(d=new Date())=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 const esc=s=>String(s??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
+const privateValue=value=>`<span class="privacy-sensitive">${value}</span>`;
+const privateMoney=value=>privateValue(money(value));
 const nextMonthId=(dateStr)=>{const d=new Date(`${dateStr}T12:00:00`);return `${d.getFullYear()+(d.getMonth()===11?1:0)}-${String((d.getMonth()+1)%12+1).padStart(2,'0')}`;};
 
 async function migrateV131(){
@@ -286,6 +288,15 @@ async function migrateV180(){
   await put('settings',{...settings,dataModelVersion:180,appVersion:'1.8',updatedAt:new Date().toISOString()});
 }
 
+async function migrateV181(){
+  const settings=await getOne('settings','app');
+  if(Number(settings?.dataModelVersion||0)>=181) return;
+  // v1.8.1 narrows Privacy Mode to sensitive balances and wealth totals.
+  // Budgets, spending/activity amounts and special-project expenses remain visible.
+  // No financial records are modified.
+  await put('settings',{...settings,dataModelVersion:181,appVersion:'1.8.1',updatedAt:new Date().toISOString()});
+}
+
 async function load(){
   await seedIfNeeded();
   await migrateV131();
@@ -301,6 +312,7 @@ async function load(){
   await migrateV173();
   await migrateV174();
   await migrateV180();
+  await migrateV181();
   const keys=['accounts','buckets','categories','goals','periods','incomes','expenses','transfers','transferAllocations','investmentSnapshots','reconciliations','adjustments','monthlyCloses','projects','projectExpenses','projectSettlements'];
   const vals=await Promise.all(keys.map(getAll));
   keys.forEach((k,i)=>state[k]=vals[i]);
@@ -719,20 +731,24 @@ function applyPrivacyMask(){
   if(!state.settings?.privacyMode) return;
   const detect=/(NT\$|US\$|\$)\s*-?[\d,]+(?:\.\d+)?/;
   const replace=/(NT\$|US\$|\$)\s*-?[\d,]+(?:\.\d+)?/g;
-  const walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT,{acceptNode(node){
-    const p=node.parentElement;
-    if(!p||['SCRIPT','STYLE','INPUT','TEXTAREA','SELECT','OPTION'].includes(p.tagName)) return NodeFilter.FILTER_REJECT;
-    return detect.test(node.nodeValue||'')?NodeFilter.FILTER_ACCEPT:NodeFilter.FILTER_REJECT;
-  }});
-  const nodes=[];while(walker.nextNode())nodes.push(walker.currentNode);
-  for(const node of nodes)node.nodeValue=(node.nodeValue||'').replace(replace,'$1••••');
+  const nodes=new Set();
+  const collect=scope=>{
+    const walker=document.createTreeWalker(scope,NodeFilter.SHOW_TEXT,{acceptNode(node){
+      const p=node.parentElement;
+      if(!p||['SCRIPT','STYLE','INPUT','TEXTAREA','SELECT','OPTION'].includes(p.tagName)) return NodeFilter.FILTER_REJECT;
+      return detect.test(node.nodeValue||'')?NodeFilter.FILTER_ACCEPT:NodeFilter.FILTER_REJECT;
+    }});
+    while(walker.nextNode()) nodes.add(walker.currentNode);
+  };
+  root.querySelectorAll('.privacy-sensitive,.privacy-all-money').forEach(collect);
+  for(const node of nodes) node.nodeValue=(node.nodeValue||'').replace(replace,'$1••••');
 }
 
 function shell(content){
   const footer=tab==='transactions'?'':'<p class="footer-note">Local-first financial planning. Transfers are not expenses; virtual buckets track purpose independently of bank balances.</p>';
   const hidden=state.settings?.privacyMode===true;
   root.innerHTML=`<main class="shell">
-    <header class="topbar"><div class="brand"><h1>Wealth OS</h1><p>Budget deliberately. Build wealth automatically.</p></div><div class="topbar-actions"><button class="btn ghost small privacy-btn" data-action="privacy-toggle" aria-label="${hidden?'Show':'Hide'} financial amounts" aria-pressed="${hidden}">${icon(hidden?'eyeOff':'eye')}<span>${hidden?'Show':'Hide'}</span></button><button class="btn ghost small settings-btn" data-action="settings">${icon('settings')}<span>Settings</span></button></div></header>
+    <header class="topbar"><div class="brand"><h1>Wealth OS</h1><p>Budget deliberately. Build wealth automatically.</p></div><div class="topbar-actions"><button class="btn ghost small privacy-btn" data-action="privacy-toggle" aria-label="${hidden?'Show':'Hide'} sensitive balances" aria-pressed="${hidden}">${icon(hidden?'eyeOff':'eye')}<span>${hidden?'Show':'Hide'}</span></button><button class="btn ghost small settings-btn" data-action="settings">${icon('settings')}<span>Settings</span></button></div></header>
     ${content}
     ${footer}
   </main>${nav()}${modal?renderModal():''}`;
@@ -792,22 +808,22 @@ function homeView(){
   const social=plan.lines.find(x=>x.id==='dating-social'), socialSpent=expTotals['dating-social']||0;
   return `<div class="split"><div><span class="tag">${monthLabel(p.id)}</span></div>${periodSelector()}</div>
   <div class="grid g3 summary-grid" style="margin-top:12px">
-    <section class="card"><div class="metric-label">Core Wealth</div><div class="metric">${money(state.wealth.coreWealth)}</div><div class="sub">Long-term wealth base</div></section>
-    <section class="card"><div class="metric-label">Financial Net Worth</div><div class="metric">${money(state.wealth.financialNetWorth)}</div><div class="sub">All financial assets, tithe excluded</div></section>
-    <section class="card"><div class="metric-label">Non-Core Funds</div><div class="metric">${money(nonCore)}</div><div class="sub">Operating cash + planned-use funds</div></section>
+    <section class="card"><div class="metric-label">Core Wealth</div><div class="metric">${privateMoney(state.wealth.coreWealth)}</div><div class="sub">Long-term wealth base</div></section>
+    <section class="card"><div class="metric-label">Financial Net Worth</div><div class="metric">${privateMoney(state.wealth.financialNetWorth)}</div><div class="sub">All financial assets, tithe excluded</div></section>
+    <section class="card"><div class="metric-label">Non-Core Funds</div><div class="metric">${privateMoney(nonCore)}</div><div class="sub">Operating cash + planned-use funds</div></section>
   </div>
-  <section class="card" style="margin-top:14px"><div class="split"><div><div class="metric-label">Emergency Fund</div><strong>${money(eb)} / ${money(em?.targetAmount||300000)}</strong></div><span class="tag">${pct(ep)}</span></div><div class="progress"><span style="width:${Math.min(100,ep*100)}%"></span></div><div class="sub">Current wealth priority: ${esc(active?.name||'No active goal')}</div></section>
+  <section class="card" style="margin-top:14px"><div class="split"><div><div class="metric-label">Emergency Fund</div><strong>${privateMoney(eb)} / ${money(em?.targetAmount||300000)}</strong></div><span class="tag">${pct(ep)}</span></div><div class="progress"><span style="width:${Math.min(100,ep*100)}%"></span></div><div class="sub">Current wealth priority: ${esc(active?.name||'No active goal')}</div></section>
   <div class="grid g3" style="margin-top:14px">
-    <section class="card"><div class="metric-label">Income</div><div class="metric">${money(plan.salary)}</div><div class="sub">Exact regular income entered</div></section>
+    <section class="card"><div class="metric-label">Income</div><div class="metric">${privateMoney(plan.salary)}</div><div class="sub">Exact regular income entered</div></section>
     <section class="card"><div class="metric-label">Spent</div><div class="metric">${money(spent)}</div><div class="sub">Actual expenses only</div></section>
-    <section class="card"><div class="metric-label">Wealth contributed</div><div class="metric">${money(core)}</div><div class="sub">${pct(contributionRate)} of take-home</div></section>
+    <section class="card"><div class="metric-label">Wealth contributed</div><div class="metric">${privateMoney(core)}</div><div class="sub">${pct(contributionRate)} of take-home</div></section>
   </div>
   <div class="section-title"><h2>Flexible budget</h2><span class="sub">Potential month-end sweep ${money(sweep.available)}</span></div>
   <section class="card">${budgetMini('Food',food?.budgetAmount||0,foodSpent)}${budgetMini('Dating / Social',social?.budgetAmount||0,socialSpent)}</section>
-  <div class="section-title"><h2>Next action</h2></div><section class="card hero-action"><div class="metric-label">${actionText}</div><div class="metric">${actionMetric}</div><p class="sub">${actionSub}</p>${action}</section>
+  <div class="section-title"><h2>Next action</h2></div><section class="card hero-action"><div class="metric-label">${actionText}</div><div class="metric">${privateValue(actionMetric)}</div><p class="sub">${actionSub}</p>${action}</section>
   ${homeQuickCapture(p)}
   <div class="section-title"><h2>Monthly flow</h2></div><section class="card">
-    ${row('Planned immediate wealth',money(Math.max(0,plan.immediateWealth)))}${row('Completed goal/reserve funding',money(goalFunding))}${row('Current sweep available',money(sweep.available))}
+    ${row('Planned immediate wealth',privateMoney(Math.max(0,plan.immediateWealth)))}${row('Completed goal/reserve funding',privateMoney(goalFunding))}${row('Current sweep available',privateMoney(sweep.available))}
     <div class="actions" style="margin-top:12px"><button class="btn secondary" data-action="add-income">Add Income</button><button class="btn secondary" data-action="month-close">Month-End Review</button></div>
   </section>`;
 }
@@ -826,7 +842,7 @@ function budgetMini(name,budget,actual){const r=budget-actual;const u=budget?Mat
 function row(label,value){return `<div class="row"><span>${label}</span><span class="amount">${value}</span></div>`;}
 function wealthStrip(){
   const nonCore=state.wealth.financialNetWorth-state.wealth.coreWealth;
-  return `<div class="grid g3 summary-grid" style="margin-top:14px"><section class="card"><div class="metric-label">Core Wealth</div><div class="metric">${money(state.wealth.coreWealth)}</div><div class="sub">Long-term wealth base</div></section><section class="card"><div class="metric-label">Financial Net Worth</div><div class="metric">${money(state.wealth.financialNetWorth)}</div><div class="sub">Tithe excluded</div></section><section class="card"><div class="metric-label">Non-Core Funds</div><div class="metric">${money(nonCore)}</div><div class="sub">Operating cash + planned-use funds</div></section></div>`;
+  return `<div class="grid g3 summary-grid" style="margin-top:14px"><section class="card"><div class="metric-label">Core Wealth</div><div class="metric">${privateMoney(state.wealth.coreWealth)}</div><div class="sub">Long-term wealth base</div></section><section class="card"><div class="metric-label">Financial Net Worth</div><div class="metric">${privateMoney(state.wealth.financialNetWorth)}</div><div class="sub">Tithe excluded</div></section><section class="card"><div class="metric-label">Non-Core Funds</div><div class="metric">${privateMoney(nonCore)}</div><div class="sub">Operating cash + planned-use funds</div></section></div>`;
 }
 
 
@@ -843,11 +859,11 @@ function budgetView(){
   return `<div class="split"><div><h2 style="margin:0">Budget</h2><div class="sub">${monthLabel(p.id)} · Plan vs actual</div></div>${periodSelector()}</div>
   ${lock}
   <div class="budget-overview" style="margin-top:14px">
-    ${budgetKpi('Income',money(plan.salary),'Exact take-home')}
+    ${budgetKpi('Income',privateMoney(plan.salary),'Exact take-home')}
     ${budgetKpi('Fixed',`${money(fixedActual)} / ${money(plan.fixed)}`,`${money(Math.max(0,plan.fixed-fixedActual))} remaining`)}
     ${budgetKpi('Flexible',`${money(flexActual)} / ${money(plan.caps)}`,`${money(plan.caps-flexActual)} remaining`,flexActual>plan.caps)}
     ${budgetKpi('Reserves',`${money(reserveFunded)} / ${money(plan.sinking)}`,'Completed funding')}
-    ${budgetKpi('Wealth',`${money(wealthDone)} / ${money(Math.max(0,plan.immediateWealth))}`,'Completed core-wealth transfers')}
+    ${budgetKpi('Wealth',`${privateMoney(wealthDone)} / ${privateMoney(Math.max(0,plan.immediateWealth))}`,'Completed core-wealth transfers')}
     ${budgetKpi('Buffer',money(plan.buffer),`Potential sweep ${money(sweep.available)}`)}
   </div>
   <div class="section-title"><h2>Monthly flow</h2><span class="sub">What this paycheck is doing</span></div>
@@ -857,8 +873,8 @@ function budgetView(){
     ${row('Flexible spending',`${money(flexActual)} / ${money(plan.caps)}`)}
     ${row('Reserve funding',`${money(reserveFunded)} / ${money(plan.sinking)}`)}
     ${row('Operating buffer',money(plan.buffer))}
-    ${row('Immediate wealth capacity',money(Math.max(0,plan.immediateWealth)))}
-    ${row('Potential month-end sweep',money(sweep.available))}
+    ${row('Immediate wealth capacity',privateMoney(Math.max(0,plan.immediateWealth)))}
+    ${row('Potential month-end sweep',privateMoney(sweep.available))}
   </section>
   ${fixedObligationsView(p.id,plan,totals,closed)}
   ${budgetGroup('Fixed',lines,p.id)}
@@ -991,10 +1007,10 @@ function goalsView(){
     if(g.id==='goal-equipment')rule='Paused unless you deliberately activate it';
     let paceText=goalPaceText(g);
     if(g.id==='goal-home-trip'&&status.key==='waiting')paceText=`Expected unlock: ${dateAfterMonths(strategyForecast.sim.events.travelUnlockMonth)}`;
-    return `<section class="card goal-card"><div class="split"><div><strong>${esc(g.name)}</strong><div class="sub">${esc(rule)}</div></div><span class="tag ${status.className}">${status.label}</span></div><div class="goal-metric-row"><div><div class="metric">${money(b)}</div><div class="sub">${money(remaining)} remaining</div></div><div class="right"><strong>${pct(p)}</strong><div class="sub">of ${money(target)}</div></div></div><div class="progress"><span style="width:${p*100}%"></span></div><div class="goal-pace">${esc(paceText)}</div>${g.targetDate?`<div class="sub">Target date: ${esc(g.targetDate)}</div>`:''}<div class="actions goal-actions"><button class="btn secondary" data-action="goal-contribution" data-id="${g.id}">Add Contribution</button><button class="btn ghost" data-action="edit-goal" data-id="${g.id}">Edit Goal</button></div></section>`;
+    return `<section class="card goal-card"><div class="split"><div><strong>${esc(g.name)}</strong><div class="sub">${esc(rule)}</div></div><span class="tag ${status.className}">${status.label}</span></div><div class="goal-metric-row"><div><div class="metric">${privateMoney(b)}</div><div class="sub">${privateMoney(remaining)} remaining</div></div><div class="right"><strong>${pct(p)}</strong><div class="sub">of ${privateMoney(target)}</div></div></div><div class="progress"><span style="width:${p*100}%"></span></div><div class="goal-pace">${esc(paceText)}</div>${g.targetDate?`<div class="sub">Target date: ${esc(g.targetDate)}</div>`:''}<div class="actions goal-actions"><button class="btn secondary" data-action="goal-contribution" data-id="${g.id}">Add Contribution</button><button class="btn ghost" data-action="edit-goal" data-id="${g.id}">Edit Goal</button></div></section>`;
   }).join('');
   return `<div><h2 style="margin:0">Goals</h2><div class="sub">Your wealth priorities, pace and planned-use funds.</div></div>
-  <section class="card strategy-card" style="margin-top:14px"><div class="split"><div><div class="metric-label">Current routing strategy</div><strong>${esc(active?.name||'Core cash goals complete')}</strong></div><div class="right"><strong>${money(pace)}</strong><div class="sub">recent monthly core-wealth pace</div></div></div><div class="strategy-steps"><span class="${emergencyBal<200000?'active-step':''}">1. Emergency to ${money(200000)}</span><span class="${emergencyBal>=200000&&travelBal<(travel?.targetAmount||100000)?'active-step':''}">2. Home Travel ${money(travel?.monthlyTarget||10000)}/mo + continue Emergency</span><span class="${emergencyBal>=(emergency?.targetAmount||300000)?'active-step':''}">3. After Emergency target, remaining surplus becomes investable</span></div></section>
+  <section class="card strategy-card" style="margin-top:14px"><div class="split"><div><div class="metric-label">Current routing strategy</div><strong>${esc(active?.name||'Core cash goals complete')}</strong></div><div class="right"><strong>${privateMoney(pace)}</strong><div class="sub">recent monthly core-wealth pace</div></div></div><div class="strategy-steps"><span class="${emergencyBal<200000?'active-step':''}">1. Emergency to ${money(200000)}</span><span class="${emergencyBal>=200000&&travelBal<(travel?.targetAmount||100000)?'active-step':''}">2. Home Travel ${money(travel?.monthlyTarget||10000)}/mo + continue Emergency</span><span class="${emergencyBal>=(emergency?.targetAmount||300000)?'active-step':''}">3. After Emergency target, remaining surplus becomes investable</span></div></section>
   <div class="grid g2 goals-grid" style="margin-top:14px">${cards}</div>`;
 }
 
@@ -1015,7 +1031,7 @@ function wealthView(){
     else {esStatus='Allocation needed';esStatusClass=' warn-tag';}
   }
   const allocationText=es.allocationOk?'Complete':es.unassigned>0?`${money(es.unassigned)} unassigned`:`${money(Math.abs(es.unassigned))} over-allocated`;
-  return `<div><h2 style="margin:0">Wealth</h2><div class="sub">Physical accounts and virtual purpose ledgers</div></div>
+  return `<div class="privacy-all-money"><div><h2 style="margin:0">Wealth</h2><div class="sub">Physical accounts and virtual purpose ledgers</div></div>
   <div class="grid g2" style="margin-top:14px"><section class="card"><div class="metric-label">Core Wealth</div><div class="metric">${money(state.wealth.coreWealth)}</div><div class="sub">Long-term capital only</div></section><section class="card"><div class="metric-label">Financial Net Worth</div><div class="metric">${money(state.wealth.financialNetWorth)}</div><div class="sub">Tithe excluded · includes cash on hand</div></section></div>
 
   <div class="section-title"><h2>Account health</h2><span class="sub">Match Wealth OS to real money</span></div>
@@ -1049,7 +1065,7 @@ function wealthView(){
     <div class="actions account-actions"><button class="btn secondary" data-action="account-reconcile" data-id="esun">Update Balance</button><button class="btn ghost" data-action="account-audit" data-id="esun">Audit Trail</button><button class="btn ghost" data-action="esun-reallocate">Reallocate Purpose</button><button class="btn ghost" data-action="account-adjustment" data-id="esun">Add Adjustment</button></div>
   </section>
   <div class="section-title"><h2>E.SUN virtual composition</h2><span class="sub">Purpose ledger</span></div><section class="card">${state.buckets.filter(b=>b.accountId==='esun').map(b=>row(b.name,money(state.bucketBalances[b.id]||0))).join('')}<div class="row"><strong>Virtual total</strong><strong class="amount">${money(es.virtualTotal)}</strong></div>${!es.allocationOk?`<div class="row"><strong>${es.unassigned>0?'Unassigned':'Over-allocated'}</strong><strong class="amount ${es.unassigned<0?'bad':'warn'}">${es.unassigned>0?'+':''}${money(es.unassigned)}</strong></div>`:''}</section>
-  <div class="section-title"><h2>Investments</h2></div><section class="card">${row('IBKR current value',money(latestInvestmentTwd()))}${row('USD/TWD rate',Number(fx).toFixed(2))}<div class="actions" style="margin-top:12px"><button class="btn secondary" data-action="investment-snapshot">Update IBKR Value</button></div></section>`;
+  <div class="section-title"><h2>Investments</h2></div><section class="card">${row('IBKR current value',money(latestInvestmentTwd()))}${row('USD/TWD rate',Number(fx).toFixed(2))}<div class="actions" style="margin-top:12px"><button class="btn secondary" data-action="investment-snapshot">Update IBKR Value</button></div></section></div>`;
 }
 
 function accountHealthRow(name,value,status,statusClass=''){return `<div class="account-health-row"><div><strong>${esc(name)}</strong><div class="sub">${money(value)}</div></div><span class="tag${statusClass}">${esc(status)}</span></div>`;}
@@ -1120,9 +1136,9 @@ function forecastView(){
   const currentRate=current?.contributionRate||0;
   const netWorthRecords=records.filter(x=>x.financialNetWorth!==null),coreRecords=records.filter(x=>x.coreWealth!==null);
   const compare=previous&&current?`<section class="card comparison-card">
-    ${comparisonLine('Income',current.totalIncome,previous.totalIncome,false)}
+    ${comparisonLine('Income',current.totalIncome,previous.totalIncome,false,false,true)}
     ${comparisonLine('Spending',current.expenses,previous.expenses,true)}
-    ${comparisonLine('Core wealth contributed',current.wealthContribution,previous.wealthContribution,false)}
+    ${comparisonLine('Core wealth contributed',current.wealthContribution,previous.wealthContribution,false,false,true)}
     ${comparisonLine('Contribution rate',current.contributionRate,previous.contributionRate,false,true)}
   </section>`:`<div class="notice"><strong>Monthly comparison needs one more funding month.</strong><br>Once two months exist, Wealth OS will show what changed in income, spending and wealth contributions.</div>`;
   const flexCats=state.categories.filter(c=>c.ruleType==='cap');
@@ -1138,38 +1154,38 @@ function forecastView(){
   <div class="grid g3 summary-grid">
     <section class="card"><div class="metric-label">Current contribution rate</div><div class="metric">${pct(currentRate)}</div><div class="sub">Core wealth ÷ regular take-home</div></section>
     <section class="card"><div class="metric-label">Recent average</div><div class="metric">${pct(avgRate)}</div><div class="sub">${recent3.length}-month contribution rate</div></section>
-    <section class="card"><div class="metric-label">${year} wealth contributed</div><div class="metric">${money(annual.wealth)}</div><div class="sub">Recorded core-wealth contributions</div></section>
+    <section class="card"><div class="metric-label">${year} wealth contributed</div><div class="metric">${privateMoney(annual.wealth)}</div><div class="sub">Recorded core-wealth contributions</div></section>
   </div>
 
   <div class="section-title"><h2>Monthly comparison</h2><span class="sub">Latest vs previous funding month</span></div>${compare}
 
   <div class="section-title"><h2>Contribution history</h2><span class="sub">Completed core-wealth transfers</span></div>
-  <section class="card">${recent.length?contributionBars(recent):'<div class="empty compact-empty"><strong>No funding-month history yet.</strong></div>'}</section>
+  <section class="card privacy-all-money">${recent.length?contributionBars(recent):'<div class="empty compact-empty"><strong>No funding-month history yet.</strong></div>'}</section>
 
   <div class="section-title"><h2>Core wealth trend</h2><span class="sub">Month-end snapshots + current month</span></div>
-  <section class="card">${coreRecords.length>=2?trendSvg(coreRecords,'coreWealth'):`<div class="empty compact-empty"><strong>Not enough snapshots yet.</strong><span>Close another month to build a meaningful wealth trend.</span></div>`}</section>
+  <section class="card privacy-all-money">${coreRecords.length>=2?trendSvg(coreRecords,'coreWealth'):`<div class="empty compact-empty"><strong>Not enough snapshots yet.</strong><span>Close another month to build a meaningful wealth trend.</span></div>`}</section>
 
   <div class="section-title"><h2>Flexible spending trends</h2><span class="sub">Recent behavior vs your caps</span></div>${catHistory}
 
   <div class="section-title"><h2>${year} recorded summary</h2><span class="sub">Only data entered in Wealth OS</span></div>
   <div class="grid g2 annual-grid">
-    ${insightKpi('Income',annual.income,'All recorded income')}
+    ${insightKpi('Income',annual.income,'All recorded income',true)}
     ${insightKpi('Expenses',annual.expenses,'Actual spending')}
-    ${insightKpi('Tithe contributed',annual.tithe,'Net Tithe additions · purpose reallocations excluded')}
-    ${insightKpi('Emergency added',annual.emergency,'Completed Emergency contributions')}
-    ${insightKpi('Invested',annual.investments,'Transfers into IBKR')}
-    ${insightKpi('Net-worth change',annual.netWorthChange===null?'—':signedMoney(annual.netWorthChange),annual.netWorthChange===null?'Need 2 recorded snapshots':'From first to latest recorded snapshot')}
+    ${insightKpi('Tithe contributed',annual.tithe,'Net Tithe additions · purpose reallocations excluded',true)}
+    ${insightKpi('Emergency added',annual.emergency,'Completed Emergency contributions',true)}
+    ${insightKpi('Invested',annual.investments,'Transfers into IBKR',true)}
+    ${insightKpi('Net-worth change',annual.netWorthChange===null?'—':signedMoney(annual.netWorthChange),annual.netWorthChange===null?'Need 2 recorded snapshots':'From first to latest recorded snapshot',true)}
   </div>
 
   <div class="section-title"><h2>Forecast assumptions</h2><span class="sub">What the base forecast is actually using</span></div>
   <section class="card forecast-assumptions">
-    ${row('Take-home salary baseline',money(salary))}
-    ${row('Current Emergency Fund',money(state.bucketBalances.emergency||0))}
-    ${row('Starting monthly wealth capacity',money(base.monthly))}
+    ${row('Take-home salary baseline',privateMoney(salary))}
+    ${row('Current Emergency Fund',privateMoney(state.bucketBalances.emergency||0))}
+    ${row('Starting monthly wealth capacity',privateMoney(base.monthly))}
     ${row('Home Travel unlock threshold',money(goal('goal-home-trip')?.prerequisiteAmount||200000))}
     ${row('Emergency Fund target',money(goal('goal-emergency')?.targetAmount||300000))}
     ${row('Home Travel monthly routing after unlock',money(goal('goal-home-trip')?.monthlyTarget||10000))}
-    ${row('Current investments',money(latestInvestmentTwd()))}
+    ${row('Current investments',privateMoney(latestInvestmentTwd()))}
     ${row('Raise captured to wealth',`${Number(state.settings.wealthRaisePercent||75)}%`)}
     <div class="sub" style="margin-top:10px">Emergency cash earns 0% in the model. Investment-return assumptions apply only to IBKR. When Home Travel unlocks, its monthly target temporarily reduces what flows to the Emergency Fund.</div>
   </section>
@@ -1184,12 +1200,12 @@ function forecastView(){
   <section class="card forecast-events">${row(`Home Travel unlock · Emergency ${money(goal('goal-home-trip')?.prerequisiteAmount||200000)}`,formatMonths(base.sim.events.travelUnlockMonth))}${row(`Emergency Fund complete · ${money(goal('goal-emergency')?.targetAmount||300000)}`,formatMonths(base.sim.events.emergencyCompleteMonth))}${row('Home Travel funded',formatMonths(base.sim.events.travelCompleteMonth))}${base.targets.map(t=>row(money(t),formatMonths(base.sim.hits[t]))).join('')}</section>
 
   <div class="section-title"><h2>Long-range checkpoints</h2><span class="sub">Base scenario; return applies only to investments</span></div>
-  <div class="grid g2 forecast-checkpoints">${base.sim.snapshots.map(x=>`<section class="card"><div class="metric-label">Year ${x.month/12}</div><div class="metric">${money(x.coreWealth)}</div><div class="sub">Emergency ${money(x.emergency)} · Investments ${money(x.investment)}</div><div class="sub">Modeled salary ${money(x.salary)}</div></section>`).join('')}</div>
+  <div class="grid g2 forecast-checkpoints privacy-all-money">${base.sim.snapshots.map(x=>`<section class="card"><div class="metric-label">Year ${x.month/12}</div><div class="metric">${money(x.coreWealth)}</div><div class="sub">Emergency ${money(x.emergency)} · Investments ${money(x.investment)}</div><div class="sub">Modeled salary ${money(x.salary)}</div></section>`).join('')}</div>
 
   <div class="section-title"><h2>Scenario lab</h2></div><section class="card"><div class="notice">Test take-home salary, annual salary growth, investment return, or an extra monthly wealth contribution. This never changes your real budget.</div><div class="form-grid" style="margin-top:12px"><div class="field"><label>Take-home salary</label><input id="scenario-salary" type="number" value="${Math.round(salary)}"></div><div class="field"><label>Annual salary growth (%)</label><input id="scenario-growth" type="number" step="0.1" value="${Number(state.settings.forecastSalaryGrowth||3)}"></div><div class="field"><label>Annual investment return (%)</label><input id="scenario-return" type="number" step="0.1" value="${Number(state.settings.forecastInvestmentReturn||7)}"></div><div class="field"><label>Extra monthly wealth contribution</label><input id="scenario-extra" type="number" step="1" value="0"></div></div><button class="btn" data-action="run-scenario">Run Scenario</button><div id="scenario-result" style="margin-top:12px"></div></section>`;
 }
-function insightKpi(label,value,sub){return `<section class="card insight-kpi"><div class="metric-label">${esc(label)}</div><div class="kpi-value">${typeof value==='number'?money(value):value}</div><div class="sub">${esc(sub)}</div></section>`;}
-function comparisonLine(label,current,previous,lowerIsBetter=false,isPercent=false){const delta=Number(current||0)-Number(previous||0),good=lowerIsBetter?delta<0:delta>0,bad=lowerIsBetter?delta>0:delta<0;const value=isPercent?pct(current):money(current),deltaText=isPercent?`${delta>0?'+':''}${(delta*100).toFixed(1)} pp`:signedMoney(delta);return `<div class="comparison-line"><div><strong>${esc(label)}</strong><div class="sub">Previous ${isPercent?pct(previous):money(previous)}</div></div><div class="right"><strong>${value}</strong><div class="sub ${good?'good':bad?'bad':''}">${deltaText}</div></div></div>`;}
+function insightKpi(label,value,sub,sensitive=false){const shown=typeof value==='number'?money(value):value;return `<section class="card insight-kpi"><div class="metric-label">${esc(label)}</div><div class="kpi-value">${sensitive?privateValue(shown):shown}</div><div class="sub">${esc(sub)}</div></section>`;}
+function comparisonLine(label,current,previous,lowerIsBetter=false,isPercent=false,sensitive=false){const delta=Number(current||0)-Number(previous||0),good=lowerIsBetter?delta<0:delta>0,bad=lowerIsBetter?delta>0:delta<0;const value=isPercent?pct(current):money(current),deltaText=isPercent?`${delta>0?'+':''}${(delta*100).toFixed(1)} pp`:signedMoney(delta);const prevValue=isPercent?pct(previous):money(previous);const shownValue=sensitive?privateValue(value):value,shownPrev=sensitive?privateValue(prevValue):prevValue,shownDelta=sensitive?privateValue(deltaText):deltaText;return `<div class="comparison-line"><div><strong>${esc(label)}</strong><div class="sub">Previous ${shownPrev}</div></div><div class="right"><strong>${shownValue}</strong><div class="sub ${good?'good':bad?'bad':''}">${shownDelta}</div></div></div>`;}
 function scenarioCard(label,s,featured=false){return `<section class="card scenario-card ${featured?'featured':''}"><div class="split"><strong>${esc(label)}</strong>${featured?'<span class="tag good-tag">Base</span>':''}</div><div class="scenario-assumptions">${s.returnPct}% investment return · ${s.growthPct}% salary growth</div><div class="scenario-milestone"><span>Emergency complete</span><strong>${formatMonths(s.sim.events.emergencyCompleteMonth)}</strong></div><div class="scenario-milestone"><span>${money(1000000)}</span><strong>${formatMonths(s.sim.hits[1000000])}</strong></div><div class="scenario-milestone"><span>${money(5000000)}</span><strong>${formatMonths(s.sim.hits[5000000])}</strong></div></section>`;}
 
 function renderModal(){
@@ -1269,15 +1285,15 @@ function monthCloseView(){
   if(p.state==='closed'){
     const accounts=closeRecord?.endingAccountBalances||{};
     return `<div class="notice"><strong>${monthLabel(p.id)} is closed.</strong><br>This month-end snapshot is read-only until you intentionally reopen the month.</div>
-    <div class="grid g2" style="margin-top:14px"><section class="card"><div class="metric-label">Expenses</div><div class="metric">${money(closeRecord?.expenses??totalExpenses(p.id))}</div></section><section class="card"><div class="metric-label">Core wealth contributed</div><div class="metric">${money(closeRecord?.wealthContribution??completedCoreWealth(p.id))}</div></section></div>
+    <div class="grid g2" style="margin-top:14px"><section class="card"><div class="metric-label">Expenses</div><div class="metric">${money(closeRecord?.expenses??totalExpenses(p.id))}</div></section><section class="card"><div class="metric-label">Core wealth contributed</div><div class="metric">${privateMoney(closeRecord?.wealthContribution??completedCoreWealth(p.id))}</div></section></div>
     <div class="section-title"><h2>Saved month-end snapshot</h2><span class="tag good-tag">Locked</span></div><section class="card">
       ${row('Closed',esc((closeRecord?.closedAt||p.closedAt||'').slice(0,10)))}
-      ${row('Ending Core Wealth',money(closeRecord?.endingCoreWealth??state.wealth.coreWealth))}
-      ${row('Ending Financial Net Worth',money(closeRecord?.endingFinancialNetWorth??state.wealth.financialNetWorth))}
-      ${row('CTBC',money(accounts.ctbc??closeRecord?.ctbcActual??0))}
-      ${row('E.SUN',money(accounts.esun??closeRecord?.esunActual??0))}
-      ${row('Cash Wallet',money(accounts.cash??0))}
-      ${row('IBKR (TWD)',money(accounts.ibkrTwd??0))}
+      ${row('Ending Core Wealth',privateMoney(closeRecord?.endingCoreWealth??state.wealth.coreWealth))}
+      ${row('Ending Financial Net Worth',privateMoney(closeRecord?.endingFinancialNetWorth??state.wealth.financialNetWorth))}
+      ${row('CTBC',privateMoney(accounts.ctbc??closeRecord?.ctbcActual??0))}
+      ${row('E.SUN',privateMoney(accounts.esun??closeRecord?.esunActual??0))}
+      ${row('Cash Wallet',privateMoney(accounts.cash??0))}
+      ${row('IBKR (TWD)',privateMoney(accounts.ibkrTwd??0))}
     </section><button class="btn secondary" style="width:100%;margin-top:14px" data-action="reopen-period" data-id="${p.id}">Reopen Month</button>`;
   }
   const fixedText=c.missingFixed.length?`${c.missingFixed.length} fixed obligation${c.missingFixed.length===1?'':'s'} not fully recorded`:'All fixed obligations recorded';
@@ -1294,7 +1310,7 @@ function monthCloseView(){
   else if(c.sweep.available>0.5) action=`<button class="btn" style="width:100%;margin-top:14px" data-action="create-sweep">Create ${money(c.sweep.available)} Sweep Transfer</button>`;
   else if(!c.fundingOk||!c.bankOk) action=`<div class="notice" style="margin-top:14px">Resolve the funding and reconciliation steps above before closing the month.</div>`;
   else action=`${c.missingFixed.length?`<div class="notice" style="margin-top:14px"><strong>Review fixed obligations.</strong><br>${fixedText}. You can close only after confirming this is intentional.</div>`:''}<button class="btn" style="width:100%;margin-top:14px" data-action="close-period">Save Snapshot & Close ${monthLabel(p.id)}</button>`;
-  const snapshotRows=`${row('Income',money(periodAllIncome(p.id)))}${row('Expenses',money(totalExpenses(p.id)))}${row('Core wealth contributed',money(completedCoreWealth(p.id)))}${row('Ending Core Wealth',money(state.wealth.coreWealth))}${row('Ending Financial Net Worth',money(state.wealth.financialNetWorth))}${row('CTBC tracked',money(c.ct.actual))}${row('E.SUN tracked',money(c.es.actual))}${row('Cash Wallet',money(accountSnapshot('cash').actual))}${row('IBKR',money(latestInvestmentTwd()))}`;
+  const snapshotRows=`${row('Income',privateMoney(periodAllIncome(p.id)))}${row('Expenses',money(totalExpenses(p.id)))}${row('Core wealth contributed',privateMoney(completedCoreWealth(p.id)))}${row('Ending Core Wealth',privateMoney(state.wealth.coreWealth))}${row('Ending Financial Net Worth',privateMoney(state.wealth.financialNetWorth))}${row('CTBC tracked',privateMoney(c.ct.actual))}${row('E.SUN tracked',privateMoney(c.es.actual))}${row('Cash Wallet',privateMoney(accountSnapshot('cash').actual))}${row('IBKR',privateMoney(latestInvestmentTwd()))}`;
   const healthText=health.critical?`${health.critical} critical Data Health issue${health.critical===1?'':'s'}`:health.warn?`${health.warn} Data Health warning${health.warn===1?'':'s'}`:'No Data Health warnings';
   return `<div class="grid g2"><section class="card"><div class="metric-label">Unused flexible + buffer</div><div class="metric">${money(c.sweep.grossUnused)}</div></section><section class="card"><div class="metric-label">Overspending deficits</div><div class="metric ${c.sweep.deficits?'bad':''}">${money(c.sweep.deficits)}</div></section></div>
   <section class="card" style="margin-top:14px"><div class="metric-label">Available month-end sweep</div><div class="metric">${money(c.sweep.available)}</div><div class="sub">Only this funding month is included; next-month income is excluded.</div></section>
@@ -1349,7 +1365,7 @@ function accountAuditView(accountId){
     return `<div class="audit-line"><div><strong>${physical?'Bank transfer + purpose':'Virtual allocation only'}</strong><div class="sub">${esc(t.completedDate||t.plannedDate||'')} · ${esc(allocText)}</div>${ev.reversedBy?`<div class="sub good">Reversed by ${esc(ev.reversedBy.completedDate||ev.reversedBy.plannedDate||'later record')}</div>`:''}</div><div class="right"><span class="tag ${physical?'':'good-tag'}">${physical?'physical + virtual':'virtual only'}</span>${canReversePurposeEvent(ev)?`<button class="text-btn danger-text" data-action="reverse-allocation" data-id="${t.id}">Reverse</button>`:''}</div></div>`;
   }).join(''):`<div class="empty compact-empty"><strong>No purpose-allocation history.</strong><span>Virtual bucket changes will appear here.</span></div>`;
   const buckets=state.buckets.filter(b=>b.accountId===accountId),crossDiff=Number(snap.rawExpected??snap.actual)-Number(audit.tracked||0);
-  return `<div class="notice"><strong>Audit view is read-only except explicit reversals.</strong><br>Physical money movements and virtual-purpose changes are shown separately so one cannot be mistaken for the other.</div>
+  return `<div class="privacy-all-money"><div class="notice"><strong>Audit view is read-only except explicit reversals.</strong><br>Physical money movements and virtual-purpose changes are shown separately so one cannot be mistaken for the other.</div>
   ${Math.abs(crossDiff)>=0.5?`<div class="notice danger-notice" style="margin-top:12px"><strong>Historical ledger differs from the verified bank trail by ${crossDiff>0?'+':''}${money(crossDiff)}.</strong><br>The verified bank baseline remains authoritative. Use the trail below to identify the historical record; do not create a compensating transaction just to force the old raw ledger to match.</div>`:''}
   <section class="card audit-summary" style="margin-top:14px">
     ${row('Verified baseline',money(audit.baseline))}
@@ -1362,7 +1378,7 @@ function accountAuditView(accountId){
   <div class="section-title"><h2>Physical bank trail</h2><span class="sub">Changes the bank balance</span></div><section class="card audit-list">${physical}</section>
   ${buckets.length?`<div class="section-title"><h2>Current purpose buckets</h2><span class="sub">Does not move bank cash</span></div><section class="card">${buckets.map(b=>row(b.name,money(state.bucketBalances[b.id]||0))).join('')}</section>`:''}
   <div class="section-title"><h2>Purpose-allocation history</h2><span class="sub">Physical and virtual effects labeled separately</span></div><section class="card audit-list">${purpose}</section>
-  ${accountId==='esun'?`<button class="btn secondary" style="width:100%;margin-top:14px" data-action="esun-reallocate">Reallocate E.SUN Purpose</button>`:''}`;
+  ${accountId==='esun'?`<button class="btn secondary" style="width:100%;margin-top:14px" data-action="esun-reallocate">Reallocate E.SUN Purpose</button>`:''}</div>`;
 }
 function esunReallocationForm(){
   const buckets=state.buckets.filter(b=>b.accountId==='esun'&&Number(state.bucketBalances[b.id]||0)>0);
@@ -1372,7 +1388,7 @@ function esunReallocationForm(){
 }
 function manualTransferReview(){
   const d=modal.draft||{},from=physicalAccount(d.from),to=physicalAccount(d.to),b=d.bucketId?bucket(d.bucketId):null;
-  return `<div class="notice"><strong>${d.status==='completed'?'Completed bank movement':'Planned bank movement'}.</strong><br>${d.status==='completed'?'Confirm only if the money has already moved in your bank.':'This will not affect balances until you later mark it completed.'}</div><section class="card" style="margin-top:14px">${row('Physical · '+(from?.name||d.from),`−${money(d.amount)}`)}${row('Physical · '+(to?.name||d.to),`+${money(d.amount)}`)}${b?row('Virtual · '+b.name,`+${money(d.amount)}`):row('Virtual allocation','None')}${row('Spending impact',money(0))}${row('Date',esc(d.date))}</section><div class="actions" style="margin-top:14px"><button class="btn" data-action="confirm-manual-transfer">Confirm & Save</button><button class="btn secondary" data-action="manual-transfer-back">Go Back</button></div>`;
+  return `<div class="notice"><strong>${d.status==='completed'?'Completed bank movement':'Planned bank movement'}.</strong><br>${d.status==='completed'?'Confirm only if the money has already moved in your bank.':'This will not affect balances until you later mark it completed.'}</div><section class="card" style="margin-top:14px">${row('Physical · '+(from?.name||d.from),`−${money(d.amount)}`)}${row('Physical · '+(to?.name||d.to),`+${money(d.amount)}`)}${b?row('Virtual · '+b.name,`+${money(d.amount)}`):row('Virtual allocation','None')}${row('Spending impact',money(0))}${row('Date',esc(d.date))}</section><div class="actions" style="margin-top:14px"><button class="btn" data-action="confirm-manual-transfer">Confirm & Save</button><button class="btn secondary" data-action="manual-transfer-back">Go Back</button></div></div>`;
 }
 
 function deleteFundingMonthView(periodId){
@@ -1390,7 +1406,7 @@ function settingsView(){
   const lastBackup=state.settings.lastBackupAt?new Date(state.settings.lastBackupAt).toLocaleString():'Never';
   const backupAge=state.settings.lastBackupAt?Math.floor((Date.now()-new Date(state.settings.lastBackupAt).getTime())/86400000):null;
   const backupStatus=backupAge===null?'No backup yet':backupAge>30?`Backup is ${backupAge} days old`:backupAge===0?'Backed up today':`Backed up ${backupAge} day${backupAge===1?'':'s'} ago`;
-  return `<section class="card app-info-card"><div class="split"><div><div class="metric-label">Installed build</div><strong>Wealth OS v${APP_VERSION}</strong><div class="sub">Data model ${DATA_MODEL_VERSION}</div></div><span class="tag good-tag">Local-first</span></div>${row('Privacy mode',state.settings.privacyMode?'Amounts hidden':'Amounts visible')}${row('Last backup',esc(lastBackup))}<div class="sub ${backupAge===null||backupAge>30?'bad':''}" style="margin-top:8px">${esc(backupStatus)}</div><div class="actions settings-export-actions" style="margin-top:12px"><button class="btn secondary" data-action="export-backup">Export Backup</button><label class="btn secondary">Restore Backup<input id="restore-file" type="file" accept="application/json" hidden></label><button class="btn ghost" data-action="export-activity-csv">Activity CSV</button><button class="btn ghost" data-action="export-monthly-csv">Monthly CSV</button></div></section>
+  return `<section class="card app-info-card"><div class="split"><div><div class="metric-label">Installed build</div><strong>Wealth OS v${APP_VERSION}</strong><div class="sub">Data model ${DATA_MODEL_VERSION}</div></div><span class="tag good-tag">Local-first</span></div>${row('Privacy mode',state.settings.privacyMode?'Sensitive balances hidden':'Sensitive balances visible')}${row('Last backup',esc(lastBackup))}<div class="sub ${backupAge===null||backupAge>30?'bad':''}" style="margin-top:8px">${esc(backupStatus)}</div><div class="actions settings-export-actions" style="margin-top:12px"><button class="btn secondary" data-action="export-backup">Export Backup</button><label class="btn secondary">Restore Backup<input id="restore-file" type="file" accept="application/json" hidden></label><button class="btn ghost" data-action="export-activity-csv">Activity CSV</button><button class="btn ghost" data-action="export-monthly-csv">Monthly CSV</button></div></section>
   <div class="section-title"><h2>Reliability tools</h2><span class="sub">Inspect before correcting</span></div><section class="card"><div class="row"><div><strong>Data Health</strong><div class="sub">Duplicates, stale reconciliations, bucket mismatches and month-state checks</div></div><button class="btn ghost small" type="button" data-action="data-health">Run Check</button></div><div class="row"><div><strong>CTBC audit trail</strong><div class="sub">Verified baseline + physical movements + virtual reserves</div></div><button class="btn ghost small" type="button" data-action="account-audit" data-id="ctbc">Open</button></div><div class="row"><div><strong>E.SUN audit trail</strong><div class="sub">Bank movements separated from purpose allocations</div></div><button class="btn ghost small" type="button" data-action="account-audit" data-id="esun">Open</button></div></section>
   <form id="settings-form"><div class="section-title"><h2>Planning settings</h2></div><div class="form-grid"><div class="field"><label>Fallback forecast salary</label><input name="forecastSalary" type="number" value="${state.settings.forecastSalary}"><div class="sub">Used only when no real paycheck history exists.</div></div><div class="field"><label>USD/TWD rate</label><input name="usdTwdRate" type="number" step="0.0001" value="${state.settings.usdTwdRate}"></div><div class="field"><label>Raise → wealth (%)</label><input name="wealthRaisePercent" type="number" min="0" max="100" value="${state.settings.wealthRaisePercent}"></div></div>
   <div class="section-title"><h2>Forecast assumptions</h2><span class="sub">Salary growth and returns are independent</span></div><div class="grid g3 scenario-settings"><section class="card nested-card"><strong>Conservative</strong><div class="field"><label>Investment return (%)</label><input name="conservativeInvestmentReturn" type="number" step="0.1" value="${state.settings.conservativeInvestmentReturn??4}"></div><div class="field"><label>Salary growth (%)</label><input name="conservativeSalaryGrowth" type="number" step="0.1" value="${state.settings.conservativeSalaryGrowth??1}"></div></section><section class="card nested-card"><strong>Base</strong><div class="field"><label>Investment return (%)</label><input name="forecastInvestmentReturn" type="number" step="0.1" value="${state.settings.forecastInvestmentReturn??7}"></div><div class="field"><label>Salary growth (%)</label><input name="forecastSalaryGrowth" type="number" step="0.1" value="${state.settings.forecastSalaryGrowth??3}"></div></section><section class="card nested-card"><strong>Aggressive</strong><div class="field"><label>Investment return (%)</label><input name="aggressiveInvestmentReturn" type="number" step="0.1" value="${state.settings.aggressiveInvestmentReturn??9}"></div><div class="field"><label>Salary growth (%)</label><input name="aggressiveSalaryGrowth" type="number" step="0.1" value="${state.settings.aggressiveSalaryGrowth??5}"></div></section></div>

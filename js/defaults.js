@@ -15,8 +15,8 @@ export const DEFAULTS = {
     conservativeSalaryGrowth: 1,
     aggressiveInvestmentReturn: 9,
     aggressiveSalaryGrowth: 5,
-    appVersion: '1.8',
-    dataModelVersion: 180,
+    appVersion: '1.8.1',
+    dataModelVersion: 181,
     privacyMode: false,
     applyBudgetChangesToCurrentMonth: true
   },

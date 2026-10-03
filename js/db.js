@@ -1,8 +1,8 @@
 import { DEFAULTS } from './defaults.js';
 
 const DB_NAME='wealth-os-db';
-const DB_VERSION=2;
-const STORES=['accounts','buckets','categories','goals','periods','incomes','expenses','transfers','transferAllocations','investmentSnapshots','reconciliations','adjustments','monthlyCloses','settings'];
+const DB_VERSION=3;
+const STORES=['accounts','buckets','categories','goals','periods','incomes','expenses','transfers','transferAllocations','investmentSnapshots','reconciliations','adjustments','monthlyCloses','projects','projectExpenses','projectSettlements','settings'];
 let dbPromise;
 
 function openDb(){

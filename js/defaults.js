@@ -15,8 +15,8 @@ export const DEFAULTS = {
     conservativeSalaryGrowth: 1,
     aggressiveInvestmentReturn: 9,
     aggressiveSalaryGrowth: 5,
-    appVersion: '1.7.4',
-    dataModelVersion: 174,
+    appVersion: '1.8',
+    dataModelVersion: 180,
     privacyMode: false,
     applyBudgetChangesToCurrentMonth: true
   },
@@ -49,6 +49,7 @@ export const DEFAULTS = {
     {id:'gas', name:'Gas', group:'Flexible', ruleType:'cap', defaultAmount:200, active:true, sort:33},
     {id:'water', name:'Water', group:'Flexible', ruleType:'cap', defaultAmount:400, active:true, sort:34},
     {id:'misc', name:'Miscellaneous', group:'Flexible', ruleType:'cap', defaultAmount:1000, active:true, sort:35},
+    {id:'project-shortfall', name:'Project Shortfall', group:'Special Project', ruleType:'expense_only', defaultAmount:0, active:true, hiddenFromManualEntry:true, sort:36},
     {id:'electricity-contrib', name:'Electricity Reserve', group:'Reserve', ruleType:'sinking_contribution', defaultAmount:4400, bucketId:'electricity', active:true, sort:50},
     {id:'operating-buffer', name:'Operating Buffer', group:'Buffer', ruleType:'buffer', defaultAmount:3000, active:true, sort:60},
     {id:'electricity-bill', name:'Electricity Bill', group:'Reserved Expense', ruleType:'expense_only', defaultAmount:0, defaultFundingBucketId:'electricity', active:true, sort:70},
@@ -64,5 +65,5 @@ export const DEFAULTS = {
 
 export const INCOME_TYPES = [
   ['regular_income','Regular Income'],['bonus','Bonus'],['reimbursement','Reimbursement'],
-  ['asset_sale','Asset Sale'],['gift_windfall','Gift / Windfall'],['other_income','Other Income']
+  ['asset_sale','Asset Sale'],['gift_windfall','Gift / Windfall'],['project_surplus','Project Surplus'],['other_income','Other Income']
 ];

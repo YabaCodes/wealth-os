@@ -9,8 +9,10 @@ let modal=null;
 let selectedPeriodId=null;
 let activityFilter='all';
 let activitySearch='';
-const APP_VERSION='1.7.4';
-const DATA_MODEL_VERSION=174;
+const APP_VERSION='1.8';
+const DATA_MODEL_VERSION=180;
+const PROJECT_CATEGORIES=['Hotel','Car Rental','Food','Gas','Transport','Business','Other'];
+const PROJECT_CURRENCIES=['EUR','TWD','USD','GBP','CHF','JPY'];
 
 const today=(d=new Date())=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 const esc=s=>String(s??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
@@ -273,6 +275,17 @@ async function migrateV174(){
   await put('settings',{...settings,applyBudgetChangesToCurrentMonth:settings?.applyBudgetChangesToCurrentMonth!==false,dataModelVersion:174,appVersion:'1.7.4',updatedAt:new Date().toISOString()});
 }
 
+async function migrateV180(){
+  const settings=await getOne('settings','app');
+  if(Number(settings?.dataModelVersion||0)>=180) return;
+  // v1.8 adds isolated reimbursable-project ledgers. Project expenses do not touch
+  // monthly budgets or physical account balances. Only the final settlement surplus
+  // or shortfall is posted to the personal ledger.
+  const shortfall=await getOne('categories','project-shortfall');
+  if(!shortfall) await put('categories',{id:'project-shortfall',name:'Project Shortfall',group:'Special Project',ruleType:'expense_only',defaultAmount:0,active:true,hiddenFromManualEntry:true,sort:36,createdAt:new Date().toISOString()});
+  await put('settings',{...settings,dataModelVersion:180,appVersion:'1.8',updatedAt:new Date().toISOString()});
+}
+
 async function load(){
   await seedIfNeeded();
   await migrateV131();
@@ -287,7 +300,8 @@ async function load(){
   await migrateV172();
   await migrateV173();
   await migrateV174();
-  const keys=['accounts','buckets','categories','goals','periods','incomes','expenses','transfers','transferAllocations','investmentSnapshots','reconciliations','adjustments','monthlyCloses'];
+  await migrateV180();
+  const keys=['accounts','buckets','categories','goals','periods','incomes','expenses','transfers','transferAllocations','investmentSnapshots','reconciliations','adjustments','monthlyCloses','projects','projectExpenses','projectSettlements'];
   const vals=await Promise.all(keys.map(getAll));
   keys.forEach((k,i)=>state[k]=vals[i]);
   state.settings=await getOne('settings','app');
@@ -333,6 +347,15 @@ function physicalAccount(id){return state.accounts.find(a=>a.id===id);}
 function bucket(id){return state.buckets.find(b=>b.id===id);}
 function category(id){return state.categories.find(c=>c.id===id);}
 function goal(id){return state.goals.find(g=>g.id===id);}
+function project(id){return state.projects.find(x=>x.id===id&&!x.deletedAt)||null;}
+function projectExpenses(projectId){return state.projectExpenses.filter(x=>x.projectId===projectId&&!x.deletedAt).sort((a,b)=>String(b.date||'').localeCompare(String(a.date||''))||String(b.createdAt||'').localeCompare(String(a.createdAt||'')));}
+function projectSettlement(projectId){return state.projectSettlements.find(x=>x.projectId===projectId&&!x.deletedAt)||null;}
+function projectKnownTwd(projectId){return projectExpenses(projectId).reduce((sum,x)=>sum+(Number.isFinite(Number(x.twdAmount))?Number(x.twdAmount||0):0),0);}
+function projectMissingTwd(projectId){return projectExpenses(projectId).filter(x=>!Number.isFinite(Number(x.twdAmount))||Number(x.twdAmount)<=0);}
+function projectPaymentTwd(projectId,method){return projectExpenses(projectId).filter(x=>x.paymentMethod===method&&Number(x.twdAmount)>0).reduce((sum,x)=>sum+Number(x.twdAmount||0),0);}
+function projectOriginalTotals(projectId){const out={};for(const x of projectExpenses(projectId)){const c=x.currency||'TWD';out[c]=(out[c]||0)+Number(x.originalAmount||0);}return out;}
+function formatOriginal(amount,currency){const n=Number(amount||0);return `${currency||'TWD'} ${n.toLocaleString(undefined,{minimumFractionDigits:n%1?2:0,maximumFractionDigits:2})}`;}
+function projectStatusTag(p){const settled=projectSettlement(p.id);if(settled)return '<span class="tag good-tag">Settled</span>';return '<span class="tag">Active</span>';}
 function totalExpenses(periodId){return state.expenses.filter(e=>e.budgetPeriodId===periodId&&!e.deletedAt).reduce((s,e)=>s+Number(e.amount),0);}
 function entryPeriodId(){
   const selected=currentPeriod();
@@ -495,6 +518,7 @@ function icon(name,extra=''){
     income:'<path d="M12 20V7M7.5 11.5 12 7l4.5 4.5"/><path d="M5 4h14"/>',
     transfer:'<path d="M4 8h14M14 4l4 4-4 4M20 16H6M10 12l-4 4 4 4"/>',
     cash:'<path d="M5 8.5h14v9H5z"/><path d="M7.5 8.5V6.5h9v2M8 13h.01M16 13h.01"/><circle cx="12" cy="13" r="2"/>',
+    project:'<path d="M4 7.5h16v11H4z"/><path d="M8 7.5V5.5h8v2M4 11h16M10 11v2h4v-2"/>',
     eye:'<path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6z"/><circle cx="12" cy="12" r="2.5"/>',
     eyeOff:'<path d="M3 3l18 18"/><path d="M10.6 6.2A8.8 8.8 0 0 1 12 6c6 0 9.5 6 9.5 6a15.8 15.8 0 0 1-3.1 3.8M6.1 6.1C3.8 7.7 2.5 12 2.5 12s3.5 6 9.5 6c1.5 0 2.9-.4 4.1-1"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/>',
     settings:'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21h-4v-.1A1.7 1.7 0 0 0 8.6 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3v-4h.1A1.7 1.7 0 0 0 4.6 8.6a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3h4v.1A1.7 1.7 0 0 0 15.4 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9c.1.36.31.7.6 1 .3.29.66.5 1.1.6h.1v4h-.1c-.44.1-.8.31-1.1.6-.29.3-.5.64-.6 1z"/>'
@@ -567,8 +591,10 @@ function dataHealthReport(){
   }
   const pending=state.transfers.filter(t=>!t.deletedAt&&t.status==='planned');
   if(pending.length)add('warn',`${pending.length} planned transfer${pending.length===1?'':'s'} still pending`,'Planned transfers do not affect balances until completed or deleted.');
-  const unrouted=state.incomes.filter(i=>!i.deletedAt&&i.incomeType!=='regular_income'&&i.incomeType!=='reimbursement'&&!routingTransfersForIncome(i.id).length);
+  const unrouted=state.incomes.filter(i=>!i.deletedAt&&i.incomeType!=='regular_income'&&i.incomeType!=='reimbursement'&&!i.routingHandled&&!routingTransfersForIncome(i.id).length);
   if(unrouted.length)add('warn',`${unrouted.length} supplemental income record${unrouted.length===1?' needs':'s need'} routing`,'Open the funding month or Activity and decide whether the money stays in operating cash, funds a goal, or goes to investments.');
+  for(const p of state.projects.filter(x=>!x.deletedAt&&!projectSettlement(x.id))){const missing=projectMissingTwd(p.id);if(missing.length)add('warn',`${p.title}: ${missing.length} expense${missing.length===1?' needs':'s need'} NTD value`,'Project settlement is blocked until each expense has an NTD equivalent.');}
+  for(const st of state.projectSettlements.filter(x=>!x.deletedAt&&Number(x.cardPaidTwd||0)>0.5&&!x.cardClearingConfirmed)){const p=project(st.projectId);add('warn',`${p?.title||'Project'} card funding not confirmed`,`${money(st.cardPaidTwd)} of E.SUN card-paid project costs still need CTBC → E.SUN funding confirmation.`);}
   const negative=state.buckets.filter(b=>Number(state.bucketBalances[b.id]||0)<-0.5);
   for(const b of negative)add('critical',`${b.name} is negative`,`${money(state.bucketBalances[b.id])} indicates a reserve/bucket was used beyond its recorded funding.`);
   const expDup=duplicateGroups(state.expenses.filter(x=>!x.deletedAt),x=>[x.date,Number(x.amount||0),x.categoryId,x.accountId,(x.description||'').trim().toLowerCase()].join('|'));
@@ -743,7 +769,7 @@ function homeView(){
   const payday=paydayRequirements(p.id);
   const paydayGroup=payday.groups.find(g=>g.amount>0.5);
   const pending=state.transfers.find(t=>t.budgetPeriodId===p.id&&t.status==='planned'&&!['payday','investment_contribution'].includes(t.transferType));
-  const unroutedSupplemental=state.incomes.find(i=>!i.deletedAt&&i.budgetPeriodId===p.id&&i.incomeType!=='regular_income'&&i.incomeType!=='reimbursement'&&!routingTransfersForIncome(i.id).length);
+  const unroutedSupplemental=state.incomes.find(i=>!i.deletedAt&&i.budgetPeriodId===p.id&&i.incomeType!=='regular_income'&&i.incomeType!=='reimbursement'&&!i.routingHandled&&!routingTransfersForIncome(i.id).length);
   let action=`<button class="btn" data-action="add-expense">Add Expense</button>`;
   let actionText='Keep the ledger current';let actionSub='Record spending as it happens.';let actionMetric=money(sweep.available);
   if(p.state==='closed'){
@@ -788,8 +814,11 @@ function homeView(){
 
 function homeQuickCapture(p){
   const recent=activityRecords().filter(x=>!p||x.budgetPeriodId===p.id).slice(0,3);
+  const activeProjects=state.projects.filter(x=>!x.deletedAt&&!projectSettlement(x.id));
+  const projectAction=activeProjects.length===1?`data-action="add-project-expense" data-project="${activeProjects[0].id}"`:'data-action="open-projects"';
+  const projectLabel=activeProjects.length===1?'Project Expense':'Projects';
   return `<div class="section-title"><h2>Quick capture</h2><span class="sub">Common actions</span></div>
-  <div class="quick-action-grid"><button class="quick-action" data-action="add-expense">${icon('expense')}<span>Expense</span></button><button class="quick-action" data-action="add-income">${icon('income')}<span>Income</span></button><button class="quick-action" data-action="manual-transfer">${icon('transfer')}<span>Transfer</span></button></div>
+  <div class="quick-action-grid project-ready"><button class="quick-action" data-action="add-expense">${icon('expense')}<span>Expense</span></button><button class="quick-action" data-action="add-income">${icon('income')}<span>Income</span></button><button class="quick-action" data-action="manual-transfer">${icon('transfer')}<span>Transfer</span></button><button class="quick-action" ${projectAction}>${icon('project')}<span>${projectLabel}</span></button></div>
   <section class="card mini-activity">${recent.length?recent.map(x=>`<div class="mini-activity-row"><div><strong>${esc(x._title)}</strong><div class="sub">${esc(x._date||'')} · ${esc(x._account||'')}</div></div><span class="amount ${x._kind==='expense'?'bad':x._kind==='income'?'good':''}">${x._kind==='transfer'?'↔ ':''}${money(x._amount)}</span></div>`).join(''):`<div class="empty compact-empty"><strong>No activity in this month yet.</strong><span>Use the buttons above for fast entry.</span></div>`}</section>`;
 }
 
@@ -886,7 +915,9 @@ function transactionsView(){
     <button class="activity-action-card" data-action="add-income"><span class="action-icon">${icon('income')}</span><span class="action-copy"><strong>Add Income</strong><span>Salary, bonus, reimbursement, asset sale or other money received.</span></span><span class="action-chevron">›</span></button>
     <button class="activity-action-card" data-action="manual-transfer"><span class="action-icon">${icon('transfer')}</span><span class="action-copy"><strong>Add Transfer</strong><span>Move money between bank accounts or assign it to a virtual bucket.</span></span><span class="action-chevron">›</span></button>
     <button class="activity-action-card" data-action="cash-withdraw"><span class="action-icon">${icon('cash')}</span><span class="action-copy"><strong>Withdraw Cash</strong><span>Move money from CTBC Operating into your Cash Wallet. This is not spending.</span></span><span class="action-chevron">›</span></button>
+    <button class="activity-action-card" data-action="open-projects"><span class="action-icon">${icon('project')}</span><span class="action-copy"><strong>Special Projects</strong><span>Track reimbursable trips or temporary expenses separately from your monthly budget.</span></span><span class="action-chevron">›</span></button>
   </div>
+  ${projectOverviewStrip()}
   <div class="section-title"><h2>Recent activity</h2><span class="sub">${list.length} shown</span></div>
   <form id="activity-search-form" class="activity-search"><input id="activity-search-input" type="search" value="${esc(activitySearch)}" placeholder="Search description, category or account"><button class="btn ghost small" type="submit">Search</button>${activitySearch?'<button class="btn ghost small" type="button" data-action="clear-activity-search">Clear</button>':''}</form>
   <div class="filter-chips">${[['all','All'],['expense','Expenses'],['income','Income'],['transfer','Transfers']].map(([id,label])=>`<button class="filter-chip ${activityFilter===id?'active':''}" data-action="activity-filter" data-filter="${id}">${label}</button>`).join('')}</div>
@@ -900,10 +931,51 @@ function txLine(x){
   const canEdit=!protectedIncome&&(x._kind!=='transfer'||x.transferType==='manual');
   const canDelete=!protectedIncome&&(x._kind!=='transfer'||['bucket_allocation','cash_withdrawal','cash_deposit'].includes(x.transferType)||(plannedTransfer&&['manual','goal_contribution','supplemental_income_routing'].includes(x.transferType)));
   const canComplete=plannedTransfer;
-  const canRoute=x._kind==='income'&&x.incomeType!=='regular_income'&&!routingTransfersForIncome(x.id).length&&!isClosedPeriod(x.budgetPeriodId);
+  const canRoute=x._kind==='income'&&x.incomeType!=='regular_income'&&!x.routingHandled&&!routingTransfersForIncome(x.id).length&&!isClosedPeriod(x.budgetPeriodId);
   const canRepeat=x._kind==='expense'&&!!entryPeriodId();
   const amount=money(x._amount);
   return `<div class="tx"><div class="tx-main"><div class="tx-title">${esc(x._title)}</div><div class="tx-meta">${esc(meta)}</div><div class="tx-actions">${canComplete?`<button class="text-btn" data-action="complete-transfer" data-id="${x.id}">Complete</button>`:''}${canRoute?`<button class="text-btn" data-action="route-income" data-id="${x.id}">Route</button>`:''}${canRepeat?`<button class="text-btn" data-action="repeat-expense" data-id="${x.id}">Repeat</button>`:''}${canEdit?`<button class="text-btn" data-action="edit-transaction" data-kind="${x._kind}" data-id="${x.id}">Edit</button>`:''}${canDelete?`<button class="text-btn danger-text" data-action="delete-transaction" data-kind="${x._kind}" data-id="${x.id}">Delete</button>`:''}</div></div><div class="right"><div class="amount ${x._kind==='income'?'good':x._kind==='expense'?'bad':''}">${x._kind==='transfer'?'↔ ':''}${amount}</div><span class="tag ${plannedTransfer?'warn-tag':''}">${plannedTransfer?'planned':x._kind}</span></div></div>`;
+}
+
+function projectOverviewStrip(){
+  const active=state.projects.filter(p=>!p.deletedAt&&!projectSettlement(p.id));
+  if(!active.length)return `<div class="section-title"><h2>Special projects</h2><span class="sub">Separate from monthly budget</span></div><section class="card project-empty"><div><strong>No active special project.</strong><div class="sub">Create one for a reimbursable business trip or another temporary expense ledger.</div></div><button class="btn secondary" data-action="new-project">Create Project</button></section>`;
+  return `<div class="section-title"><h2>Special projects</h2><span class="sub">${active.length} active</span></div><section class="card project-strip">${active.slice(0,3).map(p=>{const total=projectKnownTwd(p.id),missing=projectMissingTwd(p.id).length;return `<button class="project-strip-row" data-action="open-project" data-id="${p.id}"><div><strong>${esc(p.title)}</strong><div class="sub">${money(total)} known${missing?` · ${missing} need NTD`:''}</div></div><span>›</span></button>`;}).join('')}</section>`;
+}
+function projectsListView(){
+  const items=state.projects.filter(p=>!p.deletedAt).sort((a,b)=>String(b.createdAt||'').localeCompare(String(a.createdAt||'')));
+  return `<div class="notice"><strong>Projects stay outside your monthly budget.</strong><br>Track reimbursable spending here. Only the final surplus or personal shortfall enters your normal Wealth OS ledger.</div><div class="actions" style="margin-top:14px"><button class="btn" data-action="new-project">Create Project</button></div><div class="section-title"><h2>Your projects</h2><span class="sub">${items.length} total</span></div><section class="card project-list">${items.length?items.map(p=>{const settlement=projectSettlement(p.id),missing=projectMissingTwd(p.id).length;return `<button class="project-list-row" data-action="open-project" data-id="${p.id}"><div><div class="split tight"><strong>${esc(p.title)}</strong>${projectStatusTag(p)}</div><div class="sub">${p.startDate?esc(p.startDate):'No start date'}${p.endDate?` → ${esc(p.endDate)}`:''} · default ${esc(p.defaultCurrency||'EUR')}</div><div class="sub">${money(projectKnownTwd(p.id))} known spend${missing?` · ${missing} missing NTD equivalent`:''}${settlement?` · reimbursement ${money(settlement.reimbursementTwd)}`:''}</div></div><span class="project-chevron">›</span></button>`;}).join(''):`<div class="empty compact-empty"><strong>No projects yet.</strong><span>Create one and name it however you want.</span></div>`}</section>`;
+}
+function projectFormView(p=null){
+  const locked=p&&projectSettlement(p.id);
+  if(locked)return `<div class="notice"><strong>This project is settled.</strong><br>Undo the settlement before editing project details.</div>`;
+  return `<form id="project-form"><input type="hidden" name="id" value="${p?.id||''}"><div class="field"><label>Project title</label><input name="title" value="${esc(p?.title||'')}" placeholder="e.g. Vendor visit, business trip..." required></div><div class="form-grid"><div class="field"><label>Start date</label><input name="startDate" type="date" value="${p?.startDate||today()}"></div><div class="field"><label>End date (optional)</label><input name="endDate" type="date" value="${p?.endDate||''}"></div></div><div class="field"><label>Default expense currency</label><select name="defaultCurrency">${PROJECT_CURRENCIES.map(c=>`<option value="${c}" ${c===(p?.defaultCurrency||'EUR')?'selected':''}>${c}</option>`).join('')}</select></div><div class="notice">Project expenses remain separate from Food, Transportation and other monthly caps. You can rename this project anytime before settlement.</div><button class="btn" style="width:100%;margin-top:14px">${p?'Save Project':'Create Project'}</button></form>`;
+}
+function projectExpenseFormView(projectId,x=null){
+  const p=project(projectId);if(!p)return '<div class="empty">Project not found.</div>';
+  if(projectSettlement(projectId))return '<div class="notice"><strong>Project settled.</strong><br>Undo the settlement before adding or editing project expenses.</div>';
+  const cur=x?.currency||p.defaultCurrency||'EUR';
+  return `<form id="project-expense-form" data-project="${p.id}"><input type="hidden" name="id" value="${x?.id||''}"><div class="notice"><strong>${esc(p.title)}</strong><br>This expense is isolated from your personal monthly budget and account balances until project settlement.</div><div class="form-grid" style="margin-top:14px"><div class="field"><label>Original amount</label><input name="originalAmount" type="number" min="0" step="0.01" value="${x?.originalAmount??''}" required></div><div class="field"><label>Currency</label><select name="currency">${PROJECT_CURRENCIES.map(c=>`<option value="${c}" ${c===cur?'selected':''}>${c}</option>`).join('')}</select></div></div><div class="field"><label>Exact NTD amount (optional while traveling)</label><input name="twdAmount" type="number" min="0" step="1" value="${x?.twdAmount??''}" placeholder="Enter the exact NTD card notification when available"><div class="sub">If the expense is in TWD, leave this blank and Wealth OS will use the original amount. Settlement is blocked until every expense has an NTD equivalent.</div></div><div class="form-grid"><div class="field"><label>Category</label><select name="category">${PROJECT_CATEGORIES.map(c=>`<option value="${c}" ${c===(x?.category||'Food')?'selected':''}>${c}</option>`).join('')}</select></div><div class="field"><label>Payment method</label><select name="paymentMethod"><option value="esun_card" ${x?.paymentMethod==='esun_card'?'selected':''}>E.SUN credit card</option><option value="cash" ${x?.paymentMethod==='cash'?'selected':''}>Cash</option><option value="other" ${x?.paymentMethod==='other'?'selected':''}>Other</option></select></div></div><div class="field"><label>Date</label><input name="date" type="date" value="${x?.date||today()}" required></div><div class="field"><label>Description (optional)</label><input name="description" value="${esc(x?.description||'')}" placeholder="Hotel, dinner, rental fuel..."></div><button class="btn" style="width:100%">${x?'Save Changes':'Add Project Expense'}</button></form>`;
+}
+function projectExpenseLine(x){
+  const twd=Number(x.twdAmount)>0?money(x.twdAmount):'<span class="warn">NTD pending</span>';
+  return `<div class="project-expense-line"><div><strong>${esc(x.category)}</strong><div class="sub">${esc(x.date||'')} · ${esc(x.paymentMethod==='esun_card'?'E.SUN card':x.paymentMethod==='cash'?'Cash':'Other')}${x.description?` · ${esc(x.description)}`:''}</div><div class="sub">${esc(formatOriginal(x.originalAmount,x.currency))} · ${twd}</div></div><div class="project-line-actions"><button class="text-btn" data-action="edit-project-expense" data-project="${x.projectId}" data-id="${x.id}">Edit</button><button class="text-btn danger-text" data-action="delete-project-expense" data-project="${x.projectId}" data-id="${x.id}">Delete</button></div></div>`;
+}
+function projectDetailView(projectId){
+  const p=project(projectId);if(!p)return '<div class="empty">Project not found.</div>';
+  const expenses=projectExpenses(projectId),settlement=projectSettlement(projectId),known=projectKnownTwd(projectId),missing=projectMissingTwd(projectId),original=projectOriginalTotals(projectId),card=projectPaymentTwd(projectId,'esun_card');
+  const originalText=Object.entries(original).map(([c,v])=>formatOriginal(v,c)).join(' · ')||'No expenses yet';
+  let settlementBlock='';
+  if(settlement){const diff=Number(settlement.differenceTwd||0);settlementBlock=`<div class="section-title"><h2>Settlement</h2><span class="tag good-tag">Settled</span></div><section class="card settlement-card">${row('Project cost',money(settlement.totalProjectCostTwd))}${row('Reimbursement received',money(settlement.reimbursementTwd))}${row(diff>=0?'Surplus':'Personal responsibility',`${diff>=0?'+':'−'}${money(Math.abs(diff))}`)}${row('E.SUN card spend',money(settlement.cardPaidTwd||0))}<div class="notice" style="margin-top:12px">Card-clearing guidance: move the E.SUN card-paid project amount from CTBC to E.SUN as needed before the card debit is due. This can include reimbursed money plus any personal shortfall. Wealth OS uses net-settlement accounting, so that clearing movement and matching card debit are not posted to the personal ledger.</div>${Number(settlement.cardPaidTwd||0)>0&&!settlement.cardClearingConfirmed?`<button class="btn secondary" style="width:100%;margin-top:12px" data-action="confirm-project-card-clearing" data-id="${p.id}">Mark ${money(settlement.cardPaidTwd)} CTBC → E.SUN card funding done</button>`:Number(settlement.cardPaidTwd||0)>0?`<div class="good-notice notice" style="margin-top:12px">E.SUN card funding marked complete.</div>`:''}<div class="actions" style="margin-top:12px"><button class="btn ghost" data-action="export-project-csv" data-id="${p.id}">Export CSV</button><button class="btn ghost danger-text" data-action="undo-project-settlement" data-id="${p.id}">Undo Settlement</button></div></section>`;}
+  else settlementBlock=`<div class="section-title"><h2>Reimbursement</h2><span class="sub">Settle when company payment arrives</span></div><section class="card"><div class="split"><div><strong>${missing.length?`${missing.length} expense${missing.length===1?' needs':'s need'} NTD amount`:'Ready for settlement'}</strong><div class="sub">Known project cost ${money(known)} · E.SUN card ${money(card)}</div></div><button class="btn" data-action="settle-project" data-id="${p.id}" ${!expenses.length?'disabled':''}>Settle Reimbursement</button></div>${missing.length?'<div class="sub warn" style="margin-top:8px">Add the NTD equivalent to every expense before settlement.</div>':''}</section>`;
+  return `<div class="split"><div><h3 class="project-title">${esc(p.title)}</h3><div class="sub">${p.startDate?esc(p.startDate):''}${p.endDate?` → ${esc(p.endDate)}`:''} · default ${esc(p.defaultCurrency||'EUR')}</div></div>${projectStatusTag(p)}</div><div class="grid g2 project-summary-grid" style="margin-top:14px"><section class="card nested-card"><div class="metric-label">Known NTD spend</div><div class="metric">${money(known)}</div><div class="sub">${missing.length?`${missing.length} NTD conversion${missing.length===1?'':'s'} pending`:'All expenses valued'}</div></section><section class="card nested-card"><div class="metric-label">Original currency totals</div><strong>${esc(originalText)}</strong><div class="sub">Preserved exactly as entered</div></section></div><div class="actions project-top-actions" style="margin-top:14px">${!settlement?`<button class="btn" data-action="add-project-expense" data-project="${p.id}">Add Expense</button><button class="btn secondary" data-action="edit-project" data-id="${p.id}">Edit Project</button>`:''}<button class="btn ghost" data-action="export-project-csv" data-id="${p.id}">Export CSV</button></div><div class="section-title"><h2>Expenses</h2><span class="sub">${expenses.length} recorded</span></div><section class="card project-expense-list">${expenses.length?expenses.map(projectExpenseLine).join(''):`<div class="empty compact-empty"><strong>No project expenses yet.</strong><span>Add expenses here instead of your normal monthly budget.</span></div>`}</section>${settlementBlock}`;
+}
+function projectSettlementFormView(projectId){
+  const p=project(projectId);if(!p)return '<div class="empty">Project not found.</div>';
+  if(projectSettlement(projectId))return '<div class="notice">This project is already settled.</div>';
+  const missing=projectMissingTwd(projectId),total=projectKnownTwd(projectId),card=projectPaymentTwd(projectId,'esun_card');
+  if(missing.length)return `<div class="notice"><strong>Settlement blocked.</strong><br>${missing.length} project expense${missing.length===1?' still needs':'s still need'} an NTD amount. Edit those expenses first so the final reimbursement difference is exact.</div>`;
+  return `<form id="project-settlement-form" data-project="${p.id}"><div class="notice"><strong>Net-settlement accounting</strong><br>Enter the total company reimbursement received into CTBC. Wealth OS posts only the final surplus or personal shortfall to your personal ledger; project spending itself remains isolated.</div><section class="card" style="margin-top:14px">${row('Total project cost',money(total))}${row('E.SUN card-paid subtotal',money(card))}${row('Cash / other subtotal',money(Math.max(0,total-card)))}</section><div class="form-grid" style="margin-top:14px"><div class="field"><label>Total reimbursement received (NTD)</label><input id="project-reimbursement" name="reimbursementTwd" type="number" min="0" step="1" required></div><div class="field"><label>Date received</label><input name="date" type="date" value="${today()}" required></div></div><div id="project-settlement-preview" class="notice">Enter the reimbursement amount to calculate the settlement difference.</div><div class="field" style="margin-top:14px"><label>If there is a surplus</label><select name="surplusRoute"><option value="keep">Keep in CTBC Operating</option><option value="emergency">Emergency Fund</option><option value="home-trip">Home Travel Fund</option><option value="equipment">Equipment Fund</option><option value="invest">Investments</option></select></div><div class="sub">If there is a shortfall, Wealth OS records only that difference as a personal Project Shortfall and reminds you to fund E.SUN from CTBC for the card payment.</div><button class="btn" style="width:100%;margin-top:14px">Confirm Project Settlement</button></form>`;
 }
 
 function goalsView(){
@@ -1140,6 +1212,11 @@ function renderModal(){
   if(modal.type==='esun-reallocate') return modalWrap('Reallocate E.SUN Purpose',esunReallocationForm());
   if(modal.type==='manual-transfer-review') return modalWrap('Review Bank Transfer',manualTransferReview());
   if(modal.type==='cash-transfer') return modalWrap(modal.mode==='deposit'?'Deposit Cash':'Withdraw Cash',cashTransferForm(modal.mode||'withdrawal'));
+  if(modal.type==='projects-list') return modalWrap('Special Projects',projectsListView());
+  if(modal.type==='project-form') return modalWrap(modal.id?'Edit Project':'Create Project',projectFormView(modal.id?project(modal.id):null));
+  if(modal.type==='project-detail') return modalWrap(project(modal.id)?.title||'Project',projectDetailView(modal.id));
+  if(modal.type==='project-expense') return modalWrap(modal.expenseId?'Edit Project Expense':'Add Project Expense',projectExpenseFormView(modal.projectId,modal.expenseId?state.projectExpenses.find(x=>x.id===modal.expenseId&&!x.deletedAt):null));
+  if(modal.type==='project-settle') return modalWrap('Settle Reimbursement',projectSettlementFormView(modal.projectId));
   if(modal.type==='delete-period') return modalWrap('Delete Funding Month',deleteFundingMonthView(modal.periodId));
   if(modal.type==='edit-goal') return modalWrap('Edit Goal',goalEditForm(modal.goalId));
   if(modal.type==='goal-contribution') return modalWrap('Add Goal Contribution',goalContributionForm(modal.goalId));
@@ -1153,7 +1230,7 @@ function expenseForm(x=null,prefill=null,targetPeriodId=null){
   if(isClosedPeriod(periodId))return `<div class="notice"><strong>${monthLabel(periodId)} is closed.</strong><br>Reopen the month before adding or editing expenses.</div>`;
   const catId=x?.categoryId||prefill?.categoryId||'food',accountId=x?.accountId||prefill?.accountId||'ctbc',bucketId=x?.fundingBucketId||prefill?.fundingBucketId||'';
   const amount=x?.amount??prefill?.amount??'',description=x?.description??prefill?.description??'';
-  return `<form id="expense-form"><input type="hidden" name="id" value="${x?.id||''}"><input type="hidden" name="periodId" value="${periodId}"><div class="field"><label>Amount</label><input name="amount" type="number" min="0" step="1" value="${amount}" required></div><div class="field"><label>Category</label><select name="category">${state.categories.filter(c=>['fixed','cap','expense_only'].includes(c.ruleType)).map(c=>`<option value="${c.id}" ${c.id===catId?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div><div class="form-grid"><div class="field"><label>Date</label><input name="date" type="date" value="${x?.date||today()}" required></div><div class="field"><label>Account used</label><select name="account">${state.accounts.filter(a=>a.role!=='investment').map(a=>`<option value="${a.id}" ${a.id===accountId?'selected':''}>${esc(a.name)}</option>`).join('')}</select></div></div><div class="field"><label>Funding bucket (optional)</label><select name="fundingBucket"><option value="">Operating cash</option>${state.buckets.filter(b=>b.bucketType!=='restricted').map(b=>`<option value="${b.id}" ${b.id===bucketId?'selected':''}>${esc(b.name)}</option>`).join('')}</select></div><div class="field"><label>Description (optional)</label><input name="description" value="${esc(description)}" placeholder="Lunch, rent, electricity..."></div><button class="btn" style="width:100%">${x?'Save Changes':'Save Expense'}</button></form>`;
+  return `<form id="expense-form"><input type="hidden" name="id" value="${x?.id||''}"><input type="hidden" name="periodId" value="${periodId}"><div class="field"><label>Amount</label><input name="amount" type="number" min="0" step="1" value="${amount}" required></div><div class="field"><label>Category</label><select name="category">${state.categories.filter(c=>['fixed','cap','expense_only'].includes(c.ruleType)&&!c.hiddenFromManualEntry).map(c=>`<option value="${c.id}" ${c.id===catId?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div><div class="form-grid"><div class="field"><label>Date</label><input name="date" type="date" value="${x?.date||today()}" required></div><div class="field"><label>Account used</label><select name="account">${state.accounts.filter(a=>a.role!=='investment').map(a=>`<option value="${a.id}" ${a.id===accountId?'selected':''}>${esc(a.name)}</option>`).join('')}</select></div></div><div class="field"><label>Funding bucket (optional)</label><select name="fundingBucket"><option value="">Operating cash</option>${state.buckets.filter(b=>b.bucketType!=='restricted').map(b=>`<option value="${b.id}" ${b.id===bucketId?'selected':''}>${esc(b.name)}</option>`).join('')}</select></div><div class="field"><label>Description (optional)</label><input name="description" value="${esc(description)}" placeholder="Lunch, rent, electricity..."></div><button class="btn" style="width:100%">${x?'Save Changes':'Save Expense'}</button></form>`;
 }
 function routingTransfersForIncome(incomeId){return state.transfers.filter(t=>!t.deletedAt&&t.sourceIncomeId===incomeId);}
 function incomeForm(x=null){
@@ -1163,7 +1240,7 @@ function incomeForm(x=null){
   if(!periods.length)return `<div class="empty">Create or reopen a funding month first.</div>`;
   const defaultTithe=x?!!x.titheEligible:['regular_income','bonus'].includes(type);
   const hasRouting=x?routingTransfersForIncome(x.id).length>0:false;
-  return `<form id="income-form"><input type="hidden" name="id" value="${x?.id||''}"><div class="field"><label>Amount</label><input name="amount" type="number" min="0" step="1" value="${x?.amount||''}" required></div><div class="field"><label>Income type</label><select name="type" id="income-type">${INCOME_TYPES.map(t=>`<option value="${t[0]}" ${t[0]===type?'selected':''}>${t[1]}</option>`).join('')}</select></div><div class="form-grid"><div class="field"><label>Date received</label><input name="date" type="date" value="${x?.dateReceived||today()}" required></div><div class="field"><label>Budget period</label><select name="period">${periods.map(y=>`<option value="${y.id}" ${y.id===period?'selected':''}>${monthLabel(y.id)}</option>`).join('')}</select></div></div><div class="field"><label>Account</label><select name="account">${state.accounts.filter(a=>a.role!=='investment'&&a.id!=='cash').map(a=>`<option value="${a.id}" ${a.id===accountId?'selected':''}>${esc(a.name)}</option>`).join('')}</select></div><div class="field"><label>Description</label><input name="description" value="${esc(x?.description||'')}" placeholder="e.g. Bonus or camera sale"></div><label class="check-line"><input id="income-tithe" name="tithe" type="checkbox" ${defaultTithe?'checked':''}> Tithe eligible</label>${!x?`<label class="check-line"><input id="income-routing" name="routing" type="checkbox" ${type!=='regular_income'&&type!=='reimbursement'?'checked':''}> Open routing assistant after saving</label>`:''}${hasRouting?`<div class="notice"><strong>This income already has routing records.</strong><br>Delete any uncompleted routing transfers before changing the amount, type or tithe eligibility.</div>`:''}<button class="btn" style="width:100%;margin-top:14px">${x?'Save Changes':'Save Income'}</button></form>`;
+  return `<form id="income-form"><input type="hidden" name="id" value="${x?.id||''}"><div class="field"><label>Amount</label><input name="amount" type="number" min="0" step="1" value="${x?.amount||''}" required></div><div class="field"><label>Income type</label><select name="type" id="income-type">${INCOME_TYPES.filter(t=>t[0]!=='project_surplus').map(t=>`<option value="${t[0]}" ${t[0]===type?'selected':''}>${t[1]}</option>`).join('')}</select></div><div class="form-grid"><div class="field"><label>Date received</label><input name="date" type="date" value="${x?.dateReceived||today()}" required></div><div class="field"><label>Budget period</label><select name="period">${periods.map(y=>`<option value="${y.id}" ${y.id===period?'selected':''}>${monthLabel(y.id)}</option>`).join('')}</select></div></div><div class="field"><label>Account</label><select name="account">${state.accounts.filter(a=>a.role!=='investment'&&a.id!=='cash').map(a=>`<option value="${a.id}" ${a.id===accountId?'selected':''}>${esc(a.name)}</option>`).join('')}</select></div><div class="field"><label>Description</label><input name="description" value="${esc(x?.description||'')}" placeholder="e.g. Bonus or camera sale"></div><label class="check-line"><input id="income-tithe" name="tithe" type="checkbox" ${defaultTithe?'checked':''}> Tithe eligible</label>${!x?`<label class="check-line"><input id="income-routing" name="routing" type="checkbox" ${type!=='regular_income'&&type!=='reimbursement'?'checked':''}> Open routing assistant after saving</label>`:''}${hasRouting?`<div class="notice"><strong>This income already has routing records.</strong><br>Delete any uncompleted routing transfers before changing the amount, type or tithe eligibility.</div>`:''}<button class="btn" style="width:100%;margin-top:14px">${x?'Save Changes':'Save Income'}</button></form>`;
 }
 function incomeRoutingView(incomeId){
   const i=state.incomes.find(x=>x.id===incomeId&&!x.deletedAt);if(!i)return '<div class="empty">Income record not found.</div>';
@@ -1482,6 +1559,57 @@ async function saveGoalContribution(form){
   await put('transfers',{id:tid,fromAccountId:'ctbc',toAccountId:b.accountId,amount,budgetPeriodId:periodId,status,plannedDate:date,completedDate:status==='completed'?date:null,completedAt:status==='completed'?stamp:null,transferType:'goal_contribution',createdAt:stamp,updatedAt:stamp});
   await put('transferAllocations',{id:uid('ta'),transferId:tid,bucketId:g.bucketId,amount,goalId:g.id,label:g.name});modal=null;await load();
 }
+
+async function saveProject(form){
+  const fd=new FormData(form),id=fd.get('id')||uid('proj'),existing=project(id),stamp=new Date().toISOString(),title=String(fd.get('title')||'').trim();
+  if(!title)throw new Error('Enter a project title.');
+  if(existing&&projectSettlement(id))throw new Error('Undo the settlement before editing this project.');
+  const obj={...(existing||{}),id,title,startDate:fd.get('startDate')||null,endDate:fd.get('endDate')||null,defaultCurrency:fd.get('defaultCurrency')||'EUR',status:'active',createdAt:existing?.createdAt||stamp,updatedAt:stamp};
+  await put('projects',obj);modal={type:'project-detail',id};await load();
+}
+async function saveProjectExpense(form){
+  const fd=new FormData(form),projectId=form.dataset.project,p=project(projectId);if(!p)throw new Error('Project not found.');
+  if(projectSettlement(projectId))throw new Error('Undo the settlement before editing project expenses.');
+  const originalAmount=Number(fd.get('originalAmount')),currency=fd.get('currency')||p.defaultCurrency||'EUR';if(!(originalAmount>0))throw new Error('Enter an expense amount greater than zero.');
+  let raw=String(fd.get('twdAmount')??'').trim(),twdAmount=raw===''?null:Number(raw);if(currency==='TWD'&&(twdAmount===null||!Number.isFinite(twdAmount)))twdAmount=originalAmount;if(twdAmount!==null&&(!(twdAmount>0)||!Number.isFinite(twdAmount)))throw new Error('Enter a valid NTD amount or leave it blank while traveling.');
+  const id=fd.get('id')||uid('pexp'),old=state.projectExpenses.find(x=>x.id===id),stamp=new Date().toISOString();
+  await put('projectExpenses',{...(old||{}),id,projectId,date:fd.get('date')||today(),category:fd.get('category')||'Other',description:String(fd.get('description')||'').trim(),originalAmount,currency,twdAmount,paymentMethod:fd.get('paymentMethod')||'esun_card',createdAt:old?.createdAt||stamp,updatedAt:stamp});
+  modal={type:'project-detail',id:projectId};await load();
+}
+async function deleteProjectExpense(projectId,id){
+  if(projectSettlement(projectId))throw new Error('Undo the settlement before deleting project expenses.');
+  const x=state.projectExpenses.find(e=>e.id===id&&!e.deletedAt);if(!x)return;
+  await put('projectExpenses',{...x,deletedAt:new Date().toISOString(),updatedAt:new Date().toISOString()});modal={type:'project-detail',id:projectId};await load();
+}
+function projectRouteTarget(strategy){
+  if(strategy==='invest')return {accountId:'ibkr',bucketId:null,label:'Investments'};
+  if(strategy==='keep')return null;
+  const b=bucket(strategy);if(!b)throw new Error('Selected surplus destination is unavailable.');
+  return {accountId:b.accountId,bucketId:b.id,label:b.name};
+}
+async function saveProjectSettlement(form){
+  const fd=new FormData(form),projectId=form.dataset.project,p=project(projectId);if(!p)throw new Error('Project not found.');if(projectSettlement(projectId))throw new Error('Project is already settled.');
+  const missing=projectMissingTwd(projectId);if(missing.length)throw new Error(`${missing.length} project expense${missing.length===1?' still needs':'s still need'} an NTD amount.`);
+  const total=Math.round(projectKnownTwd(projectId)),reimbursement=Math.round(Number(fd.get('reimbursementTwd')));if(!Number.isFinite(reimbursement)||reimbursement<0)throw new Error('Enter a valid reimbursement amount.');
+  const diff=reimbursement-total,route=fd.get('surplusRoute')||'keep',stamp=new Date().toISOString(),date=fd.get('date')||today(),periodId=entryPeriodId(),cardPaid=Math.round(projectPaymentTwd(projectId,'esun_card'));
+  if(periodId)assertPeriodEditable(periodId);
+  const settlementId=uid('pset');let generatedIncomeId=null,generatedExpenseId=null,generatedTransferId=null;
+  if(diff>0.5){
+    generatedIncomeId=uid('inc');await put('incomes',{id:generatedIncomeId,dateReceived:date,budgetPeriodId:periodId,amount:diff,incomeType:'project_surplus',accountId:'ctbc',description:`${p.title} settlement surplus`,titheEligible:false,includedInRegularIncomeMetrics:false,routingHandled:true,sourceProjectId:projectId,systemGenerated:true,createdAt:stamp});
+    const target=projectRouteTarget(route);if(target){generatedTransferId=uid('tr');await put('transfers',{id:generatedTransferId,fromAccountId:'ctbc',toAccountId:target.accountId,amount:diff,budgetPeriodId:periodId,status:'planned',plannedDate:date,transferType:'project_surplus_routing',sourceProjectId:projectId,systemGenerated:true,createdAt:stamp,updatedAt:stamp});if(target.bucketId)await put('transferAllocations',{id:uid('ta'),transferId:generatedTransferId,bucketId:target.bucketId,amount:diff,goalId:state.goals.find(g=>g.bucketId===target.bucketId)?.id||null,label:target.label});}
+  }else if(diff<-0.5){
+    generatedExpenseId=uid('exp');await put('expenses',{id:generatedExpenseId,date,budgetPeriodId:periodId,amount:Math.abs(diff),categoryId:'project-shortfall',accountId:'ctbc',fundingBucketId:null,description:`${p.title} personal shortfall`,sourceProjectId:projectId,excludeFromBudget:true,systemGenerated:true,createdAt:stamp,updatedAt:stamp});
+  }
+  await put('projectSettlements',{id:settlementId,projectId,reimbursementTwd:reimbursement,reimbursementDate:date,totalProjectCostTwd:total,differenceTwd:diff,cardPaidTwd:cardPaid,cashOtherTwd:Math.max(0,total-cardPaid),surplusRoute:route,generatedIncomeId,generatedExpenseId,generatedTransferId,cardClearingConfirmed:cardPaid<=0.5,createdAt:stamp,updatedAt:stamp});
+  await put('projects',{...p,status:'settled',settledAt:stamp,updatedAt:stamp});modal={type:'project-detail',id:projectId};await load();
+}
+async function confirmProjectCardClearing(projectId){const st=projectSettlement(projectId);if(!st)return;await put('projectSettlements',{...st,cardClearingConfirmed:true,cardClearingConfirmedAt:new Date().toISOString(),updatedAt:new Date().toISOString()});modal={type:'project-detail',id:projectId};await load();}
+async function undoProjectSettlement(projectId){
+  const p=project(projectId),st=projectSettlement(projectId);if(!p||!st)return;
+  if(st.generatedTransferId){const t=state.transfers.find(x=>x.id===st.generatedTransferId&&!x.deletedAt);if(t?.status==='completed')throw new Error('The surplus transfer is already completed. Reverse that real bank movement manually before undoing the settlement.');if(t){for(const a of state.transferAllocations.filter(a=>a.transferId===t.id))await remove('transferAllocations',a.id);await remove('transfers',t.id);}}
+  if(st.generatedIncomeId)await remove('incomes',st.generatedIncomeId);if(st.generatedExpenseId)await remove('expenses',st.generatedExpenseId);await remove('projectSettlements',st.id);await put('projects',{...p,status:'active',settledAt:null,updatedAt:new Date().toISOString()});modal={type:'project-detail',id:projectId};await load();
+}
+function exportProjectCsv(projectId){const p=project(projectId);if(!p)return;const rows=[['Date','Category','Description','Original Amount','Currency','NTD Amount','Payment Method']];for(const x of projectExpenses(projectId))rows.push([x.date,x.category,x.description||'',x.originalAmount,x.currency,x.twdAmount??'',x.paymentMethod]);downloadText(`${(p.title||'project').replace(/[^a-z0-9]+/gi,'-').replace(/^-|-$/g,'').toLowerCase()||'project'}-${today()}.csv`,rows.map(r=>r.map(csvCell).join(',')).join('\n'));}
 async function saveCashTransfer(form){
   const fd=new FormData(form),mode=form.dataset.mode||'withdrawal',amount=Number(fd.get('amount')),date=fd.get('date')||today(),periodId=fd.get('period')||null;
   if(amount<=0)throw new Error('Enter a cash amount greater than zero.');
@@ -1630,6 +1758,17 @@ function bind(){
     if(a==='manual-transfer')modal={type:'manual-transfer'};
     if(a==='cash-withdraw')modal={type:'cash-transfer',mode:'withdrawal'};
     if(a==='cash-deposit')modal={type:'cash-transfer',mode:'deposit'};
+    if(a==='open-projects')modal={type:'projects-list'};
+    if(a==='new-project')modal={type:'project-form'};
+    if(a==='edit-project')modal={type:'project-form',id:b.dataset.id};
+    if(a==='open-project')modal={type:'project-detail',id:b.dataset.id};
+    if(a==='add-project-expense')modal={type:'project-expense',projectId:b.dataset.project};
+    if(a==='edit-project-expense')modal={type:'project-expense',projectId:b.dataset.project,expenseId:b.dataset.id};
+    if(a==='delete-project-expense'){if(confirm('Delete this project expense?'))return deleteProjectExpense(b.dataset.project,b.dataset.id);return;}
+    if(a==='settle-project')modal={type:'project-settle',projectId:b.dataset.id};
+    if(a==='confirm-project-card-clearing')return confirmProjectCardClearing(b.dataset.id);
+    if(a==='undo-project-settlement'){if(confirm('Undo this project settlement and its generated personal-ledger entries?'))return undoProjectSettlement(b.dataset.id);return;}
+    if(a==='export-project-csv')return exportProjectCsv(b.dataset.id);
     if(a==='privacy-toggle'){await put('settings',{...state.settings,privacyMode:!state.settings.privacyMode,updatedAt:new Date().toISOString()});return load();}
     if(a==='complete-transfer')modal={type:'transfer',id:b.dataset.id};
     if(a==='payday-transfer')modal={type:'payday-transfer',periodId:b.dataset.period,accountId:b.dataset.account};
@@ -1685,6 +1824,9 @@ function bind(){
   const irf=document.querySelector('#income-routing-form');if(irf)irf.onsubmit=e=>{e.preventDefault();saveIncomeRouting(irf).catch(err=>alert(err.message));};
   const mtf=document.querySelector('#manual-transfer-form');if(mtf)mtf.onsubmit=e=>{e.preventDefault();try{prepareManualTransfer(mtf);}catch(err){alert(err.message);}};
   const ctf=document.querySelector('#cash-transfer-form');if(ctf)ctf.onsubmit=e=>{e.preventDefault();saveCashTransfer(ctf).catch(err=>alert(err.message));};
+  const prf=document.querySelector('#project-form');if(prf)prf.onsubmit=e=>{e.preventDefault();saveProject(prf).catch(err=>alert(err.message));};
+  const pef=document.querySelector('#project-expense-form');if(pef)pef.onsubmit=e=>{e.preventDefault();saveProjectExpense(pef).catch(err=>alert(err.message));};
+  const psf=document.querySelector('#project-settlement-form');if(psf){psf.onsubmit=e=>{e.preventDefault();saveProjectSettlement(psf).catch(err=>alert(err.message));};const inp=psf.querySelector('#project-reimbursement'),preview=psf.querySelector('#project-settlement-preview');if(inp&&preview){const total=projectKnownTwd(psf.dataset.project);const update=()=>{const r=Number(inp.value);if(!Number.isFinite(r)||inp.value===''){preview.innerHTML='Enter the reimbursement amount to calculate the settlement difference.';return;}const d=r-total;preview.innerHTML=d>0.5?`<strong class="good">Surplus ${money(d)}</strong><br>Only this surplus enters your personal ledger.`:d<-0.5?`<strong class="bad">Personal responsibility ${money(Math.abs(d))}</strong><br>Only this shortfall becomes a personal expense.`:`<strong class="good">Fully reimbursed</strong><br>No personal surplus or shortfall.`;};inp.oninput=update;update();}}
   const inv=document.querySelector('#investment-form');if(inv)inv.onsubmit=e=>{e.preventDefault();saveInvestment(inv).catch(err=>alert(err.message));};
   const arf=document.querySelector('#account-reconcile-form');if(arf)arf.onsubmit=e=>{e.preventDefault();try{prepareAccountReconciliation(arf);}catch(err){alert(err.message);}};
   const aaf=document.querySelector('#account-adjustment-form');if(aaf)aaf.onsubmit=e=>{e.preventDefault();saveAccountAdjustment(aaf).catch(err=>alert(err.message));};

@@ -2110,3 +2110,158 @@ html[data-theme="dark"] .theme-option {
 html[data-theme="dark"] .theme-option.active {
   color: var(--text);
 }
+
+/* ---------- v1.11.0 refinements ---------- */
+/* Section titles stay on one line; their helper text sits underneath instead of squeezing them. */
+.section-title:has(> .sub) {
+  display: grid;
+  justify-content: start;
+  align-items: start;
+  gap: 2px;
+}
+.section-title > .sub {
+  text-align: left;
+}
+
+/* Month picker: ‹ November 2026 · Open › — tap the month to choose another */
+.period-current {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--text);
+  font-weight: 700;
+  font-size: 14px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.period-current::after {
+  content: "▾";
+  color: var(--muted);
+  font-size: 11px;
+}
+.period-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.period-state {
+  padding: 2px 7px;
+}
+.period-nav .period-current select,
+.period-nav .period-current select:focus {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  min-height: 0;
+  opacity: 0;
+  cursor: pointer;
+  font-size: 16px;
+}
+.period-current:focus-within {
+  outline: 3px solid rgba(17, 24, 39, 0.18);
+  outline-offset: 2px;
+}
+@media (max-width: 360px) {
+  .period-state {
+    display: none;
+  }
+}
+
+/* Activity: one ⋯ menu per entry (bigger target, Delete kept apart) */
+.tx {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+}
+.row-menu {
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 17px;
+  line-height: 1;
+  padding: 0;
+}
+.action-sheet {
+  display: grid;
+  gap: 8px;
+}
+.action-sheet .btn {
+  width: 100%;
+}
+.action-sheet-danger {
+  margin-top: 6px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+html[data-theme="dark"] .row-menu,
+html[data-theme="dark"] .period-current {
+  background: var(--panel);
+  color: var(--text);
+  border-color: var(--line);
+}
+
+/* Goals: the two buttons share one row (stacked only on the narrowest phones) */
+@media (max-width: 700px) {
+  .goal-actions {
+    flex-direction: row;
+  }
+  .goal-actions .btn {
+    width: auto;
+    flex: 1 1 0;
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+}
+@media (max-width: 340px) {
+  .goal-actions {
+    flex-direction: column;
+  }
+  .goal-actions .btn {
+    width: 100%;
+  }
+}
+/* The month picker gets its own full-width row on Home and Budget, so the month name is never cut off */
+.period-nav.full {
+  display: flex;
+  width: 100%;
+  max-width: none;
+}
+.period-nav.full .period-current {
+  flex: 1 1 auto;
+  justify-content: center;
+}
+.period-nav.full .period-step {
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+}
+.period-nav.full .period-current {
+  min-height: 40px;
+}
+.period-row {
+  display: block;
+}
+.budget-head {
+  display: grid;
+  gap: 12px;
+}
+@media (max-width: 360px) {
+  .period-nav.full .period-state {
+    display: inline-block;
+  }
+}
+/* Delete in the ⋯ menu reads as destructive */
+.action-sheet-danger .btn,
+html[data-theme="dark"] .action-sheet-danger .btn {
+  color: var(--bad);
+}

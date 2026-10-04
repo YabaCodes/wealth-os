@@ -1,4 +1,13 @@
-# Wealth OS — v1.10.1
+# Wealth OS — v1.11.0
+
+## v1.11.0 — refinements
+
+- **Month picker:** Home and Budget show `‹ November 2026 · Open ›` on its own row; tap the month to pick another. The month name is no longer cut off ("November 2026 · fu…"), and Home no longer shows the month twice.
+- **Section titles** stay on one line; their helper text sits underneath instead of squeezing the title onto two lines.
+- **Money and dates:** negative amounts read `−NT$180` (not `NT$-180`), an overspent cap reads `NT$320 over` (not `NT$-320 left`), and dates read `Oct 4` (with the year when it isn't this year) instead of `2026-10-04`.
+- **Activity:** each entry has one ⋯ button (Repeat, Edit, Complete, Route as they apply, with Delete set apart) instead of small text links.
+- **Goals:** *Add Contribution* and *Edit Goal* sit side by side.
+- No change to any stored record or calculation: every figure on every tab and pop-up was checked against v1.9.0.
 
 ## v1.10.1
 
@@ -75,11 +84,11 @@ This release changes presentation only. It does **not** modify balances, transac
 
 ## Release identity
 
-- App version: **1.10.1**
+- App version: **1.11.0**
 - Data model: **181**
-- Service-worker cache: **wealth-os-v1-10-1**
+- Service-worker cache: **wealth-os-v1-11-0**
 - Manifest: **manifest.webmanifest**
 
 ## Upgrade
 
-Replace the repository files with this package, commit to `main`, wait for GitHub Pages to deploy, then fully close and reopen the installed PWA. Confirm **Settings → Wealth OS v1.10.1 / Data model 181**.
+Replace the repository files with this package, commit to `main`, wait for GitHub Pages to deploy, then fully close and reopen the installed PWA. Confirm **Settings → Wealth OS v1.11.0 / Data model 181**.

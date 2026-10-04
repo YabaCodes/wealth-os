@@ -2,7 +2,10 @@ export const money = (n, currency = "TWD") => {
   const v = Number(n || 0);
   if (currency === "USD")
     return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 }).format(v);
-  return `NT$${new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(Math.round(v))}`;
+  // Negative amounts read "−NT$180" (sign before the currency), not "NT$-180".
+  const r = Math.round(v),
+    text = `NT$${new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(Math.abs(r))}`;
+  return r < 0 ? `−${text}` : text;
 };
 
 export const pct = (n) => `${(Number(n || 0) * 100).toFixed(1)}%`;

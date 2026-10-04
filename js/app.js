@@ -41,7 +41,7 @@ let selectedPeriodId = null;
 let activityFilter = "all";
 let activitySearch = "";
 let modalDirty = false;
-const APP_VERSION = "1.10.1";
+const APP_VERSION = "1.11.0";
 const THEME_KEY = "wealthOSTheme";
 // Theme: 'system' follows the phone's light/dark setting. A copy is kept in localStorage so
 // index.html can apply it before the first paint (IndexedDB is too slow for that).
@@ -1688,25 +1688,34 @@ function nav() {
   return `<nav class="tabs"><div class="tabs-inner">${items.map(([id, ic, label]) => `<button class="tab ${tab === id ? "active" : ""}" data-tab="${id}" aria-label="${label}"><span class="tab-icon">${icon(ic)}</span><span class="tab-label">${label}</span></button>`).join("")}</div></nav>`;
 }
 
-function periodSelector() {
+function periodSelector(full = false) {
   if (!state.periods.length) return "";
   const ordered = [...state.periods].sort((a, b) => a.id.localeCompare(b.id)),
     idx = ordered.findIndex((p) => p.id === selectedPeriodId),
     older = idx > 0 ? ordered[idx - 1] : null,
     newer = idx >= 0 && idx < ordered.length - 1 ? ordered[idx + 1] : null;
-  return `<div class="period-nav"><button class="period-step" data-action="period-step" data-id="${older?.id || ""}" ${older ? "" : "disabled"} aria-label="Older funding month">‹</button><select id="period-select" aria-label="Funding month">${[
+  const current = ordered[idx],
+    stateLabel = (x) => (x.state === "closed" ? "Closed" : x.state === "reopened" ? "Reopened" : "Open");
+  return `<div class="period-nav${full ? " full" : ""}"><button class="period-step" data-action="period-step" data-id="${older?.id || ""}" ${older ? "" : "disabled"} aria-label="Older funding month">‹</button><label class="period-current"><span class="period-name">${current ? monthLabel(current.id) : "Choose month"}</span>${current ? `<span class="tag period-state ${current.state === "closed" ? "" : "good-tag"}">${stateLabel(current)}</span>` : ""}<select id="period-select" aria-label="Funding month">${[
     ...ordered,
   ]
     .reverse()
     .map(
       (p) =>
-        `<option value="${p.id}" ${p.id === selectedPeriodId ? "selected" : ""}>${monthLabel(p.id)} · ${p.state.replaceAll("_", " ")}</option>`,
+        `<option value="${p.id}" ${p.id === selectedPeriodId ? "selected" : ""}>${monthLabel(p.id)} · ${stateLabel(p)}</option>`,
     )
     .join(
       "",
-    )}</select><button class="period-step" data-action="period-step" data-id="${newer?.id || ""}" ${newer ? "" : "disabled"} aria-label="Newer funding month">›</button></div>`;
+    )}</select></label><button class="period-step" data-action="period-step" data-id="${newer?.id || ""}" ${newer ? "" : "disabled"} aria-label="Newer funding month">›</button></div>`;
 }
 
+// "Oct 4" this year, "Oct 4, 2025" otherwise; anything that isn't a date is shown as is.
+function dayLabel(iso) {
+  if (!/^\d{4}-\d{2}-\d{2}/.test(iso || "")) return iso || "";
+  const [y, m, d] = iso.slice(0, 10).split("-").map(Number),
+    opts = { month: "short", day: "numeric", ...(y !== new Date().getFullYear() ? { year: "numeric" } : {}) };
+  return new Intl.DateTimeFormat("en-US", opts).format(new Date(y, m - 1, d));
+}
 function render() {
   if (tab === "home") return shell(homeView());
   if (tab === "budget") return shell(budgetView());
@@ -1793,7 +1802,7 @@ function homeView() {
     .sort((a, b) => Number(b.x.budgetAmount || 0) - Number(a.x.budgetAmount || 0) || a.i - b.i)
     .slice(0, 2)
     .map(({ x }) => x);
-  return `<div class="split period-row"><div><span class="tag">${monthLabel(p.id)}</span></div>${periodSelector()}</div>
+  return `<div class="period-row">${periodSelector(true)}</div>
   ${backupReminder()}
   <div class="grid g3 summary-grid" style="margin-top:12px">
     <section class="card"><div class="metric-label">Core Wealth</div><div class="metric">${privateMoney(state.wealth.coreWealth)}</div><div class="sub">Long-term wealth base</div></section>
@@ -1853,13 +1862,13 @@ function homeQuickCapture(p) {
   const projectLabel = activeProjects.length === 1 ? "Project Expense" : "Projects";
   return `<div class="section-title"><h2>Quick capture</h2><span class="sub">Common actions</span></div>
   <div class="quick-action-grid project-ready"><button class="quick-action" data-action="add-expense">${icon("expense")}<span>Expense</span></button><button class="quick-action" data-action="add-income">${icon("income")}<span>Income</span></button><button class="quick-action" data-action="manual-transfer">${icon("transfer")}<span>Transfer</span></button><button class="quick-action" ${projectAction}>${icon("project")}<span>${projectLabel}</span></button></div>
-  <section class="card mini-activity">${recent.length ? recent.map((x) => `<div class="mini-activity-row"><div><strong>${esc(x._title)}</strong><div class="sub">${esc(x._date || "")} · ${esc(x._account || "")}</div></div><span class="amount ${x._kind === "expense" ? "bad" : x._kind === "income" ? "good" : ""}">${x._kind === "transfer" ? "↔ " : ""}${money(x._amount)}</span></div>`).join("") : `<div class="empty compact-empty"><strong>No activity in this month yet.</strong><span>Use the buttons above for fast entry.</span></div>`}</section>`;
+  <section class="card mini-activity">${recent.length ? recent.map((x) => `<div class="mini-activity-row"><div><strong>${esc(x._title)}</strong><div class="sub">${esc(dayLabel(x._date))} · ${esc(x._account || "")}</div></div><span class="amount ${x._kind === "expense" ? "bad" : x._kind === "income" ? "good" : ""}">${x._kind === "transfer" ? "↔ " : ""}${money(x._amount)}</span></div>`).join("") : `<div class="empty compact-empty"><strong>No activity in this month yet.</strong><span>Use the buttons above for fast entry.</span></div>`}</section>`;
 }
 
 function budgetMini(name, budget, actual) {
   const r = budget - actual;
   const u = budget ? Math.min(1, actual / budget) : 0;
-  return `<div class="row"><div style="flex:1"><strong>${name}</strong><div class="progress"><span style="width:${u * 100}%"></span></div><div class="sub">${money(actual)} of ${money(budget)}</div></div><div class="amount ${r < 0 ? "bad" : ""}">${money(r)} left</div></div>`;
+  return `<div class="row"><div style="flex:1"><strong>${name}</strong><div class="progress"><span style="width:${u * 100}%"></span></div><div class="sub">${money(actual)} of ${money(budget)}</div></div><div class="amount ${r < 0 ? "bad" : ""}">${r < 0 ? `${money(-r)} over` : `${money(r)} left`}</div></div>`;
 }
 function row(label, value) {
   return `<div class="row"><span>${label}</span><span class="amount">${value}</span></div>`;
@@ -1888,12 +1897,12 @@ function budgetView() {
   const lock = closed
     ? `<div class="notice close-lock"><strong>Month closed</strong><br>${monthLabel(p.id)} is read-only. Reopen it intentionally before changing transactions or budget-linked records.</div>`
     : "";
-  return `<div class="split"><div><h2 style="margin:0">Budget</h2><div class="sub">${monthLabel(p.id)} · Plan vs actual</div></div>${periodSelector()}</div>
+  return `<div class="budget-head"><div><h2 style="margin:0">Budget</h2><div class="sub">Plan vs actual for the funding month</div></div>${periodSelector(true)}</div>
   ${lock}
   <div class="budget-overview" style="margin-top:14px">
     ${budgetKpi("Income", privateMoney(plan.salary), "Exact take-home")}
     ${budgetKpi("Fixed", `${money(fixedActual)} / ${money(plan.fixed)}`, `${money(Math.max(0, plan.fixed - fixedActual))} remaining`)}
-    ${budgetKpi("Flexible", `${money(flexActual)} / ${money(plan.caps)}`, `${money(plan.caps - flexActual)} remaining`, flexActual > plan.caps)}
+    ${budgetKpi("Flexible", `${money(flexActual)} / ${money(plan.caps)}`, flexActual > plan.caps ? `${money(flexActual - plan.caps)} over` : `${money(plan.caps - flexActual)} remaining`, flexActual > plan.caps)}
     ${budgetKpi("Reserves", `${money(reserveFunded)} / ${money(plan.sinking)}`, "Completed funding")}
     ${budgetKpi("Wealth", `${privateMoney(wealthDone)} / ${privateMoney(Math.max(0, plan.immediateWealth))}`, "Completed core-wealth transfers")}
     ${budgetKpi("Buffer", money(plan.buffer), `Potential sweep ${money(sweep.available)}`)}
@@ -2018,8 +2027,8 @@ function transactionsView() {
   <section class="card activity-list">${list.length ? list.slice(0, 150).map(txLine).join("") : `<div class="empty compact-empty"><strong>No matching activity.</strong><span>Try another filter or search term.</span></div>`}</section>`;
 }
 
-function txLine(x) {
-  const meta = [x._date, x._account, x._detail].filter(Boolean).join(" · ");
+// What can be done with an activity row (shared by the row and its ⋯ menu).
+function txActions(x) {
   const protectedIncome = x._kind === "income" && x.systemGenerated === true;
   const plannedTransfer = x._kind === "transfer" && x.status === "planned";
   const canEdit = !protectedIncome && (x._kind !== "transfer" || x.transferType === "manual");
@@ -2036,8 +2045,15 @@ function txLine(x) {
     !routingTransfersForIncome(x.id).length &&
     !isClosedPeriod(x.budgetPeriodId);
   const canRepeat = x._kind === "expense" && !!entryPeriodId();
+  return { canEdit, canDelete, canComplete, canRoute, canRepeat };
+}
+function txLine(x) {
+  const meta = [dayLabel(x._date), x._account, x._detail].filter(Boolean).join(" · ");
+  const plannedTransfer = x._kind === "transfer" && x.status === "planned";
+  const { canEdit, canDelete, canComplete, canRoute, canRepeat } = txActions(x);
+  const hasActions = canEdit || canDelete || canComplete || canRoute || canRepeat;
   const amount = money(x._amount);
-  return `<div class="tx"><div class="tx-main"><div class="tx-title">${esc(x._title)}</div><div class="tx-meta">${esc(meta)}</div><div class="tx-actions">${canComplete ? `<button class="text-btn" data-action="complete-transfer" data-id="${x.id}">Complete</button>` : ""}${canRoute ? `<button class="text-btn" data-action="route-income" data-id="${x.id}">Route</button>` : ""}${canRepeat ? `<button class="text-btn" data-action="repeat-expense" data-id="${x.id}">Repeat</button>` : ""}${canEdit ? `<button class="text-btn" data-action="edit-transaction" data-kind="${x._kind}" data-id="${x.id}">Edit</button>` : ""}${canDelete ? `<button class="text-btn danger-text" data-action="delete-transaction" data-kind="${x._kind}" data-id="${x.id}">Delete</button>` : ""}</div></div><div class="right"><div class="amount ${x._kind === "income" ? "good" : x._kind === "expense" ? "bad" : ""}">${x._kind === "transfer" ? "↔ " : ""}${amount}</div><span class="tag ${plannedTransfer ? "warn-tag" : ""}">${plannedTransfer ? "planned" : x._kind}</span></div></div>`;
+  return `<div class="tx"><div class="tx-main"><div class="tx-title">${esc(x._title)}</div><div class="tx-meta">${esc(meta)}</div></div><div class="right"><div class="amount ${x._kind === "income" ? "good" : x._kind === "expense" ? "bad" : ""}">${x._kind === "transfer" ? "↔ " : ""}${amount}</div><span class="tag ${plannedTransfer ? "warn-tag" : ""}">${plannedTransfer ? "planned" : x._kind}</span></div>${hasActions ? `<button class="row-menu" type="button" data-action="row-actions" data-kind="${x._kind}" data-id="${x.id}" aria-label="Options for ${esc(x._title)}">⋯</button>` : ""}</div>`;
 }
 
 function projectOverviewStrip() {
@@ -2085,7 +2101,7 @@ function projectExpenseFormView(projectId, x = null) {
 }
 function projectExpenseLine(x) {
   const twd = Number(x.twdAmount) > 0 ? money(x.twdAmount) : '<span class="warn">NTD pending</span>';
-  return `<div class="project-expense-line"><div><strong>${esc(x.category)}</strong><div class="sub">${esc(x.date || "")} · ${esc(x.paymentMethod === "esun_card" ? "E.SUN card" : x.paymentMethod === "cash" ? "Cash" : "Other")}${x.description ? ` · ${esc(x.description)}` : ""}</div><div class="sub">${esc(formatOriginal(x.originalAmount, x.currency))} · ${twd}</div></div><div class="project-line-actions"><button class="text-btn" data-action="edit-project-expense" data-project="${x.projectId}" data-id="${x.id}">Edit</button><button class="text-btn danger-text" data-action="delete-project-expense" data-project="${x.projectId}" data-id="${x.id}">Delete</button></div></div>`;
+  return `<div class="project-expense-line"><div><strong>${esc(x.category)}</strong><div class="sub">${esc(dayLabel(x.date))} · ${esc(x.paymentMethod === "esun_card" ? "E.SUN card" : x.paymentMethod === "cash" ? "Cash" : "Other")}${x.description ? ` · ${esc(x.description)}` : ""}</div><div class="sub">${esc(formatOriginal(x.originalAmount, x.currency))} · ${twd}</div></div><div class="project-line-actions"><button class="text-btn" data-action="edit-project-expense" data-project="${x.projectId}" data-id="${x.id}">Edit</button><button class="text-btn danger-text" data-action="delete-project-expense" data-project="${x.projectId}" data-id="${x.id}">Delete</button></div></div>`;
 }
 function projectDetailView(projectId) {
   const p = project(projectId);
@@ -2106,7 +2122,7 @@ function projectDetailView(projectId) {
     settlementBlock = `<div class="section-title"><h2>Settlement</h2><span class="tag good-tag">Settled</span></div><section class="card settlement-card">${row("Project cost", money(settlement.totalProjectCostTwd))}${row("Reimbursement received", money(settlement.reimbursementTwd))}${row(diff >= 0 ? "Surplus" : "Personal responsibility", `${diff >= 0 ? "+" : "−"}${money(Math.abs(diff))}`)}${row("E.SUN card spend", money(settlement.cardPaidTwd || 0))}<div class="notice" style="margin-top:12px">Card-clearing guidance: move the E.SUN card-paid project amount from CTBC to E.SUN as needed before the card debit is due. This can include reimbursed money plus any personal shortfall. Wealth OS uses net-settlement accounting, so that clearing movement and matching card debit are not posted to the personal ledger.</div>${Number(settlement.cardPaidTwd || 0) > 0 && !settlement.cardClearingConfirmed ? `<button class="btn secondary" style="width:100%;margin-top:12px" data-action="confirm-project-card-clearing" data-id="${p.id}">Mark ${money(settlement.cardPaidTwd)} CTBC → E.SUN card funding done</button>` : Number(settlement.cardPaidTwd || 0) > 0 ? `<div class="good-notice notice" style="margin-top:12px">E.SUN card funding marked complete.</div>` : ""}<div class="actions" style="margin-top:12px"><button class="btn ghost" data-action="export-project-csv" data-id="${p.id}">Export CSV</button><button class="btn ghost danger-text" data-action="undo-project-settlement" data-id="${p.id}">Undo Settlement</button></div></section>`;
   } else
     settlementBlock = `<div class="section-title"><h2>Reimbursement</h2><span class="sub">Settle when company payment arrives</span></div><section class="card"><div class="split"><div><strong>${missing.length ? `${missing.length} expense${missing.length === 1 ? " needs" : "s need"} NTD amount` : "Ready for settlement"}</strong><div class="sub">Known project cost ${money(known)} · E.SUN card ${money(card)}</div></div><button class="btn" data-action="settle-project" data-id="${p.id}" ${!expenses.length ? "disabled" : ""}>Settle Reimbursement</button></div>${missing.length ? '<div class="sub warn" style="margin-top:8px">Add the NTD equivalent to every expense before settlement.</div>' : ""}</section>`;
-  return `<div class="split"><div><h3 class="project-title">${esc(p.title)}</h3><div class="sub">${p.startDate ? esc(p.startDate) : ""}${p.endDate ? ` → ${esc(p.endDate)}` : ""} · default ${esc(p.defaultCurrency || "EUR")}</div></div>${projectStatusTag(p)}</div><div class="grid g2 project-summary-grid" style="margin-top:14px"><section class="card nested-card"><div class="metric-label">Known NTD spend</div><div class="metric">${money(known)}</div><div class="sub">${missing.length ? `${missing.length} NTD conversion${missing.length === 1 ? "" : "s"} pending` : "All expenses valued"}</div></section><section class="card nested-card"><div class="metric-label">Original currency totals</div><strong>${esc(originalText)}</strong><div class="sub">Preserved exactly as entered</div></section></div><div class="actions project-top-actions" style="margin-top:14px">${!settlement ? `<button class="btn" data-action="add-project-expense" data-project="${p.id}">Add Expense</button><button class="btn secondary" data-action="edit-project" data-id="${p.id}">Edit Project</button>` : ""}<button class="btn ghost" data-action="export-project-csv" data-id="${p.id}">Export CSV</button></div><div class="section-title"><h2>Expenses</h2><span class="sub">${expenses.length} recorded</span></div><section class="card project-expense-list">${expenses.length ? expenses.map(projectExpenseLine).join("") : `<div class="empty compact-empty"><strong>No project expenses yet.</strong><span>Add expenses here instead of your normal monthly budget.</span></div>`}</section>${settlementBlock}`;
+  return `<div class="split"><div><h3 class="project-title">${esc(p.title)}</h3><div class="sub">${p.startDate ? esc(dayLabel(p.startDate)) : ""}${p.endDate ? ` → ${esc(dayLabel(p.endDate))}` : ""} · default ${esc(p.defaultCurrency || "EUR")}</div></div>${projectStatusTag(p)}</div><div class="grid g2 project-summary-grid" style="margin-top:14px"><section class="card nested-card"><div class="metric-label">Known NTD spend</div><div class="metric">${money(known)}</div><div class="sub">${missing.length ? `${missing.length} NTD conversion${missing.length === 1 ? "" : "s"} pending` : "All expenses valued"}</div></section><section class="card nested-card"><div class="metric-label">Original currency totals</div><strong>${esc(originalText)}</strong><div class="sub">Preserved exactly as entered</div></section></div><div class="actions project-top-actions" style="margin-top:14px">${!settlement ? `<button class="btn" data-action="add-project-expense" data-project="${p.id}">Add Expense</button><button class="btn secondary" data-action="edit-project" data-id="${p.id}">Edit Project</button>` : ""}<button class="btn ghost" data-action="export-project-csv" data-id="${p.id}">Export CSV</button></div><div class="section-title"><h2>Expenses</h2><span class="sub">${expenses.length} recorded</span></div><section class="card project-expense-list">${expenses.length ? expenses.map(projectExpenseLine).join("") : `<div class="empty compact-empty"><strong>No project expenses yet.</strong><span>Add expenses here instead of your normal monthly budget.</span></div>`}</section>${settlementBlock}`;
 }
 function projectSettlementFormView(projectId) {
   const p = project(projectId);
@@ -2150,7 +2166,7 @@ function goalsView() {
       let paceText = goalPaceText(g);
       if (g.id === "goal-home-trip" && status.key === "waiting")
         paceText = `Expected unlock: ${dateAfterMonths(strategyForecast.sim.events.travelUnlockMonth)}`;
-      return `<section class="card goal-card"><div class="split"><div><strong>${esc(g.name)}</strong><div class="sub">${esc(rule)}</div></div><span class="tag ${status.className}">${status.label}</span></div><div class="goal-metric-row"><div><div class="metric">${privateMoney(b)}</div><div class="sub">${privateMoney(remaining)} remaining</div></div><div class="right"><strong>${pct(p)}</strong><div class="sub">of ${privateMoney(target)}</div></div></div><div class="progress"><span style="width:${p * 100}%"></span></div><div class="goal-pace">${esc(paceText)}</div>${g.targetDate ? `<div class="sub">Target date: ${esc(g.targetDate)}</div>` : ""}<div class="actions goal-actions"><button class="btn secondary" data-action="goal-contribution" data-id="${g.id}">Add Contribution</button><button class="btn ghost" data-action="edit-goal" data-id="${g.id}">Edit Goal</button></div></section>`;
+      return `<section class="card goal-card"><div class="split"><div><strong>${esc(g.name)}</strong><div class="sub">${esc(rule)}</div></div><span class="tag ${status.className}">${status.label}</span></div><div class="goal-metric-row"><div><div class="metric">${privateMoney(b)}</div><div class="sub">${privateMoney(remaining)} remaining</div></div><div class="right"><strong>${pct(p)}</strong><div class="sub">of ${privateMoney(target)}</div></div></div><div class="progress"><span style="width:${p * 100}%"></span></div><div class="goal-pace">${esc(paceText)}</div>${g.targetDate ? `<div class="sub">Target date: ${esc(dayLabel(g.targetDate))}</div>` : ""}<div class="actions goal-actions"><button class="btn secondary" data-action="goal-contribution" data-id="${g.id}">Add Contribution</button><button class="btn ghost" data-action="edit-goal" data-id="${g.id}">Edit Goal</button></div></section>`;
     })
     .join("");
   return `<div><h2 style="margin:0">Goals</h2><div class="sub">Your wealth priorities, pace and planned-use funds.</div></div>
@@ -2579,10 +2595,29 @@ function renderModal() {
     );
   if (modal.type === "project-settle")
     return modalWrap("Settle Reimbursement", projectSettlementFormView(modal.projectId));
+  if (modal.type === "row-actions") {
+    const x = activityRecords().find((r) => r._kind === modal.kind && r.id === modal.id);
+    return modalWrap(esc(x?._title || "Entry"), rowActionsView(modal.kind, modal.id));
+  }
   if (modal.type === "delete-period") return modalWrap("Delete Funding Month", deleteFundingMonthView(modal.periodId));
   if (modal.type === "edit-goal") return modalWrap("Edit Goal", goalEditForm(modal.goalId));
   if (modal.type === "goal-contribution") return modalWrap("Add Goal Contribution", goalContributionForm(modal.goalId));
   return "";
+}
+function rowActionsView(kind, id) {
+  const x = activityRecords().find((r) => r._kind === kind && r.id === id);
+  if (!x) return `<div class="empty compact-empty"><strong>This entry no longer exists.</strong></div>`;
+  const { canEdit, canDelete, canComplete, canRoute, canRepeat } = txActions(x);
+  const btn = (action, label, extra = "") =>
+    `<button class="btn ${action === "delete-transaction" ? "ghost danger-text" : "secondary"}" data-action="${action}" data-id="${x.id}" ${extra}>${label}</button>`;
+  return `<div class="sub" style="margin-bottom:12px">${esc([dayLabel(x._date), money(Math.abs(x._amount)), x._account].filter(Boolean).join(" · "))}</div><div class="action-sheet">${[
+    canComplete && btn("complete-transfer", "Complete transfer"),
+    canRoute && btn("route-income", "Route income"),
+    canRepeat && btn("repeat-expense", "Repeat expense"),
+    canEdit && btn("edit-transaction", "Edit", `data-kind="${kind}"`),
+  ]
+    .filter(Boolean)
+    .join("")}${canDelete ? `<div class="action-sheet-danger">${btn("delete-transaction", `Delete ${kind}`, `data-kind="${kind}"`)}</div>` : ""}</div>`;
 }
 function modalWrap(title, body) {
   return `<div class="modal-backdrop" data-action="backdrop-close"><section class="modal" role="dialog" aria-modal="true" aria-label="${esc(String(title).replace(/<[^>]*>/g, ""))}" onclick="event.stopPropagation()"><div class="split"><h3>${title}</h3><button class="btn ghost small" data-action="close-modal">Close</button></div>${body}</section></div>`;
@@ -4639,8 +4674,12 @@ function bind() {
             if (b.dataset.kind === "income") modal = { type: "income", id: b.dataset.id };
             if (b.dataset.kind === "transfer") modal = { type: "manual-transfer", id: b.dataset.id };
           }
+          if (a === "row-actions") modal = { type: "row-actions", kind: b.dataset.kind, id: b.dataset.id };
           if (a === "delete-transaction") {
-            if (confirm(`Delete this ${b.dataset.kind}?`)) return deleteTransaction(b.dataset.kind, b.dataset.id);
+            if (confirm(`Delete this ${b.dataset.kind}?`)) {
+              if (modal?.type === "row-actions") modal = null;
+              return deleteTransaction(b.dataset.kind, b.dataset.id);
+            }
             return;
           }
           if (a === "close-modal") modal = null;

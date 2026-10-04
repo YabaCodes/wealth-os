@@ -247,3 +247,338 @@ button,input,select,textarea{font:inherit}button{cursor:pointer}
 .project-summary-grid strong{font-variant-numeric:tabular-nums}
 @media(max-width:700px){.quick-action-grid.project-ready{grid-template-columns:repeat(2,minmax(0,1fr))}.project-empty{align-items:flex-start;flex-direction:column}.project-empty .btn{width:100%}.project-expense-line{grid-template-columns:1fr}.project-line-actions{justify-content:flex-start}.project-top-actions .btn{flex:1 1 calc(50% - 8px)}}
 @media(max-width:390px){.project-top-actions .btn{flex:1 1 100%}}
+
+
+/* ---------- Theme selector (v1.9.0) ---------- */
+.theme-switch {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  margin-top: 12px;
+  padding: 4px;
+  border-radius: 14px;
+  background: var(--soft);
+  border: 1px solid var(--line);
+}
+.theme-option {
+  min-height: 40px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 700;
+}
+.theme-option.active {
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.12);
+}
+html[data-theme="dark"] .theme-option.active {
+  background: #2a3242;
+  box-shadow: none;
+}
+
+
+/* ---------- Dark theme (v1.9.0) ----------
+   Generated from the light rules above: each hard-coded colour is mapped to a dark
+   equivalent by role. The light theme is unchanged. If you add a new colour above,
+   add its dark version here too. */
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0d1017;
+  --panel: #161b26;
+  --text: #e8ebf1;
+  --muted: #9aa4b2;
+  --line: #2a3242;
+  --accent: #e8ebf1;
+  --good: #4fd1a5;
+  --warn: #f5b041;
+  --bad: #f87171;
+  --soft: #1e2533;
+  --shadow: 0 6px 22px rgba(0, 0, 0, 0.35);
+  --input-line: #3a4252;
+}
+html[data-theme="dark"] .pill {
+    background: #252d3e
+}
+html[data-theme="dark"] .btn {
+    color: #0d1017
+}
+html[data-theme="dark"] .btn.secondary {
+    background: #252d3e;
+    color: #e8ebf1
+}
+html[data-theme="dark"] .btn.ghost {
+    color: #e8ebf1
+}
+html[data-theme="dark"] .btn.danger {
+    background: #b42318
+}
+html[data-theme="dark"] .progress {
+    background: #2a3242
+}
+html[data-theme="dark"] .progress>span {
+    background: #e8ebf1
+}
+html[data-theme="dark"] .warn-tag {
+    background: #2d2112
+}
+html[data-theme="dark"] .good-tag {
+    background: #0f2a22
+}
+html[data-theme="dark"] .tabs {
+    background: rgba(22, 27, 38, 0.97)
+}
+html[data-theme="dark"] .tab {
+    color: #a3adbb
+}
+html[data-theme="dark"] .tab.active {
+    color: #e8ebf1
+}
+html[data-theme="dark"] .modal-backdrop {
+    background: rgba(0, 0, 0, 0.62)
+}
+html[data-theme="dark"] .modal {
+    background: #161b26
+}
+html[data-theme="dark"] .field input,
+html[data-theme="dark"] .field select,
+html[data-theme="dark"] .field textarea {
+    border: 1px solid #3a4252;
+    background: #161b26
+}
+html[data-theme="dark"] .field input:disabled {
+    background: #1a2030;
+    color: #c3cad6
+}
+html[data-theme="dark"] .tag {
+    background: #252d3e;
+    color: #c9d0db
+}
+html[data-theme="dark"] .notice {
+    border-left: 4px solid #9aa4b2;
+    background: #1a2030
+}
+html[data-theme="dark"] .hero-action {
+    background: #e8ebf1;
+    color: #0d1017
+}
+html[data-theme="dark"] .hero-action .sub {
+    color: #4a5466
+}
+html[data-theme="dark"] .hero-action .btn {
+    background: #161b26;
+    color: #e8ebf1
+}
+html[data-theme="dark"] .danger-zone {
+    border-color: #5c2626;
+    background: #2e1616
+}
+html[data-theme="dark"] .action-icon {
+    background: #20283a;
+    color: #e8ebf1
+}
+html[data-theme="dark"] .action-chevron {
+    color: #7d8798
+}
+html[data-theme="dark"] .compact-empty strong {
+    color: #c9d0db
+}
+html[data-theme="dark"] .reconcile-grid>div {
+    background: #1a2030;
+    border: 1px solid #2a3242
+}
+html[data-theme="dark"] .filter-chip {
+    background: #161b26;
+    color: #c3cad6
+}
+html[data-theme="dark"] .filter-chip.active {
+    background: #e8ebf1;
+    color: #0d1017;
+    border-color: #e8ebf1
+}
+html[data-theme="dark"] .text-btn {
+    color: #c3cad6
+}
+html[data-theme="dark"] .allocation-callout {
+    background: #2d2112;
+    border: 1px solid #5a3d17
+}
+html[data-theme="dark"] .allocation-row input {
+    border: 1px solid #3a4252
+}
+html[data-theme="dark"] .check-dot {
+    background: #20283a;
+    color: #c3cad6
+}
+html[data-theme="dark"] .check-dot.ok {
+    background: #0f2a22
+}
+html[data-theme="dark"] .check-dot.attention {
+    background: #2d2112
+}
+html[data-theme="dark"] .danger-notice {
+    background: #2e1616
+}
+html[data-theme="dark"] .strategy-steps span {
+    background: #1a2030;
+    color: #9aa4b2;
+    border: 1px solid #2a3242
+}
+html[data-theme="dark"] .strategy-steps .active-step {
+    color: #e8ebf1;
+    border-color: #3a4252;
+    background: #20283a
+}
+html[data-theme="dark"] .goal-pace {
+    background: #1a2030;
+    color: #c3cad6
+}
+html[data-theme="dark"] .trend-svg line {
+    stroke: #2f3746
+}
+html[data-theme="dark"] .trend-svg polyline {
+    stroke: #e8ebf1
+}
+html[data-theme="dark"] .trend-svg circle {
+    fill: #161b26;
+    stroke: #e8ebf1
+}
+html[data-theme="dark"] .history-bar-track {
+    background: #20283a
+}
+html[data-theme="dark"] .history-bar-track span {
+    background: #e8ebf1
+}
+html[data-theme="dark"] .scenario-card.featured {
+    border-color: #3a4252;
+    box-shadow: 0 8px 28px rgba(255, 255, 255, 0.07)
+}
+html[data-theme="dark"] .nested-card {
+    background: #1a2030
+}
+html[data-theme="dark"] .check-line {
+    color: #c9d0db
+}
+html[data-theme="dark"] .quick-action {
+    background: #161b26;
+    color: #e8ebf1;
+    box-shadow: 0 2px 8px rgba(255, 255, 255, 0.03)
+}
+html[data-theme="dark"] .quick-action .ui-icon {
+    color: #c3cad6
+}
+html[data-theme="dark"] .quick-action:active {
+    background: #1a2030
+}
+html[data-theme="dark"] .obligation-status {
+    background: #20283a;
+    color: #9aa4b2
+}
+html[data-theme="dark"] .obligation-status.done {
+    background: #0f2a22
+}
+html[data-theme="dark"] .activity-search input {
+    border: 1px solid #3a4252;
+    background: #161b26;
+    color: #e8ebf1
+}
+html[data-theme="dark"] .health-dot {
+    background: #252d3e;
+    color: #9aa4b2
+}
+html[data-theme="dark"] .health-item.warn .health-dot {
+    background: #2d2112;
+    color: #f5b041
+}
+html[data-theme="dark"] .health-item.critical .health-dot {
+    background: #2e1616
+}
+html[data-theme="dark"] .health-item.info .health-dot {
+    background: #1c2640;
+    color: #c3cad6
+}
+html[data-theme="dark"] .good-notice {
+    border-left-color: #2f9e7f;
+    background: #0f2a22
+}
+html[data-theme="dark"] .cash-card .notice {
+    border-left-color: #2f9e7f
+}
+html[data-theme="dark"] .privacy-btn[aria-pressed="true"] {
+    background: #e8ebf1;
+    color: #0d1017;
+    border-color: #e8ebf1
+}
+html[data-theme="dark"] .sync-budget-option {
+    background: #1a2030
+}
+html[data-theme="dark"] .sync-budget-option input {
+    accent-color: #e8ebf1
+}
+html[data-theme="dark"] .pace-target {
+    stroke: #5f6a7b
+}
+html[data-theme="dark"] .pace-actual {
+    stroke: #e8ebf1
+}
+html[data-theme="dark"] .pace-projection {
+    stroke: #9aa4b2
+}
+html[data-theme="dark"] .pace-grid {
+    stroke: #2f3746
+}
+html[data-theme="dark"] .pace-dot {
+    fill: #e8ebf1
+}
+html[data-theme="dark"] .muted-progress span {
+    background: #8792a3 !important
+}
+html[data-theme="dark"] .pace-metrics>div {
+    background: #1a2030
+}
+html[data-theme="dark"] .bad-tag {
+    background: #2e1616;
+    color: #f87171;
+    border-color: #5c2626
+}
+html[data-theme="dark"] .project-strip-row>span {
+    color: #7d8798
+}
+html[data-theme="dark"] .project-chevron {
+    color: #7d8798
+}
+html[data-theme="dark"] .hero-action {
+  background: #1e2636;
+  color: #e8ebf1;
+  border-color: #2f3a4f;
+}
+html[data-theme="dark"] .hero-action .sub {
+  color: #b4bdca;
+}
+html[data-theme="dark"] .hero-action .metric-label {
+  color: #b4bdca;
+}
+html[data-theme="dark"] .hero-action .btn {
+  background: #e8ebf1;
+  color: #0d1017;
+}
+html[data-theme="dark"] .btn.danger {
+  color: #fff;
+}
+html[data-theme="dark"] .modal {
+  background: var(--panel);
+  color: var(--text);
+}
+html[data-theme="dark"] input,
+html[data-theme="dark"] select,
+html[data-theme="dark"] textarea {
+  background: #10141d;
+  color: var(--text);
+  border-color: #3a4252;
+}
+html[data-theme="dark"] .settings-budget-input {
+  background: #10141d;
+  color: var(--text);
+  border-color: #3a4252;
+}

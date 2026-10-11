@@ -1,4 +1,12 @@
-# Wealth OS — v1.11.0
+# Wealth OS — v1.12.0
+
+## v1.12.0 — bills, Household and the sweep
+
+- **Fixed bills:** a bill is ✓ paid as soon as you record a payment for it, even when the charge differs from the budget (NT$790 or NT$810 on a NT$799 phone plan). The line still shows both amounts and the difference: `NT$790 of NT$799 · paid · NT$9 under`. *x of y covered*, the Fixed summary on Budget and Month-End Review use the same rule; Month-End only flags bills with nothing recorded.
+- **Bill differences in the sweep:** once a bill is recorded, what you saved on it is added to the month-end sweep and an overcharge is taken off it, so small differences no longer sit unnoticed in the operating account. A bill with nothing recorded is never swept.
+- **Household:** a new flexible cap for laundry, toiletries and cleaning supplies, between Water and Miscellaneous. It starts at NT$0: set the amount in **Settings → Budget rules**. As a capped budget it is planned at payday, and whatever you don't spend comes back in the month-end sweep.
+- **Budget changes after payday:** if a change lowers this month's wealth plan after payday has already moved the old amount (for example, adding Household mid-month with *Apply to* this month), the sweep is reduced by the difference, so the month never sends more to wealth than you actually have. Month-End Review explains the adjustment.
+- Months closed before v1.12 keep exactly the numbers they were closed with. No stored transaction, transfer or allocation is changed.
 
 ## v1.11.0 — refinements
 
@@ -84,11 +92,11 @@ This release changes presentation only. It does **not** modify balances, transac
 
 ## Release identity
 
-- App version: **1.11.0**
-- Data model: **181**
-- Service-worker cache: **wealth-os-v1-11-0**
+- App version: **1.12.0**
+- Data model: **182**
+- Service-worker cache: **wealth-os-v1-12-0**
 - Manifest: **manifest.webmanifest**
 
 ## Upgrade
 
-Replace the repository files with this package, commit to `main`, wait for GitHub Pages to deploy, then fully close and reopen the installed PWA. Confirm **Settings → Wealth OS v1.11.0 / Data model 181**.
+Replace the repository files with this package, commit to `main`, wait for GitHub Pages to deploy, then fully close and reopen the installed PWA. Confirm **Settings → Wealth OS v1.12.0 / Data model 182**.

@@ -18,8 +18,8 @@ export const DEFAULTS = {
     conservativeSalaryGrowth: 1,
     aggressiveInvestmentReturn: 9,
     aggressiveSalaryGrowth: 5,
-    appVersion: "1.10.0",
-    dataModelVersion: 181,
+    appVersion: "1.12.0",
+    dataModelVersion: 182,
     privacyMode: false,
     applyBudgetChangesToCurrentMonth: true,
   },
@@ -176,6 +176,8 @@ export const DEFAULTS = {
     },
     { id: "gas", name: "Gas", group: "Flexible", ruleType: "cap", defaultAmount: 0, active: true, sort: 33 },
     { id: "water", name: "Water", group: "Flexible", ruleType: "cap", defaultAmount: 0, active: true, sort: 34 },
+    // Laundry, toiletries, cleaning supplies and other recurring household items (v1.12).
+    { id: "household", name: "Household", group: "Flexible", ruleType: "cap", defaultAmount: 0, active: true, sort: 34.5 },
     {
       id: "misc",
       name: "Miscellaneous",

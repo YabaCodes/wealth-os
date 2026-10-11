@@ -41,7 +41,7 @@ let selectedPeriodId = null;
 let activityFilter = "all";
 let activitySearch = "";
 let modalDirty = false;
-const APP_VERSION = "1.11.0";
+const APP_VERSION = "1.12.0";
 const THEME_KEY = "wealthOSTheme";
 // Theme: 'system' follows the phone's light/dark setting. A copy is kept in localStorage so
 // index.html can apply it before the first paint (IndexedDB is too slow for that).
@@ -67,7 +67,7 @@ if (window.matchMedia) {
   };
   mq.addEventListener ? mq.addEventListener("change", onChange) : mq.addListener?.(onChange);
 }
-const DATA_MODEL_VERSION = 181;
+const DATA_MODEL_VERSION = 182;
 const PROJECT_CATEGORIES = ["Hotel", "Car Rental", "Food", "Gas", "Transport", "Business", "Other"];
 const PROJECT_CURRENCIES = ["EUR", "TWD", "USD", "GBP", "CHF", "JPY"];
 
@@ -542,6 +542,40 @@ async function migrateV181() {
   });
 }
 
+async function migrateV182() {
+  const settings = await getOne("settings", "app");
+  if (Number(settings?.dataModelVersion || 0) >= 182) return;
+  // v1.12 adds a Household flexible cap (laundry, toiletries, cleaning) with no amount: set it in
+  // Settings → Budget rules. Skipped if a category with that name already exists. It is also added,
+  // at zero, to any open month's plan so Household expenses count there; zero changes no totals.
+  const categories = await getAll("categories");
+  const stamp = new Date().toISOString();
+  if (!categories.some((c) => c.id === "household" || String(c.name || "").trim().toLowerCase() === "household")) {
+    const water = categories.find((c) => c.id === "water"),
+      misc = categories.find((c) => c.id === "misc");
+    const sort = water && misc ? (Number(water.sort) + Number(misc.sort)) / 2 : Number(water?.sort ?? 34) + 0.5;
+    const household = {
+      id: "household",
+      name: "Household",
+      group: "Flexible",
+      ruleType: "cap",
+      defaultAmount: 0,
+      active: true,
+      sort,
+      createdAt: stamp,
+      updatedAt: stamp,
+    };
+    await put("categories", household);
+    for (const period of await getAll("periods")) {
+      const snap = period.planSnapshot;
+      if (period.state === "closed" || !snap || !Array.isArray(snap.lines)) continue;
+      if (snap.lines.some((l) => l.id === "household")) continue;
+      await put("periods", { ...period, planSnapshot: { ...snap, lines: [...snap.lines, { ...household, budgetAmount: 0 }] } });
+    }
+  }
+  await put("settings", { ...settings, dataModelVersion: 182, appVersion: "1.12.0", updatedAt: stamp });
+}
+
 async function load() {
   await seedIfNeeded();
   await migrateV131();
@@ -558,6 +592,7 @@ async function load() {
   await migrateV174();
   await migrateV180();
   await migrateV181();
+  await migrateV182();
   const keys = [
     "accounts",
     "buckets",
@@ -771,9 +806,42 @@ function activityRecords() {
       String(b.createdAt || "").localeCompare(String(a.createdAt || "")),
   );
 }
+// v1.12 sweep rules: recorded fixed bills count their difference from the budget, and payday money already
+// sent beyond the current plan is taken off the sweep. Open months use them; months closed before v1.12
+// keep exactly the numbers they were closed with.
+function sweepRulesFor(p) {
+  return !p || p.state !== "closed" || Number(p.sweepRules || 0) >= 2 ? 2 : 1;
+}
+// Money payday actually moved to wealth (goals and investments) for this funding month; Tithe excluded.
+function completedPaydayWealth(periodId) {
+  const ids = new Set();
+  let total = 0;
+  for (const t of state.transfers) {
+    if (t.deletedAt || t.budgetPeriodId !== periodId || t.status !== "completed") continue;
+    if (!["payday", "investment_contribution"].includes(t.transferType)) continue;
+    ids.add(t.id);
+    total += Number(t.amount || 0);
+  }
+  const tithe = state.transferAllocations
+    .filter((a) => ids.has(a.transferId) && a.bucketId === "tithe")
+    .reduce((sum, a) => sum + Number(a.amount || 0), 0);
+  return Math.max(0, total - tithe);
+}
 function sweepInfo(periodId) {
+  const p = state.periods.find((x) => x.id === periodId),
+    rules = sweepRulesFor(p);
   const plan = planFor(periodId),
-    base = calculateSweep({ budgetLines: plan.lines, expenseTotals: expenseTotals(periodId) });
+    base = calculateSweep({
+      budgetLines: plan.lines,
+      expenseTotals: expenseTotals(periodId),
+      includeFixedBills: rules >= 2,
+    });
+  // A budget change after payday (say a new Household cap) lowers this month's wealth plan, but payday already
+  // sent the old, higher amount. That money has left the operating account, so the sweep is smaller by as much.
+  const overSent =
+    rules >= 2 ? completedPaydayWealth(periodId) - Math.max(0, Math.round(Number(plan.immediateWealth || 0))) : 0;
+  const paydayOverSent = overSent > 0.5 ? overSent : 0,
+    supported = Math.max(0, base.available - paydayOverSent);
   const reserved = state.transfers
     .filter(
       (t) =>
@@ -785,10 +853,13 @@ function sweepInfo(periodId) {
     .reduce((s, t) => s + Number(t.amount || 0), 0);
   return {
     ...base,
+    rules,
+    paydayOverSent,
+    supported,
     alreadySwept: reserved,
-    available: Math.max(0, base.available - reserved),
-    overSwept: Math.max(0, reserved - base.available),
-    netAfterSweep: base.net - reserved,
+    available: Math.max(0, supported - reserved),
+    overSwept: Math.max(0, reserved - supported),
+    netAfterSweep: base.net - paydayOverSent - reserved,
   };
 }
 function monthCloseStatus(periodId) {
@@ -800,7 +871,7 @@ function monthCloseStatus(periodId) {
     (t) => !t.deletedAt && t.budgetPeriodId === periodId && t.status === "planned",
   );
   const fixedLines = plan.lines.filter((x) => x.ruleType === "fixed");
-  const missingFixed = fixedLines.filter((x) => Number(totals[x.id] || 0) + 0.5 < Number(x.budgetAmount || 0));
+  const missingFixed = fixedLines.filter((x) => !fixedPaid(totals[x.id]));
   const ct = accountSnapshot("ctbc"),
     es = esunSnapshot();
   const reserveFunded = plan.lines
@@ -1901,7 +1972,7 @@ function budgetView() {
   ${lock}
   <div class="budget-overview" style="margin-top:14px">
     ${budgetKpi("Income", privateMoney(plan.salary), "Exact take-home")}
-    ${budgetKpi("Fixed", `${money(fixedActual)} / ${money(plan.fixed)}`, `${money(Math.max(0, plan.fixed - fixedActual))} remaining`)}
+    ${budgetKpi("Fixed", `${money(fixedActual)} / ${money(plan.fixed)}`, fixedKpiText(lines))}
     ${budgetKpi("Flexible", `${money(flexActual)} / ${money(plan.caps)}`, flexActual > plan.caps ? `${money(flexActual - plan.caps)} over` : `${money(plan.caps - flexActual)} remaining`, flexActual > plan.caps)}
     ${budgetKpi("Reserves", `${money(reserveFunded)} / ${money(plan.sinking)}`, "Completed funding")}
     ${budgetKpi("Wealth", `${privateMoney(wealthDone)} / ${privateMoney(Math.max(0, plan.immediateWealth))}`, "Completed core-wealth transfers")}
@@ -1928,17 +1999,35 @@ function budgetView() {
   ${fundingMonthControls(p)}`;
 }
 
+// A fixed bill counts as paid once any payment is recorded for it in the funding month, even when the
+// charge differs slightly from the budget (a phone bill of NT$790 or NT$810 on a NT$799 plan).
+function fixedPaid(actual) {
+  return Number(actual || 0) > 0.5;
+}
+function billDifferenceText(actual, planned) {
+  const d = Number(planned || 0) - Number(actual || 0);
+  return d > 0.5 ? `${money(d)} under` : d < -0.5 ? `${money(-d)} over` : "";
+}
+function fixedKpiText(lines) {
+  const fixed = lines.filter((x) => x.ruleType === "fixed"),
+    toPay = fixed.filter((x) => !fixedPaid(x.actual)).reduce((sum, x) => sum + Number(x.budgetAmount || 0), 0),
+    diff = fixed
+      .filter((x) => fixedPaid(x.actual))
+      .reduce((sum, x) => sum + Number(x.budgetAmount || 0) - Number(x.actual || 0), 0),
+    diffText = diff > 0.5 ? ` · ${money(diff)} under` : diff < -0.5 ? ` · ${money(-diff)} over` : "";
+  return `${toPay > 0.5 ? `${money(toPay)} still to pay` : "All bills paid"}${diffText}`;
+}
 function fixedObligationsView(periodId, plan, totals, closed) {
   const lines = plan.lines.filter((x) => x.ruleType === "fixed");
   if (!lines.length) return "";
-  const paidCount = lines.filter((x) => Number(totals[x.id] || 0) + 0.5 >= Number(x.budgetAmount || 0)).length;
+  const paidCount = lines.filter((x) => fixedPaid(totals[x.id])).length;
   return `<div class="section-title"><h2>Recurring obligations</h2><span class="sub">${paidCount} of ${lines.length} covered</span></div><section class="card obligation-list"><div class="sub" style="padding:0 0 10px">Expected obligations appear every funding month, but Wealth OS creates an expense only when you record the payment.</div>${lines
     .map((x) => {
       const actual = Number(totals[x.id] || 0),
         planned = Number(x.budgetAmount || 0),
-        remaining = Math.max(0, planned - actual),
-        paid = remaining <= 0.5;
-      return `<div class="obligation-row"><div class="obligation-status ${paid ? "done" : ""}">${paid ? "✓" : "•"}</div><div class="obligation-copy"><strong>${esc(x.name)}</strong><div class="sub">Recurring monthly · ${money(actual)} of ${money(planned)}${paid ? " · paid" : actual > 0 ? " · partially recorded" : ""}</div></div>${!paid && !closed ? `<button class="btn ghost small" data-action="record-fixed" data-category="${x.id}" data-amount="${remaining}">Record ${money(remaining)}</button>` : `<span class="tag ${paid ? "good-tag" : ""}">${paid ? "Paid" : money(remaining) + " left"}</span>`}</div>`;
+        paid = fixedPaid(actual),
+        diff = paid ? billDifferenceText(actual, planned) : "";
+      return `<div class="obligation-row"><div class="obligation-status ${paid ? "done" : ""}">${paid ? "✓" : "•"}</div><div class="obligation-copy"><strong>${esc(x.name)}</strong><div class="sub">Recurring monthly · ${money(actual)} of ${money(planned)}${paid ? ` · paid${diff ? ` · ${diff}` : ""}` : ""}</div></div>${!paid && !closed ? `<button class="btn ghost small" data-action="record-fixed" data-category="${x.id}" data-amount="${planned}">Record ${money(planned)}</button>` : `<span class="tag ${paid ? "good-tag" : ""}">${paid ? "Paid" : "Not recorded"}</span>`}</div>`;
     })
     .join("")}</section>`;
 }
@@ -1982,6 +2071,12 @@ function budgetCategoryRow(x, periodId) {
   }
   if (x.ruleType === "buffer") {
     return `<div class="budget-category"><div class="split"><div><strong>${esc(x.name)}</strong><div class="sub">Held for variability and month-end sweep</div></div><div class="budget-numbers"><strong>${money(x.budgetAmount)}</strong><span>planned</span></div></div><div class="progress"><span style="width:0%"></span></div></div>`;
+  }
+  if (x.ruleType === "fixed") {
+    const planned = Number(x.budgetAmount || 0),
+      paid = fixedPaid(actual),
+      diff = billDifferenceText(actual, planned);
+    return `<div class="budget-category"><div class="split"><div><strong>${esc(x.name)}</strong><div class="sub">${paid ? `Paid ${money(actual)}${diff ? ` · ${diff}` : ""}` : "Not paid yet"}</div></div><div class="budget-numbers"><strong>${money(actual)} / ${money(planned)}</strong><span>${paid ? "Paid" : "Due"}</span></div></div><div class="progress"><span style="width:${paid ? 100 : 0}%"></span></div></div>`;
   }
   const budget = x.ruleType === "percentage" ? expectedTithe(periodId) : Number(x.budgetAmount || 0),
     remaining = budget - actual,
@@ -2764,7 +2859,7 @@ function monthCloseView() {
     </section><button class="btn secondary" style="width:100%;margin-top:14px" data-action="reopen-period" data-id="${p.id}">Reopen Month</button>`;
   }
   const fixedText = c.missingFixed.length
-    ? `${c.missingFixed.length} fixed obligation${c.missingFixed.length === 1 ? "" : "s"} not fully recorded`
+    ? `${c.missingFixed.length} fixed obligation${c.missingFixed.length === 1 ? "" : "s"} not recorded`
     : "All fixed obligations recorded";
   const steps = [
     [
@@ -2823,8 +2918,15 @@ function monthCloseView() {
     : health.warn
       ? `${health.warn} Data Health warning${health.warn === 1 ? "" : "s"}`
       : "No Data Health warnings";
-  return `<div class="grid g2"><section class="card"><div class="metric-label">Unused flexible + buffer</div><div class="metric">${money(c.sweep.grossUnused)}</div></section><section class="card"><div class="metric-label">Overspending deficits</div><div class="metric ${c.sweep.deficits ? "bad" : ""}">${money(c.sweep.deficits)}</div></section></div>
-  <section class="card" style="margin-top:14px"><div class="metric-label">Available month-end sweep</div><div class="metric">${money(c.sweep.available)}</div><div class="sub">Only this funding month is included; next-month income is excluded.</div></section>
+  const sweepNotes = [
+    c.sweep.billSavings > 0.5 ? `Includes ${money(c.sweep.billSavings)} saved on fixed bills.` : "",
+    c.sweep.billOverages > 0.5 ? `Fixed bills came in ${money(c.sweep.billOverages)} over budget.` : "",
+    c.sweep.paydayOverSent > 0.5
+      ? `${money(c.sweep.paydayOverSent)} less, because payday already sent that much more than the updated budget allows.`
+      : "",
+  ].filter(Boolean);
+  return `<div class="grid g2"><section class="card"><div class="metric-label">${c.sweep.rules >= 2 ? "Unused budget" : "Unused flexible + buffer"}</div><div class="metric">${money(c.sweep.grossUnused)}</div>${c.sweep.rules >= 2 ? `<div class="sub">Flexible caps, buffer and fixed-bill savings</div>` : ""}</section><section class="card"><div class="metric-label">Overspending deficits</div><div class="metric ${c.sweep.deficits ? "bad" : ""}">${money(c.sweep.deficits)}</div></section></div>
+  <section class="card" style="margin-top:14px"><div class="metric-label">Available month-end sweep</div><div class="metric">${money(c.sweep.available)}</div><div class="sub">Only this funding month is included; next-month income is excluded.${sweepNotes.length ? ` ${sweepNotes.join(" ")}` : ""}</div></section>
   <div class="section-title"><h2>Guided close</h2><span class="sub">Five-step month operation</span></div><section class="card close-checklist">${steps.map(([n, label, ok, detail]) => `<div class="close-check"><span class="check-dot ${ok ? "ok" : "attention"}">${ok ? "✓" : n}</span><div><strong>${label}</strong><div class="sub">${detail}</div></div></div>`).join("")}</section>
   <div class="section-title"><h2>Snapshot preview</h2><span class="sub">Saved when you close</span></div><section class="card">${snapshotRows}</section>
   <div class="notice ${health.critical ? "danger-notice" : ""}" style="margin-top:14px"><strong>Data Health: ${esc(healthText)}</strong><br>Data Health does not automatically change your records. <button class="text-btn" data-action="data-health">Review details</button></div>${action}`;
@@ -2995,7 +3097,7 @@ function manageCategoriesView() {
 function applyToMonthOption() {
   const p = currentPeriod();
   return p && p.state !== "closed"
-    ? `<label class="sync-budget-option"><input type="checkbox" name="applyCurrentMonth" ${state.settings.applyBudgetChangesToCurrentMonth !== false ? "checked" : ""}><span><strong>Apply to ${monthLabel(p.id)}</strong><small>Refresh this open month's plan. Existing transactions stay exactly as recorded.</small></span></label>`
+    ? `<label class="sync-budget-option"><input type="checkbox" name="applyCurrentMonth" ${state.settings.applyBudgetChangesToCurrentMonth !== false ? "checked" : ""}><span><strong>Apply to ${monthLabel(p.id)}</strong><small>Refresh this open month's plan. Existing transactions stay exactly as recorded. If payday already moved more to wealth than the new plan allows, the month-end sweep is reduced to match.</small></span></label>`
     : "";
 }
 function categoryForm(c = null) {
@@ -3173,7 +3275,7 @@ function settingsView() {
   <div class="section-title"><h2>Reliability tools</h2><span class="sub">Inspect before correcting</span></div><section class="card"><div class="row"><div><strong>Data Health</strong><div class="sub">Duplicates, stale reconciliations, bucket mismatches and month-state checks</div></div><button class="btn ghost small" type="button" data-action="data-health">Run Check</button></div><div class="row"><div><strong>CTBC audit trail</strong><div class="sub">Verified baseline + physical movements + virtual reserves</div></div><button class="btn ghost small" type="button" data-action="account-audit" data-id="ctbc">Open</button></div><div class="row"><div><strong>E.SUN audit trail</strong><div class="sub">Bank movements separated from purpose allocations</div></div><button class="btn ghost small" type="button" data-action="account-audit" data-id="esun">Open</button></div></section>
   <form id="settings-form"><div class="section-title"><h2>Planning settings</h2></div><div class="form-grid"><div class="field"><label>Fallback forecast salary</label><input name="forecastSalary" type="number" value="${state.settings.forecastSalary}"><div class="sub">Used only when no real paycheck history exists.</div></div><div class="field"><label>USD/TWD rate</label><input name="usdTwdRate" type="number" step="0.0001" value="${state.settings.usdTwdRate}"></div><div class="field"><label>Raise → wealth (%)</label><input name="wealthRaisePercent" type="number" min="0" max="100" value="${state.settings.wealthRaisePercent}"></div></div>
   <div class="section-title"><h2>Forecast assumptions</h2><span class="sub">Salary growth and returns are independent</span></div><div class="grid g3 scenario-settings"><section class="card nested-card"><strong>Conservative</strong><div class="field"><label>Investment return (%)</label><input name="conservativeInvestmentReturn" type="number" step="0.1" value="${state.settings.conservativeInvestmentReturn ?? 4}"></div><div class="field"><label>Salary growth (%)</label><input name="conservativeSalaryGrowth" type="number" step="0.1" value="${state.settings.conservativeSalaryGrowth ?? 1}"></div></section><section class="card nested-card"><strong>Base</strong><div class="field"><label>Investment return (%)</label><input name="forecastInvestmentReturn" type="number" step="0.1" value="${state.settings.forecastInvestmentReturn ?? 7}"></div><div class="field"><label>Salary growth (%)</label><input name="forecastSalaryGrowth" type="number" step="0.1" value="${state.settings.forecastSalaryGrowth ?? 3}"></div></section><section class="card nested-card"><strong>Aggressive</strong><div class="field"><label>Investment return (%)</label><input name="aggressiveInvestmentReturn" type="number" step="0.1" value="${state.settings.aggressiveInvestmentReturn ?? 9}"></div><div class="field"><label>Salary growth (%)</label><input name="aggressiveSalaryGrowth" type="number" step="0.1" value="${state.settings.aggressiveSalaryGrowth ?? 5}"></div></section></div>
-  <div class="section-title"><h2>Budget rules</h2></div><div class="notice">These values become the defaults for future funding months. You can also sync the changed limits into the currently selected open month. Actual expenses, transfers and closed months are never rewritten.</div>${currentPeriod() && currentPeriod().state !== "closed" ? `<label class="sync-budget-option"><input type="checkbox" name="applyCurrentMonth" ${state.settings.applyBudgetChangesToCurrentMonth !== false ? "checked" : ""}><span><strong>Apply changes to ${monthLabel(currentPeriod().id)}</strong><small>Refresh this open month's budget thresholds and plan only. Existing transactions stay exactly as recorded.</small></span></label>` : `<div class="sub" style="margin:10px 0">No open selected funding month is available to sync.</div>`}${state.categories
+  <div class="section-title"><h2>Budget rules</h2></div><div class="notice">These values become the defaults for future funding months. You can also sync the changed limits into the currently selected open month. Actual expenses, transfers and closed months are never rewritten.</div>${currentPeriod() && currentPeriod().state !== "closed" ? `<label class="sync-budget-option"><input type="checkbox" name="applyCurrentMonth" ${state.settings.applyBudgetChangesToCurrentMonth !== false ? "checked" : ""}><span><strong>Apply changes to ${monthLabel(currentPeriod().id)}</strong><small>Refresh this open month's budget thresholds and plan only. Existing transactions stay exactly as recorded. If payday already moved more to wealth than the new plan allows, the month-end sweep is reduced to match.</small></span></label>` : `<div class="sub" style="margin:10px 0">No open selected funding month is available to sync.</div>`}${state.categories
     .filter((c) => c.ruleType !== "expense_only" && c.active !== false)
     .map(
       (c) =>
@@ -3639,7 +3741,7 @@ async function closePeriod() {
   if (
     c.missingFixed.length &&
     !confirm(
-      `${c.missingFixed.length} fixed obligation${c.missingFixed.length === 1 ? " is" : "s are"} not fully recorded. Close the month anyway?`,
+      `${c.missingFixed.length} fixed obligation${c.missingFixed.length === 1 ? " has" : "s have"} no payment recorded. Close the month anyway?`,
     )
   )
     return;
@@ -3649,7 +3751,7 @@ async function closePeriod() {
       .reduce((sum, i) => sum + Number(i.amount || 0), 0),
     regularIncome = periodRegularIncome(p.id),
     health = dataHealthReport();
-  await put("periods", { ...p, state: "closed", closedAt: stamp, updatedAt: stamp });
+  await put("periods", { ...p, state: "closed", closedAt: stamp, updatedAt: stamp, sweepRules: c.sweep.rules });
   await put("monthlyCloses", {
     id: p.id,
     budgetPeriodId: p.id,
@@ -3666,6 +3768,10 @@ async function closePeriod() {
     goalFunding: completedGoalFunding(p.id),
     titheAllocated: completedTithe(p.id),
     sweepAmount: c.sweep.alreadySwept,
+    sweepRules: c.sweep.rules,
+    sweepBillSavings: c.sweep.billSavings,
+    sweepBillOverages: c.sweep.billOverages,
+    sweepPaydayOverSent: c.sweep.paydayOverSent,
     endingCoreWealth: state.wealth.coreWealth,
     endingFinancialNetWorth: state.wealth.financialNetWorth,
     endingAccountBalances: {

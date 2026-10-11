@@ -287,16 +287,35 @@ export function budgetSummary({ planLines, expenseTotals }) {
   });
 }
 
-export function calculateSweep({ budgetLines, expenseTotals }) {
+// Month-end sweep: unused flexible caps and buffer, less any cap overspending.
+// With includeFixedBills (v1.12+), a fixed bill that has been recorded also counts: paying NT$790 on a
+// NT$799 bill adds NT$9, paying NT$810 removes NT$11. A bill with nothing recorded yet never counts.
+export function calculateSweep({ budgetLines, expenseTotals, includeFixedBills = false }) {
   let sweep = 0,
-    deficit = 0;
-  const eligible = budgetLines.filter((x) => ["cap", "buffer"].includes(x.ruleType));
-  for (const line of eligible) {
-    const rem = Number(line.budgetAmount || 0) - Number(expenseTotals[line.id] || 0);
-    if (rem >= 0) sweep += rem;
-    else deficit += Math.abs(rem);
+    deficit = 0,
+    billSavings = 0,
+    billOverages = 0;
+  for (const line of budgetLines) {
+    const actual = Number(expenseTotals[line.id] || 0),
+      rem = Number(line.budgetAmount || 0) - actual;
+    if (["cap", "buffer"].includes(line.ruleType)) {
+      if (rem >= 0) sweep += rem;
+      else deficit += Math.abs(rem);
+    } else if (includeFixedBills && line.ruleType === "fixed" && actual > 0.5) {
+      if (rem >= 0) billSavings += rem;
+      else billOverages += Math.abs(rem);
+    }
   }
-  return { grossUnused: sweep, deficits: deficit, available: Math.max(0, sweep - deficit), net: sweep - deficit };
+  sweep += billSavings;
+  deficit += billOverages;
+  return {
+    grossUnused: sweep,
+    deficits: deficit,
+    billSavings,
+    billOverages,
+    available: Math.max(0, sweep - deficit),
+    net: sweep - deficit,
+  };
 }
 
 export function forecastMonthsToTarget({ start, monthly, annualReturn, target }) {

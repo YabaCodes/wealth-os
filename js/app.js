@@ -41,7 +41,7 @@ let selectedPeriodId = null;
 let activityFilter = "all";
 let activitySearch = "";
 let modalDirty = false;
-const APP_VERSION = "1.14.0";
+const APP_VERSION = "1.15.0";
 const THEME_KEY = "wealthOSTheme";
 // Theme: 'system' follows the phone's light/dark setting. A copy is kept in localStorage so
 // index.html can apply it before the first paint (IndexedDB is too slow for that).
@@ -1807,10 +1807,8 @@ function shell(content) {
   const hidden = state.settings?.privacyMode === true;
   const hour = new Date().getHours(),
     greeting = hour >= 5 && hour < 12 ? "Good morning" : hour >= 12 && hour < 18 ? "Good afternoon" : "Good evening";
-  const brand =
-    tab === "home"
-      ? `<div class="brand home-brand"><span class="brand-kicker">Wealth OS</span><h1>${greeting}</h1></div>`
-      : `<div class="brand"><h1>Wealth OS</h1><p>Budget deliberately. Build wealth automatically.</p></div>`;
+  const titles = { budget: "Budget", transactions: "Activity", wealth: "Wealth", goals: "Wealth", forecast: "Wealth" };
+  const brand = `<div class="brand home-brand"><span class="brand-kicker">Wealth OS</span><h1>${tab === "home" ? greeting : titles[tab] || "Wealth OS"}</h1></div>`;
   root.innerHTML = `<main class="shell">
     <header class="topbar">${brand}<div class="topbar-actions"><button class="btn ghost small privacy-btn" data-action="privacy-toggle" aria-label="${hidden ? "Show" : "Hide"} sensitive balances" aria-pressed="${hidden}">${icon(hidden ? "eyeOff" : "eye")}<span>${hidden ? "Show" : "Hide"}</span></button><button class="btn ghost small settings-btn" data-action="settings" aria-label="Settings">${icon("settings")}<span>Settings</span></button></div></header>
     ${content}
@@ -1968,33 +1966,11 @@ function homeView() {
   const eb = em ? goalBal(em) : 0;
   const ep = em ? Math.min(1, eb / em.targetAmount) : 0;
   // v1.14 Home: one wealth card, the month at a glance with today's mark, the next step, latest activity.
-  const ctx = monthPaceContext(p.id),
-    monthName = new Intl.DateTimeFormat("en-US", { month: "long" }).format(new Date(`${p.id}-15T12:00:00`));
-  const capLines = plan.lines.filter((x) => x.ruleType === "cap"),
-    capsBudget = capLines.reduce((sum, x) => sum + Number(x.budgetAmount || 0), 0),
-    capsSpent = capLines.reduce((sum, x) => sum + Number(expTotals[x.id] || 0), 0),
-    fillPct = capsBudget > 0 ? Math.min(100, (capsSpent / capsBudget) * 100) : 0,
-    markPct = ctx.days ? Math.min(100, (ctx.elapsed / ctx.days) * 100) : 0,
-    todaysMark = capsBudget * (ctx.days ? ctx.elapsed / ctx.days : 0);
-  let paceTone = "good",
-    paceText = "";
-  if (capsBudget <= 0) {
-    paceTone = "muted";
-    paceText = "No flexible caps yet. Add them in Settings → Budget rules.";
-  } else if (capsSpent > capsBudget + 0.5) {
-    paceTone = "bad";
-    paceText = `<strong>Over</strong> · ${money(capsSpent - capsBudget)} above your flexible caps`;
-  } else if (!ctx.isCurrent) {
-    paceText = ctx.isFuture
-      ? "This month hasn't started yet."
-      : `<strong>Finished</strong> · ${money(capsBudget - capsSpent)} of the caps unspent`;
-    paceTone = ctx.isFuture ? "muted" : "good";
-  } else if (capsSpent <= todaysMark + 0.5) {
-    paceText = `<strong>On pace</strong> · ${money(todaysMark - capsSpent)} under today's mark`;
-  } else {
-    paceTone = "warn";
-    paceText = `<strong>Ahead of pace</strong> · ${money(capsSpent - todaysMark)} over today's mark`;
-  }
+  const monthName = new Intl.DateTimeFormat("en-US", { month: "long" }).format(new Date(`${p.id}-15T12:00:00`));
+  const fp = flexPace(p, plan, expTotals),
+    { ctx, capsBudget, capsSpent, fillPct, markPct, todaysMark } = fp,
+    paceTone = fp.tone,
+    paceText = fp.text;
   const dayPill = ctx.isCurrent ? `Day ${ctx.elapsed} of ${ctx.days}` : ctx.isPast ? (p.state === "closed" ? "Closed" : "Month ended") : "Upcoming";
   const recent = activityRecords()
     .filter((x) => x.budgetPeriodId === p.id)
@@ -2097,52 +2073,105 @@ function budgetView() {
   const plan = planFor(p.id),
     totals = expenseTotals(p.id),
     lines = budgetSummary({ planLines: plan.lines, expenseTotals: totals });
-  const fixedActual = lines.filter((x) => x.ruleType === "fixed").reduce((s, x) => s + Number(x.actual || 0), 0);
-  const flexActual = lines.filter((x) => x.ruleType === "cap").reduce((s, x) => s + Number(x.actual || 0), 0);
   const reserveFunded = lines
     .filter((x) => x.ruleType === "sinking_contribution")
     .reduce((s, x) => s + completedAllocationToBucket(p.id, x.bucketId), 0);
-  const titheAllocated = completedTithe(p.id);
-  const wealthDone = completedCoreWealth(p.id);
+  const titheAllocated = completedTithe(p.id),
+    titheExpected = expectedTithe(p.id);
+  const wealthDone = completedCoreWealth(p.id),
+    wealthPlanned = Math.max(0, plan.immediateWealth);
   const sweep = sweepInfo(p.id),
     close = monthCloseStatus(p.id),
     closed = p.state === "closed";
+  const fp = flexPace(p, plan, totals),
+    ctx = fp.ctx;
+  const dayPill = ctx.isCurrent ? `Day ${ctx.elapsed} of ${ctx.days}` : ctx.isPast ? (closed ? "Closed" : "Month ended") : "Upcoming";
+  const fixedLines = lines.filter((x) => x.ruleType === "fixed"),
+    paidFixed = fixedLines.filter((x) => fixedPaid(x.actual)),
+    billDiff = paidFixed.reduce((sum, x) => sum + Number(x.budgetAmount || 0) - Number(x.actual || 0), 0),
+    billDiffText = billDiff > 0.5 ? ` · ${money(billDiff)} under` : billDiff < -0.5 ? ` · ${money(-billDiff)} over` : "";
   const lock = closed
     ? `<div class="notice close-lock"><strong>Month closed</strong><br>${monthLabel(p.id)} is read-only. Reopen it intentionally before changing transactions or budget-linked records.</div>`
     : "";
-  return `<div class="budget-head"><div><h2 style="margin:0">Budget</h2><div class="sub">Plan vs actual for the funding month</div></div>${periodSelector(true)}</div>
+
+  // Where the paycheck goes: one bar, one row per part of the plan with how it stands.
+  const salary = Number(plan.salary || 0),
+    status = (done, label, todo) => (done ? { tone: "good", text: label } : { tone: "warn", text: todo });
+  const parts = [
+    { key: "tithe", name: "Tithe", amount: plan.tithe, ...status(titheAllocated + 0.5 >= titheExpected, "Allocated", `${money(titheExpected - titheAllocated)} to allocate`) },
+    { key: "fixed", name: "Fixed bills", amount: plan.fixed, tone: paidFixed.length === fixedLines.length ? "good" : "muted", text: `${paidFixed.length} of ${fixedLines.length} paid` },
+    { key: "flex", name: "Flexible caps", amount: plan.caps, tone: fp.tone === "bad" ? "bad" : "muted", text: fp.capsBudget > 0 ? `${Math.round((fp.capsSpent / fp.capsBudget) * 100)}% used` : "No caps" },
+    { key: "reserve", name: "Reserves", amount: plan.sinking, ...status(reserveFunded + 0.5 >= plan.sinking, "Funded", `${money(plan.sinking - reserveFunded)} to fund`) },
+    { key: "buffer", name: "Operating buffer", amount: plan.buffer, tone: "muted", text: "Held" },
+    { key: "wealth", name: "Wealth", amount: wealthPlanned, private: true, ...status(wealthDone + 0.5 >= wealthPlanned, "Transferred", `${money(wealthPlanned - wealthDone)} to transfer`) },
+  ].filter((x) => Number(x.amount || 0) > 0.5);
+  const overPlanned = Math.max(0, -Number(plan.immediateWealth || 0));
+  const planCard = `<section class="card plan-card"><div class="plan-head"><h2>Where ${privateMoney(salary)} goes</h2><span class="sub">Your paycheck plan for ${monthLabel(p.id)}</span></div>${
+    salary > 0
+      ? `<div class="plan-bar" role="img" aria-label="${parts.map((x) => `${x.name} ${Math.round((x.amount / salary) * 100)}%`).join(", ")}">${parts.map((x) => `<span class="plan-seg k-${x.key}" style="width:${((x.amount / Math.max(salary, plan.assignedBeforeWealth)) * 100).toFixed(2)}%"></span>`).join("")}</div>`
+      : ""
+  }<div class="plan-rows">${parts
+    .map(
+      (x) =>
+        `<div class="plan-row"><span class="plan-dot k-${x.key}" aria-hidden="true"></span><span class="plan-name">${x.name}</span><span class="plan-status st-${x.tone}">${x.text}</span><strong class="plan-amt">${x.private ? privateMoney(x.amount) : money(x.amount)}</strong></div>`,
+    )
+    .join("")}</div>${overPlanned > 0.5 ? `<div class="notice plan-warn">The plan assigns ${money(overPlanned)} more than this paycheck. Lower a cap or a bill in Settings → Budget rules.</div>` : ""}<div class="plan-sweep"><span>Month-end sweep so far</span><strong>${privateMoney(sweep.available)}</strong></div></section>`;
+
+  // Fixed bills: ✓ once a payment is recorded, with the difference from the budget.
+  const lastDate = (catId) =>
+    state.expenses
+      .filter((e) => !e.deletedAt && e.budgetPeriodId === p.id && e.categoryId === catId)
+      .map((e) => e.date || "")
+      .sort()
+      .at(-1);
+  const fixedList = fixedLines.length
+    ? `<div class="section-title"><h2>Fixed bills</h2><span class="sub ${paidFixed.length === fixedLines.length ? "good-text" : ""}">${paidFixed.length} of ${fixedLines.length} paid${billDiffText}</span></div><section class="card bill-list">${fixedLines
+        .map((x) => {
+          const planned = Number(x.budgetAmount || 0),
+            actual = Number(x.actual || 0),
+            paid = fixedPaid(actual),
+            diff = paid ? billDifferenceText(actual, planned) : "";
+          const right = paid
+            ? `<span class="bill-check" role="img" aria-label="Paid">${icon("check")}</span>`
+            : closed
+              ? `<span class="tag">Not recorded</span>`
+              : `<button class="btn ghost small" data-action="record-fixed" data-category="${x.id}" data-amount="${planned}" aria-label="Record ${esc(x.name)} ${money(planned)}">Record</button>`;
+          return `<div class="bill-row">${catIcon(categoryVisual(x))}<div class="bill-copy"><strong>${esc(x.name)}</strong><span>${paid ? `Paid ${dayLabel(lastDate(x.id))}${diff ? ` · ${diff} ${money(planned)}` : ""}` : `${money(planned)} expected`}</span></div><span class="bill-amt ${paid ? "" : "muted-amt"}">${money(paid ? actual : planned)}</span>${right}</div>`;
+        })
+        .join("")}</section>`
+    : "";
+
+  // Flexible caps: each with its own bar and today's mark.
+  const capList = fp.capLines.length
+    ? `<div class="section-title"><h2>Flexible caps</h2>${ctx.isCurrent ? `<span class="sub mark-legend"><span class="mark-swatch" aria-hidden="true"></span>today's mark</span>` : ""}</div><section class="card cap-list">${fp.capLines
+        .map((x) => {
+          const budget = Number(x.budgetAmount || 0),
+            spent = Number(totals[x.id] || 0),
+            left = budget - spent,
+            pace = capPace(x, spent, ctx),
+            v = categoryVisual(x),
+            fill = budget > 0 ? Math.min(100, (spent / budget) * 100) : spent > 0 ? 100 : 0;
+          return `<div class="cap-row"><div class="cap-top">${catIcon(v, "sm")}<div class="cap-copy"><strong>${esc(x.name)}</strong><span class="st-${pace.tone}">${pace.text}</span></div><div class="cap-nums"><strong class="${left < -0.5 ? "bad" : ""}">${money(Math.abs(left))} ${left < -0.5 ? "over" : "left"}</strong><span>${money(spent)} of ${money(budget)}</span></div></div><div class="cap-bar"><span class="cap-fill t-${v.tone}${left < -0.5 ? " over" : ""}" style="width:${fill.toFixed(1)}%"></span>${ctx.isCurrent && !pace.noMark && budget > 0 ? `<span class="cap-mark" style="left:${fp.markPct.toFixed(1)}%"></span>` : ""}</div></div>`;
+        })
+        .join("")}</section>`
+    : "";
+
+  return `<div class="period-row">${periodSelector(true)}</div>
   ${lock}
-  <div class="budget-overview" style="margin-top:14px">
-    ${budgetKpi("Income", privateMoney(plan.salary), "Exact take-home")}
-    ${budgetKpi("Fixed", `${money(fixedActual)} / ${money(plan.fixed)}`, fixedKpiText(lines))}
-    ${budgetKpi("Flexible", `${money(flexActual)} / ${money(plan.caps)}`, flexActual > plan.caps ? `${money(flexActual - plan.caps)} over` : `${money(plan.caps - flexActual)} remaining`, flexActual > plan.caps)}
-    ${budgetKpi("Reserves", `${money(reserveFunded)} / ${money(plan.sinking)}`, "Completed funding")}
-    ${budgetKpi("Wealth", `${privateMoney(wealthDone)} / ${privateMoney(Math.max(0, plan.immediateWealth))}`, "Completed core-wealth transfers")}
-    ${budgetKpi("Buffer", money(plan.buffer), `Potential sweep ${money(sweep.available)}`)}
-  </div>
-  <div class="section-title"><h2>Monthly flow</h2><span class="sub">What this paycheck is doing</span></div>
-  <section class="card flow-card">
-    ${row("Tithe", `${money(titheAllocated)} / ${money(expectedTithe(p.id))}`)}
-    ${row("Fixed obligations", `${money(fixedActual)} / ${money(plan.fixed)}`)}
-    ${row("Flexible spending", `${money(flexActual)} / ${money(plan.caps)}`)}
-    ${row("Reserve funding", `${money(reserveFunded)} / ${money(plan.sinking)}`)}
-    ${row("Operating buffer", money(plan.buffer))}
-    ${row("Immediate wealth capacity", privateMoney(Math.max(0, plan.immediateWealth)))}
-    ${row("Potential month-end sweep", privateMoney(sweep.available))}
+  <section class="card ring-card">
+    <div class="ring-head"><h2>Flexible spending</h2><span class="tag">${dayPill}</span></div>
+    ${flexRing(fp, totals)}
+    <div class="pace-status pace-${fp.tone}">${fp.tone === "good" ? icon("check") : ""}<span>${fp.text}</span>${ctx.isCurrent && fp.capsBudget > 0 ? `<span class="mark-swatch" aria-hidden="true"></span>` : ""}</div>
+    <div class="ring-tiles"><div><span><i class="dot dot-spent" aria-hidden="true"></i>Spent</span><strong>${money(fp.capsSpent)}</strong></div><div><span><i class="dot dot-left" aria-hidden="true"></i>${fp.capsSpent > fp.capsBudget + 0.5 ? "Over" : "Remaining"}</span><strong class="${fp.capsSpent > fp.capsBudget + 0.5 ? "bad" : ""}">${money(Math.abs(fp.capsBudget - fp.capsSpent))}</strong></div></div>
   </section>
-  ${fixedObligationsView(p.id, plan, totals, closed)}
-  ${budgetGroup("Fixed", lines, p.id)}
-  ${budgetGroup("Flexible", lines, p.id)}
-  ${budgetGroup("Reserve", lines, p.id)}
-  ${budgetGroup("Giving", lines, p.id)}
-  ${budgetGroup("Buffer", lines, p.id)}
+  ${planCard}
+  ${fixedList}
+  ${capList}
   <div class="section-title"><h2>Month close</h2><span class="tag ${closed ? "good-tag" : close.ready ? "good-tag" : "warn-tag"}">${closed ? "Closed" : close.ready ? "Ready" : "Review"}</span></div>
   <section class="card close-summary-card"><div><strong>${closed ? `${monthLabel(p.id)} is closed` : "Reconcile, sweep and lock the month"}</strong><div class="sub">${closed ? "Period-linked records are protected until you reopen the month." : close.hardBlockers.length ? `${close.hardBlockers.length} item${close.hardBlockers.length === 1 ? "" : "s"} still need attention.` : "Core close checks are clear."}</div></div><button class="btn ${closed ? "secondary" : ""}" data-action="month-close">${closed ? "View Close Summary" : "Month-End Review"}</button></section>
   ${fundingMonthControls(p)}`;
 }
 
-// A fixed bill counts as paid once any payment is recorded for it in the funding month, even when the
-// charge differs slightly from the budget (a phone bill of NT$790 or NT$810 on a NT$799 plan).
 function fixedPaid(actual) {
   return Number(actual || 0) > 0.5;
 }
@@ -2174,6 +2203,85 @@ function fixedObligationsView(periodId, plan, totals, closed) {
     .join("")}</section>`;
 }
 
+// Flexible spending against the caps, with today's mark: where you'd be if the caps were spread evenly.
+function flexPace(p, plan, totals) {
+  const ctx = monthPaceContext(p.id);
+  const capLines = plan.lines.filter((x) => x.ruleType === "cap"),
+    capsBudget = capLines.reduce((sum, x) => sum + Number(x.budgetAmount || 0), 0),
+    capsSpent = capLines.reduce((sum, x) => sum + Number(totals[x.id] || 0), 0),
+    todaysMark = capsBudget * (ctx.days ? ctx.elapsed / ctx.days : 0);
+  let tone = "good",
+    text = "";
+  if (capsBudget <= 0) {
+    tone = "muted";
+    text = "No flexible caps yet. Add them in Settings → Budget rules.";
+  } else if (capsSpent > capsBudget + 0.5) {
+    tone = "bad";
+    text = `<strong>Over</strong> · ${money(capsSpent - capsBudget)} above your flexible caps`;
+  } else if (!ctx.isCurrent) {
+    tone = ctx.isFuture ? "muted" : "good";
+    text = ctx.isFuture
+      ? "This month hasn't started yet."
+      : `<strong>Finished</strong> · ${money(capsBudget - capsSpent)} of the caps unspent`;
+  } else if (capsSpent <= todaysMark + 0.5) {
+    text = `<strong>On pace</strong> · ${money(todaysMark - capsSpent)} under today's mark`;
+  } else {
+    tone = "warn";
+    text = `<strong>Ahead of pace</strong> · ${money(capsSpent - todaysMark)} over today's mark`;
+  }
+  return {
+    ctx,
+    capLines,
+    capsBudget,
+    capsSpent,
+    todaysMark,
+    fillPct: capsBudget > 0 ? Math.min(100, (capsSpent / capsBudget) * 100) : 0,
+    markPct: ctx.days ? Math.min(100, (ctx.elapsed / ctx.days) * 100) : 0,
+    tone,
+    text,
+  };
+}
+// Gas, water and electricity arrive as bills, so a daily pace means little for them.
+function isIrregularCap(line) {
+  return ["gas", "water"].includes(line.id) || /\b(gas|water|electric)/i.test(line.name || "");
+}
+function capPace(line, spent, ctx) {
+  const budget = Number(line.budgetAmount || 0);
+  if (budget <= 0) return spent > 0.5 ? { tone: "bad", text: `${money(spent)} with no cap set` } : { tone: "muted", text: "No cap set" };
+  if (spent > budget + 0.5) return { tone: "bad", text: `Over by ${money(spent - budget)}` };
+  if (isIrregularCap(line)) return { tone: "muted", text: "Billed irregularly", noMark: true };
+  if (!ctx.isCurrent) return { tone: "muted", text: ctx.isPast ? `${money(budget - spent)} unspent` : "Not started", noMark: true };
+  const mark = (budget * ctx.elapsed) / ctx.days;
+  if (spent <= mark + 0.5) return { tone: "muted", text: "On pace" };
+  return { tone: "warn", text: `${money(spent - mark)} ahead of today's mark` };
+}
+function flexRing(fp, totals) {
+  const r = 90,
+    C = 2 * Math.PI * r,
+    total = Math.max(fp.capsBudget, fp.capsSpent);
+  let offset = 0;
+  const segs = fp.capLines
+    .map((l) => ({ l, spent: Number(totals[l.id] || 0) }))
+    .filter((x) => x.spent > 0.5)
+    .sort((a, b) => b.spent - a.spent)
+    .map(({ l, spent }) => {
+      const len = total > 0 ? (spent / total) * C : 0,
+        seg = `<circle class="ring-seg t-${categoryVisual(l).tone}" cx="110" cy="110" r="${r}" stroke-dasharray="${Math.max(0, len - 1.5).toFixed(1)} ${C.toFixed(1)}" stroke-dashoffset="${(-offset).toFixed(1)}"></circle>`;
+      offset += len;
+      return seg;
+    })
+    .join("");
+  let mark = "";
+  if (fp.ctx.isCurrent && fp.capsBudget > 0 && total > 0) {
+    const a = (fp.todaysMark / total) * 2 * Math.PI,
+      pt = (rad) => [(110 + rad * Math.sin(a)).toFixed(1), (110 - rad * Math.cos(a)).toFixed(1)];
+    const [x1, y1] = pt(74),
+      [x2, y2] = pt(106);
+    mark = `<line class="ring-mark" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"></line>`;
+  }
+  const left = fp.capsBudget - fp.capsSpent;
+  return `<div class="ring-wrap"><svg viewBox="0 0 220 220" role="img" aria-label="${money(fp.capsSpent)} of ${money(fp.capsBudget)} flexible budget spent${mark ? `; today's mark is ${money(fp.todaysMark)}` : ""}"><circle class="ring-track" cx="110" cy="110" r="${r}"></circle><g transform="rotate(-90 110 110)">${segs}</g>${mark}</svg><div class="ring-center"><strong>${money(Math.abs(left))}</strong><span>${left >= 0 ? "left" : "over"} of ${money(fp.capsBudget)}</span></div></div>`;
+}
 function budgetKpi(label, value, sub, bad = false) {
   return `<section class="card budget-kpi"><div class="metric-label">${label}</div><div class="kpi-value ${bad ? "bad" : ""}">${value}</div><div class="sub">${sub}</div></section>`;
 }
@@ -2239,7 +2347,7 @@ function transactionsView() {
           .includes(q),
       )
     : filtered;
-  return `<div><h2 style="margin:0">Activity</h2><div class="sub">Expenses, income and transfers</div></div>
+  return `<div class="sub page-sub">Expenses, income and transfers</div>
   <div class="activity-quick"><button class="btn secondary small" data-action="cash-withdraw">${icon("cash")}<span>Withdraw cash</span></button><button class="btn secondary small" data-action="open-projects">${icon("project")}<span>Special projects</span></button></div>
   <div class="sub activity-add-hint">Add expenses, income and transfers with the + button below.</div>
   ${projectOverviewStrip()}
@@ -2401,7 +2509,7 @@ function goalsView() {
       return `<section class="card goal-card"><div class="split"><div><strong>${esc(g.name)}</strong><div class="sub">${esc(rule)}</div></div><span class="tag ${status.className}">${status.label}</span></div><div class="goal-metric-row"><div><div class="metric">${privateMoney(b)}</div><div class="sub">${privateMoney(remaining)} remaining</div></div><div class="right"><strong>${pct(p)}</strong><div class="sub">of ${privateMoney(target)}</div></div></div><div class="progress"><span style="width:${p * 100}%"></span></div><div class="goal-pace">${esc(paceText)}</div>${g.targetDate ? `<div class="sub">Target date: ${esc(dayLabel(g.targetDate))}</div>` : ""}<div class="actions goal-actions"><button class="btn secondary" data-action="goal-contribution" data-id="${g.id}">Add Contribution</button><button class="btn ghost" data-action="edit-goal" data-id="${g.id}">Edit Goal</button></div></section>`;
     })
     .join("");
-  return `<div><h2 style="margin:0">Goals</h2><div class="sub">Your wealth priorities, pace and planned-use funds.</div></div>
+  return `<div class="sub page-sub">Your wealth priorities, pace and planned-use funds.</div>
   <section class="card strategy-card" style="margin-top:14px"><div class="split"><div><div class="metric-label">Current routing strategy</div><strong>${esc(active?.name || "Core cash goals complete")}</strong></div><div class="right"><strong>${privateMoney(pace)}</strong><div class="sub">recent monthly core-wealth pace</div></div></div><div class="strategy-steps"><span class="${emergencyBal < 200000 ? "active-step" : ""}">1. Emergency to ${money(200000)}</span><span class="${emergencyBal >= 200000 && travelBal < (travel?.targetAmount || 100000) ? "active-step" : ""}">2. Home Travel ${money(travel?.monthlyTarget || 10000)}/mo + continue Emergency</span><span class="${emergencyBal >= (emergency?.targetAmount || 300000) ? "active-step" : ""}">3. After Emergency target, remaining surplus becomes investable</span></div></section>
   <div class="grid g2 goals-grid" style="margin-top:14px">${cards}</div>`;
 }
@@ -2437,7 +2545,7 @@ function wealthView() {
     : es.unassigned > 0
       ? `${money(es.unassigned)} unassigned`
       : `${money(Math.abs(es.unassigned))} over-allocated`;
-  return `<div class="privacy-all-money"><div><h2 style="margin:0">Wealth</h2><div class="sub">Physical accounts and virtual purpose ledgers</div></div>
+  return `<div class="privacy-all-money"><div class="sub page-sub">Physical accounts and virtual purpose ledgers</div>
   <div class="grid g2" style="margin-top:14px"><section class="card"><div class="metric-label">Core Wealth</div><div class="metric">${money(state.wealth.coreWealth)}</div><div class="sub">Long-term capital only</div></section><section class="card"><div class="metric-label">Financial Net Worth</div><div class="metric">${money(state.wealth.financialNetWorth)}</div><div class="sub">Tithe excluded · includes cash on hand</div></section></div>
 
   <div class="section-title"><h2>Account health</h2><span class="sub">Match Wealth OS to real money</span></div>
@@ -2661,7 +2769,7 @@ function forecastView() {
     records.length < 2
       ? `<div class="notice"><strong>Category trends are still building.</strong><br>After another month, 3-month averages and recurring over/under-budget patterns will appear here.</div>`
       : `<section class="card insight-list">${catRows.map((x) => `<div class="insight-row"><div><strong>${esc(x.c.name)}</strong><div class="sub">Current ${money(x.cur)} · ${Math.min(3, recent3.length)}-mo avg ${money(x.avg)}</div></div><div class="right"><strong class="${x.avg > x.budget ? "bad" : x.avg < x.budget * 0.8 ? "good" : ""}">${money(x.budget)}</strong><div class="sub">monthly cap</div></div></div>`).join("")}</section>`;
-  return `<div><h2 style="margin:0">Insights</h2><div class="sub">See whether this month's spending is on pace, then use history and forecasts for longer-term planning.</div></div>
+  return `<div class="sub page-sub">See whether this month's spending is on pace, then use history and forecasts for longer-term planning.</div>
   <div class="section-title"><h2>Spending pace</h2><span class="sub">Flexible caps vs days elapsed</span></div>
   ${spendingPaceInsights()}
   <div class="section-title"><h2>Wealth & history</h2><span class="sub">Contribution and month-to-month trends</span></div>

@@ -1,4 +1,13 @@
-# Wealth OS — v1.14.0
+# Wealth OS — v1.15.0
+
+## v1.15.0 — the new Budget
+
+- **Flexible spending ring:** what you've spent from your flexible caps, in each category's colour, with the amber **today's mark**, how much is left in the middle, the same *On pace / Ahead of pace / Over* line as Home, and Spent / Remaining tiles.
+- **Where your paycheck goes:** one bar splitting the paycheck into Tithe, Fixed bills, Flexible caps, Reserves, Operating buffer and Wealth, with a row for each showing how it stands (Allocated, 3 of 4 paid, 40% used, Funded, Held, Transferred, or what's still to do), and the month-end sweep so far. It replaces the six summary cards and Monthly flow. If the plan ever assigns more than the paycheck, it says so.
+- **Fixed bills:** one list with pictures; ✓ once paid, with the date and any difference ("Paid Oct 6 · NT$9 under NT$799"), or a **Record** button for a bill still to pay.
+- **Flexible caps:** each cap with its picture, what's left, its own bar and today's mark, and a status: On pace, NT$… ahead of today's mark, or Over by NT$… in red. Gas, water and electricity say *Billed irregularly* instead of a pace.
+- **Headers:** every tab now uses Home's style: "Wealth OS" above the page name (Budget, Activity, Wealth).
+- Home and Budget share one pace calculation, so their numbers always agree. No change to any stored record or calculation.
 
 ## v1.14.0 — the new Home
 
@@ -119,11 +128,11 @@ This release changes presentation only. It does **not** modify balances, transac
 
 ## Release identity
 
-- App version: **1.14.0**
+- App version: **1.15.0**
 - Data model: **182**
-- Service-worker cache: **wealth-os-v1-14-0**
+- Service-worker cache: **wealth-os-v1-15-0**
 - Manifest: **manifest.webmanifest**
 
 ## Upgrade
 
-Replace the repository files with this package, commit to `main`, wait for GitHub Pages to deploy, then fully close and reopen the installed PWA. Confirm **Settings → Wealth OS v1.14.0 / Data model 182**.
+Replace the repository files with this package, commit to `main`, wait for GitHub Pages to deploy, then fully close and reopen the installed PWA. Confirm **Settings → Wealth OS v1.15.0 / Data model 182**.

@@ -41,7 +41,7 @@ let selectedPeriodId = null;
 let activityFilter = "all";
 let activitySearch = "";
 let modalDirty = false;
-const APP_VERSION = "1.13.1";
+const APP_VERSION = "1.14.0";
 const THEME_KEY = "wealthOSTheme";
 // Theme: 'system' follows the phone's light/dark setting. A copy is kept in localStorage so
 // index.html can apply it before the first paint (IndexedDB is too slow for that).
@@ -1183,6 +1183,9 @@ function icon(name, extra = "") {
     bolt: '<path d="M13 3 5 13.5h6L10 21l8-10.5h-6z"/>',
     plane: '<path d="M10.5 4.5 13 10l6-.5a1.6 1.6 0 0 1 0 3.2l-6-.5-2.5 5.5H8.5l1.2-5.7-4.2-.4L4 13.5H2.8l.6-2.5-.6-2.5H4l1.5 1.9 4.2-.4-1.2-5.5z"/>',
     camera: '<path d="M4 8h3l1.5-2.5h7L17 8h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>',
+    check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+    lock: '<rect x="5" y="10.5" width="14" height="10" rx="2.5"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"/>',
+    arrowRight: '<path d="M5 12h14M13 6l6 6-6 6"/>',
     heart: '<path d="M12 20s-7.5-4.6-7.5-10A4.3 4.3 0 0 1 12 7.3 4.3 4.3 0 0 1 19.5 10c0 5.4-7.5 10-7.5 10z"/>',
     repeat: '<path d="M17 3.5 20 6.5l-3 3"/><path d="M4 12v-1.5a4 4 0 0 1 4-4h12M7 20.5 4 17.5l3-3"/><path d="M20 12v1.5a4 4 0 0 1-4 4H4"/>',
   };
@@ -1802,8 +1805,14 @@ function shell(content) {
       ? ""
       : '<p class="footer-note">Local-first financial planning. Transfers are not expenses; virtual buckets track purpose independently of bank balances.</p>';
   const hidden = state.settings?.privacyMode === true;
+  const hour = new Date().getHours(),
+    greeting = hour >= 5 && hour < 12 ? "Good morning" : hour >= 12 && hour < 18 ? "Good afternoon" : "Good evening";
+  const brand =
+    tab === "home"
+      ? `<div class="brand home-brand"><span class="brand-kicker">Wealth OS</span><h1>${greeting}</h1></div>`
+      : `<div class="brand"><h1>Wealth OS</h1><p>Budget deliberately. Build wealth automatically.</p></div>`;
   root.innerHTML = `<main class="shell">
-    <header class="topbar"><div class="brand"><h1>Wealth OS</h1><p>Budget deliberately. Build wealth automatically.</p></div><div class="topbar-actions"><button class="btn ghost small privacy-btn" data-action="privacy-toggle" aria-label="${hidden ? "Show" : "Hide"} sensitive balances" aria-pressed="${hidden}">${icon(hidden ? "eyeOff" : "eye")}<span>${hidden ? "Show" : "Hide"}</span></button><button class="btn ghost small settings-btn" data-action="settings" aria-label="Settings">${icon("settings")}<span>Settings</span></button></div></header>
+    <header class="topbar">${brand}<div class="topbar-actions"><button class="btn ghost small privacy-btn" data-action="privacy-toggle" aria-label="${hidden ? "Show" : "Hide"} sensitive balances" aria-pressed="${hidden}">${icon(hidden ? "eyeOff" : "eye")}<span>${hidden ? "Show" : "Hide"}</span></button><button class="btn ghost small settings-btn" data-action="settings" aria-label="Settings">${icon("settings")}<span>Settings</span></button></div></header>
     ${content}
     ${footer}
   </main>${nav()}${modal ? renderModal() : ""}`;
@@ -1915,20 +1924,21 @@ function homeView() {
       !i.routingHandled &&
       !routingTransfersForIncome(i.id).length,
   );
-  let action = `<button class="btn" data-action="add-expense">Add Expense</button>`;
-  let actionText = "Keep the ledger current";
-  let actionSub = "Record spending as it happens.";
-  let actionMetric = money(sweep.available);
+  let action = "";
+  let actionText = "Payday done · keep recording";
+  let actionSub = `Month-end sweep so far ${privateMoney(sweep.available)}`;
+  let actionMetric = "";
+  let nextTone = "good";
   const hasOpenMonth = state.periods.some((x) => x.state !== "closed");
   if (p.state === "closed" && !hasOpenMonth) {
     actionText = `${monthLabel(p.id)} is closed`;
     actionSub = "Enter your next paycheck to start the next funding month.";
-    actionMetric = "Next month";
+    nextTone = "action";
     action = `<div class="actions"><button class="btn" data-action="new-paycheck">Enter Paycheck</button><button class="btn ghost hero-ghost" data-action="reopen-period" data-id="${p.id}">Reopen ${monthLabel(p.id)}</button></div>`;
   } else if (p.state === "closed") {
     actionText = `${monthLabel(p.id)} is closed`;
     actionSub = "Period-linked records are locked until you intentionally reopen the month.";
-    actionMetric = "Locked";
+    nextTone = "locked";
     action = `<button class="btn" data-action="reopen-period" data-id="${p.id}">Reopen Month</button>`;
   } else if (paydayGroup) {
     const destination = physicalAccount(paydayGroup.accountId)?.name || paydayGroup.accountId;
@@ -1936,11 +1946,13 @@ function homeView() {
     actionText = `Transfer to ${destination}`;
     actionSub = `${detail}. Move only this remaining amount physically, then confirm it here.`;
     actionMetric = money(paydayGroup.amount);
+    nextTone = "action";
     action = `<button class="btn" data-action="payday-transfer" data-account="${paydayGroup.accountId}" data-period="${p.id}">Record Transfer Completed</button>`;
   } else if (pending) {
     actionText = `Transfer ${money(pending.amount)} pending`;
     actionSub = `Move the money physically, then confirm it here.`;
     actionMetric = money(pending.amount);
+    nextTone = "action";
     action = `<button class="btn" data-action="complete-transfer" data-id="${pending.id}">Mark Transfer Completed</button>`;
   } else if (unroutedSupplemental) {
     const due = unroutedSupplemental.titheEligible
@@ -1949,39 +1961,81 @@ function homeView() {
     actionText = "Route supplemental income";
     actionSub = `${INCOME_TYPES.find((t) => t[0] === unroutedSupplemental.incomeType)?.[1] || "Supplemental income"} ${money(unroutedSupplemental.amount)}${due ? ` · tithe due ${money(due)}` : ""}. Decide what the remainder should do.`;
     actionMetric = money(unroutedSupplemental.amount);
+    nextTone = "action";
     action = `<button class="btn" data-action="route-income" data-id="${unroutedSupplemental.id}">Open Routing Assistant</button>`;
   }
   const em = goal("goal-emergency");
   const eb = em ? goalBal(em) : 0;
   const ep = em ? Math.min(1, eb / em.targetAmount) : 0;
-  // The two largest flexible spending caps (works with categories you add or rename).
-  const topCaps = plan.lines
-    .filter((x) => x.ruleType === "cap")
-    .map((x, i) => ({ x, i }))
-    .sort((a, b) => Number(b.x.budgetAmount || 0) - Number(a.x.budgetAmount || 0) || a.i - b.i)
-    .slice(0, 2)
-    .map(({ x }) => x);
+  // v1.14 Home: one wealth card, the month at a glance with today's mark, the next step, latest activity.
+  const ctx = monthPaceContext(p.id),
+    monthName = new Intl.DateTimeFormat("en-US", { month: "long" }).format(new Date(`${p.id}-15T12:00:00`));
+  const capLines = plan.lines.filter((x) => x.ruleType === "cap"),
+    capsBudget = capLines.reduce((sum, x) => sum + Number(x.budgetAmount || 0), 0),
+    capsSpent = capLines.reduce((sum, x) => sum + Number(expTotals[x.id] || 0), 0),
+    fillPct = capsBudget > 0 ? Math.min(100, (capsSpent / capsBudget) * 100) : 0,
+    markPct = ctx.days ? Math.min(100, (ctx.elapsed / ctx.days) * 100) : 0,
+    todaysMark = capsBudget * (ctx.days ? ctx.elapsed / ctx.days : 0);
+  let paceTone = "good",
+    paceText = "";
+  if (capsBudget <= 0) {
+    paceTone = "muted";
+    paceText = "No flexible caps yet. Add them in Settings → Budget rules.";
+  } else if (capsSpent > capsBudget + 0.5) {
+    paceTone = "bad";
+    paceText = `<strong>Over</strong> · ${money(capsSpent - capsBudget)} above your flexible caps`;
+  } else if (!ctx.isCurrent) {
+    paceText = ctx.isFuture
+      ? "This month hasn't started yet."
+      : `<strong>Finished</strong> · ${money(capsBudget - capsSpent)} of the caps unspent`;
+    paceTone = ctx.isFuture ? "muted" : "good";
+  } else if (capsSpent <= todaysMark + 0.5) {
+    paceText = `<strong>On pace</strong> · ${money(todaysMark - capsSpent)} under today's mark`;
+  } else {
+    paceTone = "warn";
+    paceText = `<strong>Ahead of pace</strong> · ${money(capsSpent - todaysMark)} over today's mark`;
+  }
+  const dayPill = ctx.isCurrent ? `Day ${ctx.elapsed} of ${ctx.days}` : ctx.isPast ? (p.state === "closed" ? "Closed" : "Month ended") : "Upcoming";
+  const recent = activityRecords()
+    .filter((x) => x.budgetPeriodId === p.id)
+    .slice(0, 5);
+  const isPriority = active && em && active.id === em.id;
+  const nextIcon = nextTone === "good" ? "check" : nextTone === "locked" ? "lock" : "arrowRight";
   return `<div class="period-row">${periodSelector(true)}</div>
   ${backupReminder()}
-  <div class="grid g3 summary-grid" style="margin-top:12px">
-    <section class="card"><div class="metric-label">Core Wealth</div><div class="metric">${privateMoney(state.wealth.coreWealth)}</div><div class="sub">Long-term wealth base</div></section>
-    <section class="card"><div class="metric-label">Financial Net Worth</div><div class="metric">${privateMoney(state.wealth.financialNetWorth)}</div><div class="sub">All financial assets, tithe excluded</div></section>
-    <section class="card"><div class="metric-label">Non-Core Funds</div><div class="metric">${privateMoney(nonCore)}</div><div class="sub">Operating cash + planned-use funds</div></section>
-  </div>
-  <section class="card" style="margin-top:14px"><div class="split"><div><div class="metric-label">Emergency Fund</div><strong>${privateMoney(eb)} / ${money(em?.targetAmount || 300000)}</strong></div><span class="tag">${pct(ep)}</span></div><div class="progress"><span style="width:${Math.min(100, ep * 100)}%"></span></div><div class="sub">Current wealth priority: ${esc(active?.name || "No active goal")}</div></section>
-  <div class="grid g3" style="margin-top:14px">
-    <section class="card"><div class="metric-label">Income</div><div class="metric">${privateMoney(plan.salary)}</div><div class="sub">Exact regular income entered</div></section>
-    <section class="card"><div class="metric-label">Spent</div><div class="metric">${money(spent)}</div><div class="sub">Actual expenses only</div></section>
-    <section class="card"><div class="metric-label">Wealth contributed</div><div class="metric">${privateMoney(core)}</div><div class="sub">${pct(contributionRate)} of take-home</div></section>
-  </div>
-  <div class="section-title"><h2>Flexible budget</h2><span class="sub">Potential month-end sweep ${money(sweep.available)}</span></div>
-  <section class="card">${topCaps.map((x) => budgetMini(esc(category(x.id)?.name || x.name), x.budgetAmount || 0, expTotals[x.id] || 0)).join("") || `<div class="sub">No flexible spending caps yet.</div>`}</section>
-  <div class="section-title"><h2>Next action</h2></div><section class="card hero-action"><div class="metric-label">${actionText}</div><div class="metric">${privateValue(actionMetric)}</div><p class="sub">${actionSub}</p>${action}</section>
-  ${homeQuickCapture(p)}
-  <div class="section-title"><h2>Monthly flow</h2></div><section class="card">
-    ${row("Planned immediate wealth", privateMoney(Math.max(0, plan.immediateWealth)))}${row("Completed goal/reserve funding", privateMoney(goalFunding))}${row("Current sweep available", privateMoney(sweep.available))}
-    <div class="actions" style="margin-top:12px"><button class="btn secondary" data-action="add-income">Add Income</button><button class="btn secondary" data-action="month-close">Month-End Review</button>${newPaycheckButton()}</div>
-  </section>`;
+  <section class="home-hero" aria-label="Wealth summary">
+    <div class="home-hero-top"><div><div class="hero-label">Core Wealth</div><div class="hero-value">${privateMoney(state.wealth.coreWealth)}</div></div>${core > 0.5 ? `<span class="hero-pill">+${privateMoney(core)} this month</span>` : ""}</div>
+    <div class="hero-tiles"><div class="hero-tile"><span>Net worth</span><strong>${privateMoney(state.wealth.financialNetWorth)}</strong></div><div class="hero-tile"><span>Non-core funds</span><strong>${privateMoney(nonCore)}</strong></div></div>
+    ${
+      em
+        ? `<div class="hero-goal"><div class="hero-goal-row"><strong>${esc(em.name || "Emergency Fund")}</strong><span>${privateMoney(eb)} of ${money(em.targetAmount)}</span></div><div class="hero-bar" role="img" aria-label="${esc(em.name || "Emergency Fund")} ${pct(ep)} funded"><span style="width:${(ep * 100).toFixed(1)}%"></span></div><div class="hero-sub">${ep >= 1 ? "Complete" : pct(ep)}${isPriority ? " · current wealth priority" : active ? ` · priority now: ${esc(active.name)}` : ""}</div></div>`
+        : ""
+    }
+  </section>
+  <section class="card month-card">
+    <div class="month-card-head"><h2>${esc(monthName)} so far</h2><span class="tag">${dayPill}</span></div>
+    <div class="month-stats"><div><span>Income</span><strong>${privateMoney(plan.salary)}</strong></div><div><span>Spent</span><strong>${money(spent)}</strong></div><div><span>To wealth</span><strong class="good-text">${pct(contributionRate)}</strong></div></div>
+    <div class="month-divider"></div>
+    <div class="pace-head"><strong>Flexible spending</strong><span>${money(capsSpent)} of ${money(capsBudget)}</span></div>
+    <div class="pace-bar" role="img" aria-label="Flexible spending ${money(capsSpent)} of ${money(capsBudget)}${ctx.isCurrent ? `; today's mark ${money(todaysMark)}` : ""}"><span class="pace-fill ${paceTone === "bad" ? "over" : ""}" style="width:${fillPct.toFixed(1)}%"></span>${ctx.isCurrent && capsBudget > 0 ? `<span class="pace-mark" style="left:${markPct.toFixed(1)}%"></span>` : ""}</div>
+    <div class="pace-status pace-${paceTone}">${paceTone === "good" ? icon("check") : ""}<span>${paceText}</span></div>
+    <div class="month-actions"><button class="btn ghost small" data-action="month-close">Month-End Review</button>${newPaycheckButton()}</div>
+  </section>
+  <section class="card next-step next-${nextTone}">
+    <div class="next-step-row"><span class="next-ic" aria-hidden="true">${icon(nextIcon)}</span><div class="next-copy"><span class="metric-label">Next step</span><strong>${actionText}</strong><span class="sub">${actionSub}</span></div>${actionMetric ? `<strong class="next-amount">${privateValue(actionMetric)}</strong>` : ""}</div>
+    ${action ? `<div class="next-step-actions">${action}</div>` : ""}
+  </section>
+  <div class="section-title"><h2>Latest activity</h2><button class="text-btn see-all" data-tab="transactions">See all</button></div>
+  <section class="card home-activity">${
+    recent.length
+      ? recent
+          .map(
+            (x) =>
+              `<div class="home-tx">${catIcon(txVisual(x))}<div class="home-tx-copy"><strong>${esc(x._title)}</strong><span>${esc([dayLabel(x._date), x._account].filter(Boolean).join(" · "))}</span></div><span class="amount ${x._kind === "income" ? "good" : ""}">${money(x._amount)}</span></div>`,
+          )
+          .join("")
+      : `<div class="empty compact-empty"><strong>No activity in ${esc(monthName)} yet.</strong><span>Tap + to add the first one.</span></div>`
+  }</section>`;
 }
 
 function backupReminder() {

@@ -41,7 +41,7 @@ let selectedPeriodId = null;
 let activityFilter = "all";
 let activitySearch = "";
 let modalDirty = false;
-const APP_VERSION = "1.12.0";
+const APP_VERSION = "1.13.0";
 const THEME_KEY = "wealthOSTheme";
 // Theme: 'system' follows the phone's light/dark setting. A copy is kept in localStorage so
 // index.html can apply it before the first paint (IndexedDB is too slow for that).
@@ -1165,9 +1165,82 @@ function icon(name, extra = "") {
       '<path d="M3 3l18 18"/><path d="M10.6 6.2A8.8 8.8 0 0 1 12 6c6 0 9.5 6 9.5 6a15.8 15.8 0 0 1-3.1 3.8M6.1 6.1C3.8 7.7 2.5 12 2.5 12s3.5 6 9.5 6c1.5 0 2.9-.4 4.1-1"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/>',
     settings:
       '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21h-4v-.1A1.7 1.7 0 0 0 8.6 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3v-4h.1A1.7 1.7 0 0 0 4.6 8.6a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3h4v.1A1.7 1.7 0 0 0 15.4 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9c.1.36.31.7.6 1 .3.29.66.5 1.1.6h.1v4h-.1c-.44.1-.8.31-1.1.6-.29.3-.5.64-.6 1z"/>',
+    // v1.13: the bottom bar's "+" and category pictures
+    plus: '<path d="M12 5v14M5 12h14"/>',
+    pie: '<circle cx="12" cy="12" r="8.5"/><path d="M12 3.5V12l6 6"/>',
+    food: '<path d="M4 12h16a8 8 0 0 1-16 0z"/><path d="M8.5 20h7M14 4l-3 6M18 5l-4 5"/>',
+    bus: '<rect x="5" y="4" width="14" height="13" rx="2.5"/><path d="M5 11h14M8 17v2.5M16 17v2.5M8.5 14h.01M15.5 14h.01"/>',
+    people:
+      '<circle cx="9" cy="9" r="3"/><path d="M3.5 19c.6-3 2.8-4.5 5.5-4.5s4.9 1.5 5.5 4.5"/><circle cx="16.5" cy="10" r="2.4"/><path d="M15.5 14.6c2.6-.3 4.4 1.2 5 4.4"/>',
+    flame: '<path d="M12 3c1 3.5 5 5.5 5 10a5 5 0 0 1-10 0c0-2.4 1.2-3.8 2.4-5 .2 1.6 1 2.6 2 3 0-3 .2-5.5.6-8z"/>',
+    droplet: '<path d="M12 3.5c3 4 6 7.2 6 10.5a6 6 0 0 1-12 0c0-3.3 3-6.5 6-10.5z"/>',
+    washer: '<rect x="5" y="3.5" width="14" height="17" rx="2.5"/><path d="M5 8h14M8 5.8h.01M10.5 5.8h.01"/><circle cx="12" cy="14" r="3.5"/>',
+    tag: '<path d="M3.5 12.5V4.5h8l9 9-8 8z"/><circle cx="8" cy="9" r="1.3"/>',
+    building: '<path d="M5 20V5.5L13 3.5V20M13 9l6 2v9M3.5 20h17M8 8h2M8 11.5h2M8 15h2"/>',
+    phone: '<rect x="7" y="3" width="10" height="18" rx="2.5"/><path d="M11 17.5h2"/>',
+    wifi: '<path d="M3.5 9.5a12 12 0 0 1 17 0M6.5 12.8a7.5 7.5 0 0 1 11 0M9.5 16a3 3 0 0 1 5 0M12 19h.01"/>',
+    dumbbell: '<path d="M6.5 8v8M17.5 8v8M3.5 10v4M20.5 10v4M6.5 12h11"/>',
+    bolt: '<path d="M13 3 5 13.5h6L10 21l8-10.5h-6z"/>',
+    plane: '<path d="M10.5 4.5 13 10l6-.5a1.6 1.6 0 0 1 0 3.2l-6-.5-2.5 5.5H8.5l1.2-5.7-4.2-.4L4 13.5H2.8l.6-2.5-.6-2.5H4l1.5 1.9 4.2-.4-1.2-5.5z"/>',
+    camera: '<path d="M4 8h3l1.5-2.5h7L17 8h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>',
   };
   return `<svg class="ui-icon ${extra}" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${paths[name] || ""}</svg>`;
 }
+// Picture and colour for each category: by id for the built-in ones, by name for categories you add.
+const CATEGORY_VISUALS = {
+  food: ["food", "orange"],
+  "dating-social": ["people", "pink"],
+  transport: ["bus", "blue"],
+  gas: ["flame", "amber"],
+  water: ["droplet", "cyan"],
+  household: ["washer", "teal"],
+  misc: ["tag", "slate"],
+  rent: ["building", "indigo"],
+  sim: ["phone", "violet"],
+  wifi: ["wifi", "sky"],
+  gym: ["dumbbell", "green"],
+  "electricity-bill": ["bolt", "amber"],
+  "travel-expense": ["plane", "sky"],
+  "equipment-purchase": ["camera", "slate"],
+  "project-shortfall": ["project", "slate"],
+};
+const CATEGORY_KEYWORDS = [
+  [/food|grocer|meal|restaurant|lunch|dinner|coffee|snack/i, "food", "orange"],
+  [/transport|mrt|metro|bus|taxi|uber|train|commute/i, "bus", "blue"],
+  [/social|dating|friend|gift|party/i, "people", "pink"],
+  [/household|laundry|toilet|clean|home supplies/i, "washer", "teal"],
+  [/rent|housing|mortgage/i, "building", "indigo"],
+  [/phone|sim|mobile/i, "phone", "violet"],
+  [/internet|wifi|wi-fi|broadband/i, "wifi", "sky"],
+  [/gym|fitness|sport|workout/i, "dumbbell", "green"],
+  [/electric|power/i, "bolt", "amber"],
+  [/gas|fuel/i, "flame", "amber"],
+  [/water/i, "droplet", "cyan"],
+  [/travel|trip|flight|hotel/i, "plane", "sky"],
+  [/equipment|camera|gear|device/i, "camera", "slate"],
+];
+function categoryVisual(c) {
+  if (!c) return { icon: "tag", tone: "slate" };
+  const known = CATEGORY_VISUALS[c.id];
+  if (known) return { icon: known[0], tone: known[1] };
+  const hit = CATEGORY_KEYWORDS.find(([re]) => re.test(c.name || ""));
+  return hit ? { icon: hit[1], tone: hit[2] } : { icon: "tag", tone: "slate" };
+}
+function catIcon(v, size = "") {
+  return `<span class="cat-ic t-${v.tone}${size ? ` ${size}` : ""}" aria-hidden="true">${icon(v.icon)}</span>`;
+}
+function txVisual(x) {
+  if (x._kind === "income") return { icon: "income", tone: "green" };
+  if (x._kind === "transfer") return { icon: "transfer", tone: "slate" };
+  return categoryVisual(category(x.categoryId));
+}
+const SHORT_CATEGORY_NAMES = {
+  Transportation: "Transport",
+  Miscellaneous: "Misc",
+  "Electricity Bill": "Electricity",
+  "Travel Expense": "Travel",
+  "Equipment Purchase": "Equipment",
+};
 function latestReconciliation(accountId) {
   return (
     [...state.reconciliations]
@@ -1747,16 +1820,27 @@ function linkFieldLabels() {
     label.htmlFor = control.id;
   });
 }
+// Bottom bar (v1.13): Home · Budget · + · Activity · Wealth. Goals and Insights live inside Wealth.
+const WEALTH_TABS = ["wealth", "goals", "forecast"];
 function nav() {
-  const items = [
-    ["home", "home", "Home"],
-    ["budget", "budget", "Budget"],
-    ["transactions", "activity", "Activity"],
-    ["goals", "goals", "Goals"],
-    ["wealth", "wealth", "Wealth"],
-    ["forecast", "forecast", "Insights"],
-  ];
-  return `<nav class="tabs"><div class="tabs-inner">${items.map(([id, ic, label]) => `<button class="tab ${tab === id ? "active" : ""}" data-tab="${id}" aria-label="${label}"><span class="tab-icon">${icon(ic)}</span><span class="tab-label">${label}</span></button>`).join("")}</div></nav>`;
+  const button = ([id, ic, label]) => {
+    const active = id === "wealth" ? WEALTH_TABS.includes(tab) : tab === id;
+    return `<button class="tab ${active ? "active" : ""}" data-tab="${id}" aria-label="${label}"${active ? ' aria-current="page"' : ""}><span class="tab-icon">${icon(ic)}</span><span class="tab-label">${label}</span></button>`;
+  };
+  const add = `<button class="tab tab-add" data-action="new-entry" aria-label="Add an expense, income or transfer"><span class="tab-icon"><span class="tab-add-circle">${icon("plus")}</span></span><span class="tab-label" aria-hidden="true">Add</span></button>`;
+  return `<nav class="tabs" aria-label="Main"><div class="tabs-inner">${button(["home", "home", "Home"])}${button(["budget", "pie", "Budget"])}${add}${button(["transactions", "activity", "Activity"])}${button(["wealth", "wealth", "Wealth"])}</div></nav>`;
+}
+function wealthSwitch() {
+  return `<div class="theme-switch wealth-switch" role="group" aria-label="Wealth sections">${[
+    ["wealth", "Overview"],
+    ["goals", "Goals"],
+    ["forecast", "Insights"],
+  ]
+    .map(
+      ([id, label]) =>
+        `<button type="button" class="theme-option ${tab === id ? "active" : ""}" data-tab="${id}" aria-pressed="${tab === id}">${label}</button>`,
+    )
+    .join("")}</div>`;
 }
 
 function periodSelector(full = false) {
@@ -1791,9 +1875,9 @@ function render() {
   if (tab === "home") return shell(homeView());
   if (tab === "budget") return shell(budgetView());
   if (tab === "transactions") return shell(transactionsView());
-  if (tab === "goals") return shell(goalsView());
-  if (tab === "wealth") return shell(wealthView());
-  if (tab === "forecast") return shell(forecastView());
+  if (tab === "goals") return shell(wealthSwitch() + goalsView());
+  if (tab === "wealth") return shell(wealthSwitch() + wealthView());
+  if (tab === "forecast") return shell(wealthSwitch() + forecastView());
 }
 
 function homeView() {
@@ -2098,13 +2182,8 @@ function transactionsView() {
       )
     : filtered;
   return `<div><h2 style="margin:0">Activity</h2><div class="sub">Expenses, income and transfers</div></div>
-  <div class="activity-actions">
-    <button class="activity-action-card" data-action="add-expense"><span class="action-icon">${icon("expense")}</span><span class="action-copy"><strong>Add Expense</strong><span>Record money actually spent on goods, services or obligations.</span></span><span class="action-chevron">›</span></button>
-    <button class="activity-action-card" data-action="add-income"><span class="action-icon">${icon("income")}</span><span class="action-copy"><strong>Add Income</strong><span>Salary, bonus, reimbursement, asset sale or other money received.</span></span><span class="action-chevron">›</span></button>
-    <button class="activity-action-card" data-action="manual-transfer"><span class="action-icon">${icon("transfer")}</span><span class="action-copy"><strong>Add Transfer</strong><span>Move money between bank accounts or assign it to a virtual bucket.</span></span><span class="action-chevron">›</span></button>
-    <button class="activity-action-card" data-action="cash-withdraw"><span class="action-icon">${icon("cash")}</span><span class="action-copy"><strong>Withdraw Cash</strong><span>Move money from CTBC Operating into your Cash Wallet. This is not spending.</span></span><span class="action-chevron">›</span></button>
-    <button class="activity-action-card" data-action="open-projects"><span class="action-icon">${icon("project")}</span><span class="action-copy"><strong>Special Projects</strong><span>Track reimbursable trips or temporary expenses separately from your monthly budget.</span></span><span class="action-chevron">›</span></button>
-  </div>
+  <div class="activity-quick"><button class="btn secondary small" data-action="cash-withdraw">${icon("cash")}<span>Withdraw cash</span></button><button class="btn secondary small" data-action="open-projects">${icon("project")}<span>Special projects</span></button></div>
+  <div class="sub activity-add-hint">Add expenses, income and transfers with the + button below.</div>
   ${projectOverviewStrip()}
   <div class="section-title"><h2>Recent activity</h2><span class="sub">${list.length} shown</span></div>
   <form id="activity-search-form" class="activity-search"><input id="activity-search-input" type="search" value="${esc(activitySearch)}" placeholder="Search description, category or account"><button class="btn ghost small" type="submit">Search</button>${activitySearch ? '<button class="btn ghost small" type="button" data-action="clear-activity-search">Clear</button>' : ""}</form>
@@ -2148,7 +2227,7 @@ function txLine(x) {
   const { canEdit, canDelete, canComplete, canRoute, canRepeat } = txActions(x);
   const hasActions = canEdit || canDelete || canComplete || canRoute || canRepeat;
   const amount = money(x._amount);
-  return `<div class="tx"><div class="tx-main"><div class="tx-title">${esc(x._title)}</div><div class="tx-meta">${esc(meta)}</div></div><div class="right"><div class="amount ${x._kind === "income" ? "good" : x._kind === "expense" ? "bad" : ""}">${x._kind === "transfer" ? "↔ " : ""}${amount}</div><span class="tag ${plannedTransfer ? "warn-tag" : ""}">${plannedTransfer ? "planned" : x._kind}</span></div>${hasActions ? `<button class="row-menu" type="button" data-action="row-actions" data-kind="${x._kind}" data-id="${x.id}" aria-label="Options for ${esc(x._title)}">⋯</button>` : ""}</div>`;
+  return `<div class="tx has-ic">${catIcon(txVisual(x))}<div class="tx-main"><div class="tx-title">${esc(x._title)}</div><div class="tx-meta">${esc(meta)}</div></div><div class="right"><div class="amount ${x._kind === "income" ? "good" : ""}">${x._kind === "transfer" ? "↔ " : ""}${amount}</div>${plannedTransfer ? '<span class="tag warn-tag">planned</span>' : ""}</div>${hasActions ? `<button class="row-menu" type="button" data-action="row-actions" data-kind="${x._kind}" data-id="${x.id}" aria-label="Options for ${esc(x._title)}">⋯</button>` : ""}</div>`;
 }
 
 function projectOverviewStrip() {
@@ -2617,6 +2696,27 @@ function renderModal() {
       modal.id ? "Edit Income" : "Add Income",
       incomeForm(modal.id ? state.incomes.find((x) => x.id === modal.id) : null),
     );
+  if (modal.type === "new-entry") {
+    const kind = modal.kind || "expense";
+    const kinds = `<div class="theme-switch entry-kind" role="group" aria-label="Entry type">${[
+      ["expense", "Expense"],
+      ["income", "Income"],
+      ["transfer", "Transfer"],
+    ]
+      .map(
+        ([k, label]) =>
+          `<button type="button" class="theme-option ${kind === k ? "active" : ""}" data-action="entry-kind" data-kind="${k}" aria-pressed="${kind === k}">${label}</button>`,
+      )
+      .join("")}</div>`;
+    const body =
+      kind === "income"
+        ? incomeForm(null)
+        : kind === "transfer"
+          ? manualTransferForm(null)
+          : expenseForm(null, null, modal.periodId || entryPeriodId());
+    const extra = `<div class="entry-extras"><button type="button" class="text-btn" data-action="cash-withdraw">Withdraw cash</button><button type="button" class="text-btn" data-action="open-projects">Special projects</button></div>`;
+    return modalWrap("New entry", kinds + body + extra);
+  }
   if (modal.type === "income-routing") return modalWrap("Route Supplemental Income", incomeRoutingView(modal.incomeId));
   if (modal.type === "manual-transfer") {
     const x = modal.draft
@@ -2735,22 +2835,47 @@ function expenseForm(x = null, prefill = null, targetPeriodId = null) {
     bucketId = x?.fundingBucketId || prefill?.fundingBucketId || "";
   const amount = x?.amount ?? prefill?.amount ?? "",
     description = x?.description ?? prefill?.description ?? "";
-  return `<form id="expense-form"><input type="hidden" name="id" value="${x?.id || ""}"><input type="hidden" name="periodId" value="${periodId}"><div class="field"><label>Amount</label><input name="amount" type="number" min="0" step="1" value="${amount}" required></div><div class="field"><label>Category</label><select name="category">${state.categories
+  // Flexible caps first (the everyday ones), then fixed bills, then reserve-funded expenses.
+  const groupRank = { cap: 0, fixed: 1, expense_only: 2 };
+  const cats = state.categories
     .filter((c) => ["fixed", "cap", "expense_only"].includes(c.ruleType) && !c.hiddenFromManualEntry && (c.active !== false || c.id === catId))
-    .map((c) => `<option value="${c.id}" ${c.id === catId ? "selected" : ""}>${esc(c.name)}</option>`)
-    .join(
-      "",
-    )}</select></div><div class="form-grid"><div class="field"><label>Date</label><input name="date" type="date" value="${x?.date || today()}" required></div><div class="field"><label>Account used</label><select name="account">${state.accounts
+    .sort((a, b) => groupRank[a.ruleType] - groupRank[b.ruleType] || (a.sort || 0) - (b.sort || 0));
+  const selected = cats.some((c) => c.id === catId) ? catId : cats[0]?.id;
+  const plan = planFor(periodId),
+    totals = expenseTotals(periodId);
+  const hintFor = (c) => {
+    const line = plan.lines.find((l) => l.id === c.id),
+      spent = Number(totals[c.id] || 0);
+    if (c.ruleType === "cap" && line) {
+      const left = Number(line.budgetAmount || 0) - spent;
+      return left >= 0 ? `${money(left)} left this month` : `${money(-left)} over this month`;
+    }
+    if (c.ruleType === "fixed" && line)
+      return fixedPaid(spent) ? `Paid ${money(spent)} this month` : `${money(line.budgetAmount)} expected this month`;
+    const fund = c.defaultFundingBucketId ? bucket(c.defaultFundingBucketId) : null;
+    return fund ? `Paid from ${fund.name}` : "";
+  };
+  const activeProjects = state.projects.filter((p) => !p.deletedAt && !projectSettlement(p.id));
+  const projectTile = x
+    ? ""
+    : `<button type="button" class="cat-tile cat-tile-extra" ${activeProjects.length === 1 ? `data-action="add-project-expense" data-project="${activeProjects[0].id}"` : 'data-action="open-projects"'}>${catIcon({ icon: "project", tone: "slate" }, "sm")}<span class="cat-name">Project</span></button>`;
+  const selectedCat = cats.find((c) => c.id === selected);
+  return `<form id="expense-form" class="entry-form"><input type="hidden" name="id" value="${x?.id || ""}"><input type="hidden" name="periodId" value="${periodId}"><label class="amount-field"><span class="amount-label">Amount</span><span class="amount-input"><span class="amount-cur">NT$</span><input name="amount" type="number" inputmode="numeric" min="0" step="1" value="${amount}" required placeholder="0"></span></label><div class="cat-head"><span class="cat-head-label" id="cat-head-label">Category</span><span class="cat-hint" id="cat-hint" aria-live="polite">${esc(selectedCat ? hintFor(selectedCat) : "")}</span></div><div class="cat-grid" role="radiogroup" aria-labelledby="cat-head-label">${cats
+    .map((c) => {
+      const name = SHORT_CATEGORY_NAMES[c.name] || c.name;
+      return `<label class="cat-tile${c.id === selected ? " selected" : ""}" title="${esc(c.name)}"><input type="radio" name="category" value="${c.id}" ${c.id === selected ? "checked" : ""} data-hint="${esc(hintFor(c))}">${catIcon(categoryVisual(c), "sm")}<span class="cat-name">${esc(name)}</span></label>`;
+    })
+    .join("")}${projectTile}</div><div class="form-grid"><div class="field"><label>Date</label><input name="date" type="date" value="${x?.date || today()}" required></div><div class="field"><label>Account used</label><select name="account">${state.accounts
     .filter((a) => a.role !== "investment")
     .map((a) => `<option value="${a.id}" ${a.id === accountId ? "selected" : ""}>${esc(a.name)}</option>`)
     .join(
       "",
-    )}</select></div></div><div class="field"><label>Funding bucket (optional)</label><select name="fundingBucket"><option value="">Operating cash</option>${state.buckets
+    )}</select></div></div><div class="field"><label>Note (optional)</label><input name="description" value="${esc(description)}" placeholder="Lunch, laundry, electricity..."></div><details class="entry-more"${bucketId ? " open" : ""}><summary>Pay from a savings bucket</summary><div class="field"><label>Funding bucket</label><select name="fundingBucket"><option value="">Operating cash</option>${state.buckets
     .filter((b) => b.bucketType !== "restricted" && (b.active !== false || b.id === bucketId))
     .map((b) => `<option value="${b.id}" ${b.id === bucketId ? "selected" : ""}>${esc(b.name)}</option>`)
     .join(
       "",
-    )}</select></div><div class="field"><label>Description (optional)</label><input name="description" value="${esc(description)}" placeholder="Lunch, rent, electricity..."></div><button class="btn" style="width:100%">${x ? "Save Changes" : "Save Expense"}</button></form>`;
+    )}</select></div></details><button class="btn" style="width:100%">${x ? "Save Changes" : "Save Expense"}</button></form>`;
 }
 function routingTransfersForIncome(incomeId) {
   return state.transfers.filter((t) => !t.deletedAt && t.sourceIncomeId === incomeId);
@@ -4644,6 +4769,8 @@ function bind() {
             modal = { type: "paycheck" };
           }
           if (a === "add-expense") modal = { type: "expense", periodId: entryPeriodId() };
+          if (a === "new-entry") modal = { type: "new-entry", kind: "expense", periodId: entryPeriodId() };
+          if (a === "entry-kind" && modal?.type === "new-entry") modal = { ...modal, kind: b.dataset.kind };
           if (a === "add-income") modal = { type: "income" };
           if (a === "route-income") modal = { type: "income-routing", incomeId: b.dataset.id };
           if (a === "skip-income-routing") {
@@ -4824,11 +4951,21 @@ function bind() {
       createPaycheck(pf).catch((err) => alert(err.message));
     };
   const ef = document.querySelector("#expense-form");
-  if (ef)
+  if (ef) {
     ef.onsubmit = (e) => {
       e.preventDefault();
       saveExpense(ef).catch((err) => alert(err.message));
     };
+    // Category tiles: highlight the chosen one and show what's left in it.
+    const hint = ef.querySelector("#cat-hint");
+    ef.querySelectorAll('input[name="category"]').forEach(
+      (r) =>
+        (r.onchange = () => {
+          ef.querySelectorAll(".cat-tile").forEach((t) => t.classList.toggle("selected", !!t.querySelector("input")?.checked));
+          if (hint) hint.textContent = r.dataset.hint || "";
+        }),
+    );
+  }
   const inf = document.querySelector("#income-form");
   if (inf) {
     inf.onsubmit = (e) => {

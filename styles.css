@@ -2530,3 +2530,60 @@ html[data-theme="dark"] .entry-more summary {
     font-size: 11px;
   }
 }
+
+/* ---------- v1.13.1: layout fixes ---------- */
+/* iPhone Safari gives date and month fields a minimum width of their own and centres the text,
+   so they stuck out of the sheet. Let them shrink to the column like every other field. */
+input[type="date"],
+input[type="month"],
+input[type="time"],
+input[type="datetime-local"] {
+  -webkit-appearance: none;
+  appearance: none;
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 46px;
+  text-align: left;
+}
+input::-webkit-date-and-time-value {
+  text-align: left;
+  margin: 0;
+}
+.field input,
+.field select,
+.field textarea {
+  min-width: 0;
+  max-width: 100%;
+}
+.field,
+.form-grid > * {
+  min-width: 0;
+}
+/* 1fr columns grow to fit their widest field; minmax(0, 1fr) keeps them equal and inside the card. */
+.form-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+@media (max-width: 700px) {
+  .g2,
+  .g3,
+  .form-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+/* Category tiles: names wrap onto a second line instead of being cut off ("Dating / Social"). */
+.cat-name {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  font-size: 11.5px;
+  line-height: 1.2;
+}
+.cat-tile {
+  min-height: 76px;
+}
+.t-red { background: #fdecec; color: #b91c1c; }
+html[data-theme="dark"] .t-red { background: #3b1414; color: #fca5a5; }

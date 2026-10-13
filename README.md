@@ -1,4 +1,12 @@
-# Wealth OS — v1.13.0
+# Wealth OS — v1.13.1
+
+## v1.13.1 — layout fixes
+
+- **Date fields on iPhone** (expense, income, transfer, paycheck, reconciliation, goals and the rest) no longer stick out past the right edge of their sheet, and their date reads from the left like every other field. iPhone Safari gives date and month fields a minimum width of their own; they now shrink to the column.
+- Two-column forms keep both columns equal and inside the card, however wide a field is.
+- **Category tiles** show long names on two lines ("Dating / Social", "Family Support", "Sister's Rent") instead of cutting them off.
+- New pictures for categories you add: subscriptions (Apple One, iCloud, Netflix, Spotify…) get a repeat icon; family support (Family, Parents, Support…) gets a heart.
+- Checked every tab and 40+ pop-ups at 390 px and 320 px: nothing sticks out of its card or sheet and no text is cut off.
 
 ## v1.13.0 — the + button and category pictures
 
@@ -101,11 +109,11 @@ This release changes presentation only. It does **not** modify balances, transac
 
 ## Release identity
 
-- App version: **1.13.0**
+- App version: **1.13.1**
 - Data model: **182**
-- Service-worker cache: **wealth-os-v1-13-0**
+- Service-worker cache: **wealth-os-v1-13-1**
 - Manifest: **manifest.webmanifest**
 
 ## Upgrade
 
-Replace the repository files with this package, commit to `main`, wait for GitHub Pages to deploy, then fully close and reopen the installed PWA. Confirm **Settings → Wealth OS v1.13.0 / Data model 182**.
+Replace the repository files with this package, commit to `main`, wait for GitHub Pages to deploy, then fully close and reopen the installed PWA. Confirm **Settings → Wealth OS v1.13.1 / Data model 182**.

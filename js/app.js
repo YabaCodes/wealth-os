@@ -41,7 +41,7 @@ let selectedPeriodId = null;
 let activityFilter = "all";
 let activitySearch = "";
 let modalDirty = false;
-const APP_VERSION = "1.13.0";
+const APP_VERSION = "1.13.1";
 const THEME_KEY = "wealthOSTheme";
 // Theme: 'system' follows the phone's light/dark setting. A copy is kept in localStorage so
 // index.html can apply it before the first paint (IndexedDB is too slow for that).
@@ -1183,6 +1183,8 @@ function icon(name, extra = "") {
     bolt: '<path d="M13 3 5 13.5h6L10 21l8-10.5h-6z"/>',
     plane: '<path d="M10.5 4.5 13 10l6-.5a1.6 1.6 0 0 1 0 3.2l-6-.5-2.5 5.5H8.5l1.2-5.7-4.2-.4L4 13.5H2.8l.6-2.5-.6-2.5H4l1.5 1.9 4.2-.4-1.2-5.5z"/>',
     camera: '<path d="M4 8h3l1.5-2.5h7L17 8h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>',
+    heart: '<path d="M12 20s-7.5-4.6-7.5-10A4.3 4.3 0 0 1 12 7.3 4.3 4.3 0 0 1 19.5 10c0 5.4-7.5 10-7.5 10z"/>',
+    repeat: '<path d="M17 3.5 20 6.5l-3 3"/><path d="M4 12v-1.5a4 4 0 0 1 4-4h12M7 20.5 4 17.5l3-3"/><path d="M20 12v1.5a4 4 0 0 1-4 4H4"/>',
   };
   return `<svg class="ui-icon ${extra}" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${paths[name] || ""}</svg>`;
 }
@@ -1205,6 +1207,8 @@ const CATEGORY_VISUALS = {
   "project-shortfall": ["project", "slate"],
 };
 const CATEGORY_KEYWORDS = [
+  [/icloud|apple one|netflix|spotify|youtube|disney|prime video|google one|chatgpt|claude|subscription|streaming/i, "repeat", "indigo"],
+  [/family|parent|mom|mother|dad|father|support|remit|allowance/i, "heart", "red"],
   [/food|grocer|meal|restaurant|lunch|dinner|coffee|snack/i, "food", "orange"],
   [/transport|mrt|metro|bus|taxi|uber|train|commute/i, "bus", "blue"],
   [/social|dating|friend|gift|party/i, "people", "pink"],

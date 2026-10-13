@@ -1,4 +1,13 @@
-# Wealth OS — v1.12.0
+# Wealth OS — v1.13.0
+
+## v1.13.0 — the + button and category pictures
+
+- **Bottom bar:** Home · Budget · **+** · Activity · Wealth. The + sits in line with the other icons and opens **New entry**: Expense, Income or Transfer in one place, with Withdraw cash and Special projects underneath.
+- **Expense form:** a large amount field and a grid of category tiles, each with its own picture and colour: everyday caps first, then fixed bills, then reserve-funded expenses, plus Project. The line above the grid says how much is left in the chosen category this month (or that a bill is already paid). The note field stays; *Pay from a savings bucket* is one tap away. Editing an expense or recording a bill uses the same form.
+- **Activity:** every entry shows its category picture; expenses are no longer red (red is kept for overspending), income stays green. The large Add cards are replaced by the + button; Withdraw cash and Special projects stay as small buttons.
+- **Wealth** now holds **Overview · Goals · Insights** in a switch at the top, so the bar needs only four tabs.
+- Categories you add get a matching picture from their name (for example "Laundry" gets the household one); anything else gets a tag.
+- No change to any stored record or calculation.
 
 ## v1.12.0 — bills, Household and the sweep
 
@@ -92,11 +101,11 @@ This release changes presentation only. It does **not** modify balances, transac
 
 ## Release identity
 
-- App version: **1.12.0**
+- App version: **1.13.0**
 - Data model: **182**
-- Service-worker cache: **wealth-os-v1-12-0**
+- Service-worker cache: **wealth-os-v1-13-0**
 - Manifest: **manifest.webmanifest**
 
 ## Upgrade
 
-Replace the repository files with this package, commit to `main`, wait for GitHub Pages to deploy, then fully close and reopen the installed PWA. Confirm **Settings → Wealth OS v1.12.0 / Data model 182**.
+Replace the repository files with this package, commit to `main`, wait for GitHub Pages to deploy, then fully close and reopen the installed PWA. Confirm **Settings → Wealth OS v1.13.0 / Data model 182**.

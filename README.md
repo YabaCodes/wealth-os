@@ -1,4 +1,14 @@
-# Wealth OS — v1.16.0
+# Wealth OS — v1.17.0
+
+## v1.17.0 — the week on Home, a month-end summary, tidier Wealth and Budget
+
+- **This week on Home.** Inside *October so far*, seven small bars show what went on everyday flexible spending each day, against a dashed line for an even daily share of those caps (gas and water, billed irregularly, are left out). A day above the line turns amber. The line above says the week's total and the daily amount that keeps you on pace; ‹ › step through the weeks of the month. **Tap a day** and Latest activity shows that day's entries and what you spent; *Show latest* goes back.
+- **Month-end summary.** Closing a month now opens a short summary: how much went to wealth (and how much of it was the month-end sweep), what you spent against the plan, bills paid, caps under and over (every cap that went over, then your three biggest savings), and the Emergency Fund bar moving from where it began the month to where it is now. *Done* closes it.
+- **Goal reached.** When a save takes a goal to its target, a note follows the save message: *Emergency Fund reached its target · NT$300,000*.
+- **Wealth tab.** Each account card keeps its main button (*Update Balance*, or *Withdraw Cash* for the wallet) with **More** beside it for the rest (Audit Trail, Add Adjustment, Deposit Cash, Count Cash, Reallocate Purpose).
+- **Budget tab.** The big red *Delete funding month* card is gone from the bottom. The month picker has a **⋯** with Month-End Review, Reopen (for a closed month) and *Delete <month>…*, which still shows what it would remove before anything happens.
+- On 320 px phones the month card's numbers stay on one line ("NT$62,000", not "NT$62,00 / 0").
+- No change to any stored record, calculation, backup or CSV export.
 
 ## v1.16.0 — smoother to use
 

@@ -128,13 +128,14 @@ export function toast(text, tone = "") {
 // ---------- Bars and rings ----------
 // Every bar fill carries data-bar="<key>" and every ring segment data-arc="<key>". When a screen is opened
 // they fill from empty; after a change on the same screen (an expense saved) they move from where they
-// were to where they are now. Nothing animates when nothing changed, so opening a pop-up stays still.
+// were to where they are now; a bar that wasn't there before grows from data-from (or empty). Nothing
+// animates when nothing changed, so opening a pop-up stays still. data-axis="y" bars grow upwards.
 const BAR_SEL = "[data-bar]",
   ARC_SEL = "[data-arc]";
 export function snapshotBars(scope) {
   const bars = new Map(),
     arcs = new Map();
-  scope.querySelectorAll(BAR_SEL).forEach((el) => bars.set(el.dataset.bar, el.style.width));
+  scope.querySelectorAll(BAR_SEL).forEach((el) => bars.set(el.dataset.bar, el.dataset.axis === "y" ? el.style.height : el.style.width));
   scope.querySelectorAll(ARC_SEL).forEach((el) =>
     arcs.set(el.dataset.arc, [el.getAttribute("stroke-dasharray"), el.getAttribute("stroke-dashoffset")]),
   );
@@ -174,14 +175,16 @@ export function animateBars(scope, before, entering) {
   const ease = "cubic-bezier(.2,.8,.2,1)";
   let n = 0;
   scope.querySelectorAll(BAR_SEL).forEach((el) => {
-    const to = el.style.width,
-      from = entering ? "0%" : before?.bars.get(el.dataset.bar);
-    if (!to || from == null || from === to || (entering && !(parseFloat(to) > 0))) return;
+    const prop = el.dataset.axis === "y" ? "height" : "width",
+      to = el.style[prop],
+      known = before?.bars.has(el.dataset.bar),
+      from = entering ? "0%" : known ? before.bars.get(el.dataset.bar) : el.dataset.from || "0%";
+    if (!to || from == null || from === to || ((entering || !known) && !(parseFloat(to) > 0) && !el.dataset.from)) return;
     if (!el.getClientRects().length) return;
     const r = el.getBoundingClientRect(),
       onScreen = r.bottom > 0 && r.top < window.innerHeight;
-    const anim = el.animate([{ width: from || "0%" }, { width: to }], {
-      duration: entering ? 650 : 520,
+    const anim = el.animate([{ [prop]: from || "0%" }, { [prop]: to }], {
+      duration: entering ? 650 : el.dataset.from ? 900 : 520,
       delay: entering && onScreen ? Math.min(n++, 10) * 40 : 0,
       easing: ease,
       fill: "backwards",

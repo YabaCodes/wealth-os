@@ -42,7 +42,11 @@ let selectedPeriodId = null;
 let activityFilter = "all";
 let activitySearch = "";
 let modalDirty = false;
-const APP_VERSION = "1.16.0";
+// Home week strip (v1.17): which week is shown and which day is picked. Not saved; resets with the month.
+let homeWeekStart = null,
+  homeDay = null;
+let reachedGoals = null; // goals at target after the last load (null until the first load)
+const APP_VERSION = "1.17.0";
 const THEME_KEY = "wealthOSTheme";
 // Theme: 'system' follows the phone's light/dark setting. A copy is kept in localStorage so
 // index.html can apply it before the first paint (IndexedDB is too slow for that).
@@ -623,7 +627,17 @@ async function load() {
   const open = state.periods.filter((p) => p.state !== "closed").sort((a, b) => b.id.localeCompare(a.id));
   const any = [...state.periods].sort((a, b) => b.id.localeCompare(a.id));
   if (!selectedPeriodId) selectedPeriodId = (open[0] || any[0])?.id || null;
+  // v1.17: a goal that reaches its target gets a short note after the save message.
+  const reached = new Set(
+    state.goals.filter((g) => Number(g.targetAmount || 0) > 0 && goalBal(g) + 0.5 >= Number(g.targetAmount)).map((g) => g.id),
+  );
+  const newly = reachedGoals ? [...reached].filter((id) => !reachedGoals.has(id)) : [];
+  reachedGoals = reached;
   render();
+  if (newly.length) {
+    const g = goal(newly[0]);
+    setTimeout(() => toast(`${g?.name || "Goal"} reached its target · ${money(g?.targetAmount || 0)}`, "good"), 2700);
+  }
 }
 
 function currentPeriod() {
@@ -1906,6 +1920,71 @@ function render() {
   if (tab === "forecast") return shell(wealthSwitch() + forecastView());
 }
 
+// ---------- Home week strip (v1.17) ----------
+// Seven days of the month you're looking at, each with what went on everyday flexible spending (bills that
+// arrive irregularly, like gas and water, are left out) against an even daily share of those caps.
+const isoDay = (d) => today(d);
+function addDaysIso(iso, n) {
+  const [y, m, d] = iso.split("-").map(Number);
+  return isoDay(new Date(y, m - 1, d + n, 12));
+}
+function mondayOf(iso) {
+  const [y, m, d] = iso.split("-").map(Number),
+    dow = new Date(y, m - 1, d, 12).getDay();
+  return addDaysIso(iso, dow === 0 ? -6 : 1 - dow);
+}
+function weekStripHTML(p, fp) {
+  const [y, m] = p.id.split("-").map(Number),
+    first = `${p.id}-01`,
+    last = isoDay(new Date(y, m, 0, 12));
+  const dailyLines = fp.capLines.filter((l) => !isIrregularCap(l));
+  if (!dailyLines.length) return "";
+  const ids = new Set(dailyLines.map((l) => l.id)),
+    dailyBudget = dailyLines.reduce((n, l) => n + Number(l.budgetAmount || 0), 0),
+    pace = fp.ctx.days ? dailyBudget / fp.ctx.days : 0;
+  const ref = today() < first ? first : today() > last ? last : today();
+  if (!homeWeekStart || homeWeekStart > last || addDaysIso(homeWeekStart, 6) < first) {
+    homeWeekStart = mondayOf(ref);
+    homeDay = null;
+  }
+  const days = Array.from({ length: 7 }, (_, i) => addDaysIso(homeWeekStart, i));
+  const spentOn = (d) =>
+    state.expenses
+      .filter((e) => !e.deletedAt && e.budgetPeriodId === p.id && e.date === d && ids.has(e.categoryId))
+      .reduce((n, e) => n + Number(e.amount || 0), 0);
+  const amounts = days.map(spentOn),
+    scale = Math.max(pace * 1.8, ...amounts, 1),
+    weekTotal = amounts.reduce((a, b) => a + b, 0);
+  const prev = addDaysIso(homeWeekStart, -7),
+    next = addDaysIso(homeWeekStart, 7),
+    canPrev = addDaysIso(prev, 6) >= first,
+    canNext = next <= last;
+  const fmt = (d, o) => new Intl.DateTimeFormat("en-US", o).format(new Date(`${d}T12:00:00`));
+  const range = `${fmt(days[0], { month: "short", day: "numeric" })} – ${fmt(days[6], { month: "short", day: "numeric" })}`;
+  const bars = days
+    .map((d, i) => {
+      const inMonth = d >= first && d <= last,
+        amt = amounts[i],
+        future = d > today(),
+        over = pace > 0 && amt > pace + 0.5,
+        label = `${fmt(d, { weekday: "long", month: "short", day: "numeric" })}: ${money(amt)} flexible spending${over ? ", over the daily share" : ""}`;
+      return `<button type="button" class="week-day${over ? " over" : ""}${d === today() ? " today" : ""}${d === homeDay ? " selected" : ""}${future ? " future" : ""}" ${inMonth ? `data-action="home-day" data-day="${d}"` : "disabled"} aria-pressed="${d === homeDay}" aria-label="${esc(label)}"><span class="week-col"><span class="week-fill" data-bar="day-${d}" data-axis="y" style="height:${((amt / scale) * 100).toFixed(1)}%"></span></span><span class="week-dow">${fmt(d, { weekday: "narrow" })}</span><span class="week-date">${Number(d.slice(8))}</span></button>`;
+    })
+    .join("");
+  return `<div class="week-strip"><div class="week-head"><div><strong>${range}</strong><span>${money(weekTotal)} spent · on pace at ${money(pace)} a day</span></div><div class="week-nav"><button type="button" class="period-step" data-action="home-week" data-start="${prev}" ${canPrev ? "" : "disabled"} aria-label="Previous week">‹</button><button type="button" class="period-step" data-action="home-week" data-start="${next}" ${canNext ? "" : "disabled"} aria-label="Next week">›</button></div></div><div class="week-bars" style="--pace:${(pace / scale).toFixed(3)}">${bars}<span class="week-pace" aria-hidden="true"></span></div></div>`;
+}
+// The picked day's entries, with what was spent and received.
+function homeDayList(p, day) {
+  const items = activityRecords().filter((x) => x.budgetPeriodId === p.id && String(x._date || "").slice(0, 10) === day);
+  if (!items.length) return `<div class="empty compact-empty"><strong>Nothing recorded on this day.</strong><span>Tap + to add an entry.</span></div>`;
+  const spent = items.filter((x) => x._kind === "expense").reduce((n, x) => n + Math.abs(Number(x._amount || 0)), 0);
+  return `${items
+    .map(
+      (x) =>
+        `<div class="home-tx" data-entry="${x._kind}:${esc(x.id)}">${catIcon(txVisual(x))}<div class="home-tx-copy"><strong>${esc(x._title)}</strong><span>${esc([x.description, x._account].filter(Boolean).join(" · "))}</span></div><span class="amount ${x._kind === "income" ? "good" : ""}">${money(x._amount)}</span></div>`,
+    )
+    .join("")}${spent ? `<div class="home-day-total"><span>Spent this day</span><strong>${money(spent)}</strong></div>` : ""}`;
+}
 function homeView() {
   const p = currentPeriod();
   const active = activeGoal(state.goals, state.bucketBalances);
@@ -2010,15 +2089,22 @@ function homeView() {
     <div class="pace-head"><strong>Flexible spending</strong><span>${money(capsSpent)} of ${money(capsBudget)}</span></div>
     <div class="pace-bar" role="img" aria-label="Flexible spending ${money(capsSpent)} of ${money(capsBudget)}${ctx.isCurrent ? `; today's mark ${money(todaysMark)}` : ""}"><span class="pace-fill ${paceTone === "bad" ? "over" : ""}" data-bar="flex-pace" style="width:${fillPct.toFixed(1)}%"></span>${ctx.isCurrent && capsBudget > 0 ? `<span class="pace-mark" style="left:${markPct.toFixed(1)}%"></span>` : ""}</div>
     <div class="pace-status pace-${paceTone}">${paceTone === "good" ? icon("check") : ""}<span>${paceText}</span></div>
+    ${weekStripHTML(p, fp)}
     <div class="month-actions"><button class="btn ghost small" data-action="month-close">Month-End Review</button>${newPaycheckButton()}</div>
   </section>
   <section class="card next-step next-${nextTone}">
     <div class="next-step-row"><span class="next-ic" aria-hidden="true">${icon(nextIcon)}</span><div class="next-copy"><span class="metric-label">Next step</span><strong>${actionText}</strong><span class="sub">${actionSub}</span></div>${actionMetric ? `<strong class="next-amount">${privateValue(actionMetric)}</strong>` : ""}</div>
     ${action ? `<div class="next-step-actions">${action}</div>` : ""}
   </section>
-  <div class="section-title"><h2>Latest activity</h2><button class="text-btn see-all" data-tab="transactions">See all</button></div>
+  ${
+    homeDay
+      ? `<div class="section-title"><h2>${esc(dayHeading(homeDay))}</h2><button class="text-btn see-all" data-action="home-day" data-day="">Show latest</button></div>`
+      : `<div class="section-title"><h2>Latest activity</h2><button class="text-btn see-all" data-tab="transactions">See all</button></div>`
+  }
   <section class="card home-activity">${
-    recent.length
+    homeDay
+      ? homeDayList(p, homeDay)
+      : recent.length
       ? recent
           .map(
             (x) =>
@@ -2171,7 +2257,7 @@ function budgetView() {
         .join("")}</section>`
     : "";
 
-  return `<div class="period-row">${periodSelector(true)}</div>
+  return `<div class="period-row with-menu">${periodSelector(true)}<button type="button" class="period-step period-menu" data-action="month-actions" data-id="${p.id}" aria-label="More for ${monthLabel(p.id)}">⋯</button></div>
   ${lock}
   <section class="card ring-card">
     <div class="ring-head"><h2>Flexible spending</h2><span class="tag">${dayPill}</span></div>
@@ -2184,7 +2270,7 @@ function budgetView() {
   ${capList}
   <div class="section-title"><h2>Month close</h2><span class="tag ${closed ? "good-tag" : close.ready ? "good-tag" : "warn-tag"}">${closed ? "Closed" : close.ready ? "Ready" : "Review"}</span></div>
   <section class="card close-summary-card"><div><strong>${closed ? `${monthLabel(p.id)} is closed` : "Reconcile, sweep and lock the month"}</strong><div class="sub">${closed ? "Period-linked records are protected until you reopen the month." : close.hardBlockers.length ? `${close.hardBlockers.length} item${close.hardBlockers.length === 1 ? "" : "s"} still need attention.` : "Core close checks are clear."}</div></div><button class="btn ${closed ? "secondary" : ""}" data-action="month-close">${closed ? "View Close Summary" : "Month-End Review"}</button></section>
-  ${fundingMonthControls(p)}`;
+`;
 }
 
 function fixedPaid(actual) {
@@ -2299,23 +2385,6 @@ function flexRing(fp, totals) {
 }
 function budgetKpi(label, value, sub, bad = false) {
   return `<section class="card budget-kpi"><div class="metric-label">${label}</div><div class="kpi-value ${bad ? "bad" : ""}">${value}</div><div class="sub">${sub}</div></section>`;
-}
-function fundingMonthControls(p) {
-  const completed = state.transfers.filter(
-    (t) =>
-      !t.deletedAt &&
-      t.budgetPeriodId === p.id &&
-      t.status === "completed" &&
-      !(t.systemGenerated && t.fromAccountId === t.toAccountId && t.transferType === "reserve_allocation"),
-  );
-  const closed = p.state === "closed";
-  if (closed) {
-    return `<div class="section-title"><h2>Funding month controls</h2></div><section class="card"><div class="split"><div><strong>Reopen ${monthLabel(p.id)}</strong><div class="sub">Use this only to correct a closed month. Changes may require a new reconciliation or sweep correction.</div></div><button class="btn secondary" data-action="reopen-period" data-id="${p.id}">Reopen Month</button></div></section>`;
-  }
-  const warning = completed.length
-    ? `${completed.length} completed transfer${completed.length === 1 ? "" : "s"} must be resolved before this month can be deleted.`
-    : "Use this to remove a test or mistaken funding month and all of its period-linked draft data.";
-  return `<div class="section-title"><h2>Funding month controls</h2></div><section class="card danger-zone"><div class="split"><div><strong>Delete ${monthLabel(p.id)} funding month</strong><div class="sub">${warning}</div></div><button class="btn danger" data-action="delete-period" data-id="${p.id}">Delete Month</button></div></section>`;
 }
 
 function budgetGroup(group, lines, periodId) {
@@ -2613,14 +2682,14 @@ function wealthView() {
     <div class="account-balance-head"><div><div class="metric-label">Tracked current balance</div><div class="metric">${money(ct.actual)}</div>${ct.verified ? `<div class="sub">Last checked ${esc(ct.reconciliation.date || "")}${ct.isEstimated ? " · updated by recorded activity" : ""}</div>` : `<div class="sub">Using ledger balance until you confirm it</div>`}</div></div>
     <div class="reconcile-grid two-col"><div><span class="sub">Ledger expected</span><strong>${money(ct.expected)}</strong></div><div><span class="sub">Bank vs ledger</span><strong class="${Math.abs(ct.difference) < 0.5 ? "good" : ct.difference < 0 ? "bad" : "warn"}">${ct.difference > 0 ? "+" : ""}${money(ct.difference)}</strong></div></div>
     <div class="row"><div><strong>Electricity Reserve</strong><div class="sub">Virtual reserve held inside CTBC · no bank transfer required</div></div><strong class="amount">${money(state.bucketBalances.electricity || 0)}</strong></div>
-    <div class="actions account-actions"><button class="btn secondary" data-action="account-reconcile" data-id="ctbc">Update Balance</button><button class="btn ghost" data-action="account-audit" data-id="ctbc">Audit Trail</button><button class="btn ghost" data-action="account-adjustment" data-id="ctbc">Add Adjustment</button></div>
+    ${accountActions(`<button class="btn secondary" data-action="account-reconcile" data-id="ctbc">Update Balance</button>`, "ctbc")}
   </section>
 
   <div class="section-title"><h2>Cash Wallet</h2><span class="tag${cashStatusClass}">${cashStatus}</span></div>
   <section class="card account-detail-card cash-card">
     <div class="account-balance-head"><div><div class="metric-label">Cash on hand</div><div class="metric">${money(cash.actual)}</div>${cash.verified ? `<div class="sub">Last counted ${esc(cash.reconciliation.date || "")}${cash.isEstimated ? " · updated by recorded activity" : ""}</div>` : `<div class="sub">Starts at zero and changes only through CTBC cash transfers and cash expenses</div>`}</div></div>
     <div class="notice" style="margin-top:14px">ATM withdrawals are <strong>transfers</strong>, not expenses. Only spending from Cash Wallet counts as an expense.</div>
-    <div class="actions account-actions"><button class="btn" data-action="cash-withdraw">Withdraw Cash</button><button class="btn secondary" data-action="cash-deposit">Deposit Cash</button><button class="btn ghost" data-action="account-reconcile" data-id="cash">Count Cash</button><button class="btn ghost" data-action="account-audit" data-id="cash">Audit Trail</button></div>
+    ${accountActions(`<button class="btn" data-action="cash-withdraw">Withdraw Cash</button>`, "cash")}
   </section>
 
   <div class="section-title"><h2>E.SUN Reserved</h2><span class="tag${esStatusClass}">${esStatus}</span></div>
@@ -2628,7 +2697,7 @@ function wealthView() {
     <div class="account-balance-head"><div><div class="metric-label">Tracked current balance</div><div class="metric">${money(es.actual)}</div>${es.verified ? `<div class="sub">Last checked ${esc(es.reconciliation.date || "")}${es.isEstimated ? " · updated by recorded activity" : ""}</div>` : `<div class="sub">Using ledger balance until you confirm it</div>`}</div></div>
     <div class="reconcile-grid"><div><span class="sub">Ledger expected</span><strong>${money(es.expected)}</strong></div><div><span class="sub">Virtual allocated</span><strong>${money(es.virtualTotal)}</strong></div><div><span class="sub">Bank reconciliation</span><strong class="${es.bankOk ? "good" : es.difference < 0 ? "bad" : "warn"}">${es.bankOk ? "Matched" : `${es.difference > 0 ? "+" : ""}${money(es.difference)}`}</strong></div><div><span class="sub">Purpose allocation</span><strong class="${es.allocationOk ? "good" : "warn"}">${allocationText}</strong></div></div>
     ${!es.allocationOk ? `<div class="allocation-callout"><div><strong>${es.unassigned > 0 ? `${money(es.unassigned)} needs a purpose` : `Allocations exceed the bank balance by ${money(Math.abs(es.unassigned))}`}</strong><div class="sub">Assign or reduce virtual buckets explicitly. Wealth OS will never guess.</div></div><button class="btn" data-action="esun-allocate">${es.unassigned > 0 ? "Assign Money" : "Reduce Allocation"}</button></div>` : ""}
-    <div class="actions account-actions"><button class="btn secondary" data-action="account-reconcile" data-id="esun">Update Balance</button><button class="btn ghost" data-action="account-audit" data-id="esun">Audit Trail</button><button class="btn ghost" data-action="esun-reallocate">Reallocate Purpose</button><button class="btn ghost" data-action="account-adjustment" data-id="esun">Add Adjustment</button></div>
+    ${accountActions(`<button class="btn secondary" data-action="account-reconcile" data-id="esun">Update Balance</button>`, "esun")}
   </section>
   <div class="section-title"><h2>E.SUN virtual composition</h2><span class="sub">Purpose ledger</span></div><section class="card">${state.buckets
     .filter((b) => b.accountId === "esun")
@@ -3013,9 +3082,97 @@ function renderModal() {
     return modalWrap(esc(x?._title || "Entry"), rowActionsView(modal.kind, modal.id));
   }
   if (modal.type === "delete-period") return modalWrap("Delete Funding Month", deleteFundingMonthView(modal.periodId));
+  if (modal.type === "account-actions")
+    return modalWrap(esc(physicalAccount(modal.accountId)?.name || "Account"), accountActionsView(modal.accountId));
+  if (modal.type === "month-actions") return modalWrap(monthLabel(modal.periodId), monthActionsView(modal.periodId));
+  if (modal.type === "month-summary")
+    return modalWrap(`${monthLabel(modal.periodId)} closed`, monthSummaryView(modal.periodId, modal.emergencyFrom));
   if (modal.type === "edit-goal") return modalWrap("Edit Goal", goalEditForm(modal.goalId));
   if (modal.type === "goal-contribution") return modalWrap("Add Goal Contribution", goalContributionForm(modal.goalId));
   return "";
+}
+// v1.17: each account card keeps its main button; the rest live behind "More".
+const ACCOUNT_MORE = {
+  ctbc: [
+    ["account-audit", "Audit Trail"],
+    ["account-adjustment", "Add Adjustment"],
+  ],
+  cash: [
+    ["cash-deposit", "Deposit Cash"],
+    ["account-reconcile", "Count Cash"],
+    ["account-audit", "Audit Trail"],
+  ],
+  esun: [
+    ["account-audit", "Audit Trail"],
+    ["esun-reallocate", "Reallocate Purpose"],
+    ["account-adjustment", "Add Adjustment"],
+  ],
+};
+function accountActions(primary, accountId) {
+  const name = physicalAccount(accountId)?.name || "this account";
+  return `<div class="account-actions account-actions-two">${primary}<button class="btn ghost account-more" data-action="account-actions" data-id="${accountId}" aria-label="More for ${esc(name)}">More</button></div>`;
+}
+function accountActionsView(accountId) {
+  return `<div class="action-sheet">${(ACCOUNT_MORE[accountId] || [])
+    .map(([action, label]) => `<button class="btn secondary" data-action="${action}" data-id="${accountId}">${label}</button>`)
+    .join("")}</div>`;
+}
+// The month picker's ⋯ on Budget: review, reopen, or (for a mistaken month) delete.
+function monthActionsView(periodId) {
+  const p = state.periods.find((x) => x.id === periodId);
+  if (!p) return `<div class="empty compact-empty"><strong>This month no longer exists.</strong></div>`;
+  const closed = p.state === "closed";
+  return `<div class="action-sheet"><button class="btn secondary" data-action="month-close">Month-End Review</button>${
+    closed ? `<button class="btn secondary" data-action="reopen-period" data-id="${p.id}">Reopen ${monthLabel(p.id)}</button>` : ""
+  }${
+    closed
+      ? ""
+      : `<div class="action-sheet-danger"><button class="btn ghost danger-text" data-action="delete-period" data-id="${p.id}">Delete ${monthLabel(p.id)}…</button><div class="sub" style="margin-top:6px">For a test or mistaken funding month. You'll see what it removes first.</div></div>`
+  }</div>`;
+}
+// Shown once, right after a month is closed: what the month added up to. Reads only; saves nothing.
+function monthSummaryView(periodId, emergencyFrom) {
+  const close = state.monthlyCloses.find((x) => x.id === periodId || x.budgetPeriodId === periodId);
+  const plan = close?.planSnapshot || planFor(periodId),
+    totals = close?.categoryActuals || expenseTotals(periodId);
+  const spent = Number(close?.expenses ?? totalExpenses(periodId)),
+    planned = plan.lines
+      .filter((l) => ["fixed", "cap"].includes(l.ruleType))
+      .reduce((n, l) => n + Number(l.budgetAmount || 0), 0);
+  const toWealth = Number(close?.wealthContribution ?? completedCoreWealth(periodId)),
+    swept = Number(close?.sweepAmount || 0);
+  const fixed = plan.lines.filter((l) => l.ruleType === "fixed"),
+    paid = fixed.filter((l) => fixedPaid(totals[l.id])).length;
+  const caps = plan.lines
+    .filter((l) => l.ruleType === "cap" && Number(l.budgetAmount || 0) > 0)
+    .map((l) => ({ l, diff: Number(l.budgetAmount || 0) - Number(totals[l.id] || 0) }))
+    .sort((a, b) => a.diff - b.diff);
+  const over = caps.filter((x) => x.diff < -0.5).length,
+    under = caps.filter((x) => x.diff > 0.5).length;
+  // Every cap that went over, then the three biggest savings; the rest are summed up in one line.
+  const shown = [...caps.filter((x) => x.diff < -0.5), ...caps.filter((x) => x.diff >= -0.5).sort((a, b) => b.diff - a.diff).slice(0, 3)],
+    hidden = caps.length - shown.length;
+  const capRows = shown
+    .map(
+      ({ l, diff }) =>
+        `<div class="ms-cap">${catIcon(categoryVisual(l), "sm")}<span>${esc(l.name)}</span><strong class="${diff < -0.5 ? "bad" : diff > 0.5 ? "good" : ""}">${Math.abs(diff) < 0.5 ? "On budget" : `${money(Math.abs(diff))} ${diff < 0 ? "over" : "under"}`}</strong></div>`,
+    )
+    .join("") + (hidden > 0 ? `<div class="ms-cap-more">+ ${hidden} more cap${hidden === 1 ? "" : "s"} on or under budget</div>` : "");
+  const em = goal("goal-emergency"),
+    target = Number(em?.targetAmount || 0),
+    now = em ? goalBal(em) : 0,
+    from = Number.isFinite(Number(emergencyFrom)) ? Number(emergencyFrom) : now,
+    pctOf = (v) => (target > 0 ? Math.min(100, (v / target) * 100) : 0);
+  const emergency = em
+    ? `<div class="ms-goal"><div class="hero-goal-row"><strong>${esc(em.name || "Emergency Fund")}</strong><span>${privateMoney(now)} of ${money(target)}</span></div><div class="ms-bar"><span data-bar="ms-emergency" data-from="${pctOf(from).toFixed(1)}%" style="width:${pctOf(now).toFixed(1)}%"></span></div><div class="sub">${now - from > 0.5 ? `+${privateMoney(now - from)} this month · ` : ""}${pct(target ? now / target : 0)}${target && now >= target ? " · goal reached" : ""}</div></div>`
+    : "";
+  return `<div class="month-summary">
+    <div class="ms-hero"><span class="ms-check" aria-hidden="true">${icon("check")}</span><div><strong>${privateMoney(toWealth)} to wealth</strong><span>${swept > 0.5 ? `including ${privateMoney(swept)} swept at month end` : "No month-end sweep this month"}</span></div></div>
+    <div class="ms-tiles"><div><span>Spent</span><strong>${money(spent)}</strong><small>of ${money(planned)} planned</small></div><div><span>Bills paid</span><strong>${paid} of ${fixed.length}</strong><small>${paid === fixed.length ? "All covered" : `${fixed.length - paid} not recorded`}</small></div><div><span>Caps</span><strong>${under} under</strong><small>${over ? `${over} over` : "None over"}</small></div></div>
+    ${capRows ? `<div class="ms-caps">${capRows}</div>` : ""}
+    ${emergency}
+    <button class="btn" data-action="close-modal" style="width:100%;margin-top:4px">Done</button>
+  </div>`;
 }
 function rowActionsView(kind, id) {
   const x = activityRecords().find((r) => r._kind === kind && r.id === id);
@@ -4116,6 +4273,13 @@ async function closePeriod() {
     ))
   )
     return;
+  // For the summary: where the Emergency Fund stood when this month began.
+  const prevClose = [...state.monthlyCloses]
+      .filter((x) => String(x.id) < p.id && Number.isFinite(Number(x.endingEmergency)))
+      .sort((a, b) => String(b.id).localeCompare(String(a.id)))[0],
+    emergencyFrom = prevClose
+      ? Number(prevClose.endingEmergency)
+      : Number(state.bucketBalances.emergency || 0) - completedAllocationToBucket(p.id, "emergency");
   const stamp = new Date().toISOString(),
     allIncome = state.incomes
       .filter((i) => i.budgetPeriodId === p.id && !i.deletedAt)
@@ -4164,9 +4328,8 @@ async function closePeriod() {
     esunActual: c.es.actual,
     missingFixedIds: c.missingFixed.map((x) => x.id),
   });
-  modal = null;
+  modal = { type: "month-summary", periodId: p.id, emergencyFrom };
   await load();
-  toast(`${monthLabel(p.id)} closed`, "good");
 }
 async function reopenPeriod(periodId) {
   const p = state.periods.find((x) => x.id === periodId);
@@ -4971,6 +5134,7 @@ async function restore(file) {
     return;
   await saveUndoSnapshot(current);
   await importData(payload);
+  reachedGoals = null; // a restored backup isn't "reaching" a goal
   modal = { type: "settings" };
   selectedPeriodId = null;
   await load();
@@ -4989,6 +5153,7 @@ async function undoRestore() {
     return;
   await importData(snap.payload);
   await clearUndoSnapshot();
+  reachedGoals = null;
   selectedPeriodId = null;
   await load();
   toast("Previous data is back.", "good");
@@ -5113,6 +5278,8 @@ function bind() {
           if (a === "account-adjustment") modal = { type: "account-adjustment", accountId: b.dataset.id };
           if (a === "esun-allocate") modal = { type: "esun-allocate", amount: esunSnapshot().unassigned };
           if (a === "delete-period") modal = { type: "delete-period", periodId: b.dataset.id };
+          if (a === "account-actions") modal = { type: "account-actions", accountId: b.dataset.id };
+          if (a === "month-actions") modal = { type: "month-actions", periodId: b.dataset.id };
           if (a === "reopen-period") return reopenPeriod(b.dataset.id || currentPeriod()?.id);
           if (a === "edit-goal") modal = { type: "edit-goal", goalId: b.dataset.id };
           if (a === "goal-contribution") modal = { type: "goal-contribution", goalId: b.dataset.id };
@@ -5136,6 +5303,15 @@ function bind() {
             )
               return reversePurposeAllocation(b.dataset.id);
             return;
+          }
+          if (a === "home-day") {
+            homeDay = b.dataset.day && b.dataset.day !== homeDay ? b.dataset.day : null;
+            return render();
+          }
+          if (a === "home-week") {
+            homeWeekStart = b.dataset.start || null;
+            homeDay = null;
+            return render();
           }
           if (a === "activity-filter") {
             activityFilter = b.dataset.filter;

@@ -1,4 +1,13 @@
-# Wealth OS — v1.15.0
+# Wealth OS — v1.16.0
+
+## v1.16.0 — smoother to use
+
+- **No more browser pop-ups.** Every question (delete an entry, discard what you typed, close the month with a bill unpaid, restore a backup, delete a funding month…) is now the app's own sheet with clear buttons such as *Delete* / *Cancel* or *Discard* / *Keep editing*. Tapping outside it means no. The grey "yabacodes.github.io says…" boxes are gone.
+- **Problems show where you typed.** If something can't be saved ("From and to accounts must be different…"), the reason appears in red above the pop-up's button and everything you entered stays. Other problems get the app's own message sheet.
+- **You see what you saved.** A short message at the top: *Food · NT$150 saved · NT$6,445 left*, *Phone paid · NT$790*, *Food · NT$300 saved · NT$320 over* (in red), *Income saved*, *Transfer completed*, *October closed*, and so on. The new entry glows briefly in Latest activity and Activity, and the spending bar and ring move from where they were to where they are now.
+- **Motion and press feedback.** Buttons, category tiles, tabs and + give slightly under your finger; the chosen category's picture pops. Pop-ups slide up from the bottom with the page fading behind, and stay above the keyboard while you type. The Budget ring sweeps round and the bars (flexible spending, Emergency Fund, caps, the paycheck split, goals) fill once when you open a screen; bars further down fill as you scroll to them. Opening or closing a pop-up doesn't replay it. Reduce Motion turns all of it off.
+- **Activity, grouped by day.** Today / Yesterday / Tue, Oct 13 headings with what you spent (and received) that day. Each entry is two short lines: the category and your note, then the account. The "Physical expense" label is gone from ordinary entries. The list starts at the top; Withdraw cash and Special projects stay as one compact row, and active projects show under it.
+- No change to any stored record, calculation, backup or CSV export.
 
 ## v1.15.0 — the new Budget
 

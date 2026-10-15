@@ -476,8 +476,7 @@ button {
   line-height: 1;
 }
 .activity-list {
-  padding-top: 8px;
-  padding-bottom: 8px;
+  padding: 4px 14px;
 }
 .compact-empty {
   padding: 20px 12px;
@@ -3372,4 +3371,328 @@ html[data-theme="dark"] .cap-bar {
   .cap-nums span {
     white-space: normal;
   }
+}
+
+/* ---------- v1.16 — fluid touch: press feedback, sheets that slide up, the app's own questions and
+   messages, and a highlight on what you just saved. Visual only; nothing here changes saved data. ---------- */
+
+/* Press feedback: things you tap give a little under your finger. */
+.btn,
+.tab,
+.cat-tile,
+.filter-chip,
+.theme-option,
+.period-step,
+.row-menu,
+.text-btn,
+.project-strip-row,
+.tab-add-circle {
+  transition: transform 0.12s ease, background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease,
+    filter 0.15s ease;
+}
+.btn:active:not(:disabled),
+.filter-chip:active,
+.theme-option:active,
+.period-step:active:not(:disabled),
+.row-menu:active,
+.text-btn:active,
+.project-strip-row:active {
+  transform: scale(0.97);
+}
+.btn:active:not(:disabled) {
+  filter: brightness(0.92);
+}
+.btn.ghost:active:not(:disabled),
+.btn.secondary:active:not(:disabled) {
+  filter: none;
+  background: var(--soft);
+}
+.cat-tile:active {
+  transform: scale(0.95);
+}
+.tab .tab-icon {
+  transition: transform 0.14s ease;
+}
+.tab:active .tab-icon {
+  transform: scale(0.86);
+}
+.tab-add:active .tab-add-circle {
+  transform: scale(0.9);
+}
+@keyframes wos-tile-pick {
+  0% { transform: scale(0.92); }
+  55% { transform: scale(1.04); }
+  100% { transform: scale(1); }
+}
+.cat-tile.selected .cat-ic {
+  animation: wos-tile-pick 0.28s ease-out;
+}
+
+/* Pop-ups slide up from the bottom (they already sit there) and the page behind fades. Opening only:
+   redraws while a pop-up is open don't replay it. They stay above the on-screen keyboard. */
+@keyframes wos-sheet-up {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+@keyframes wos-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.modal-backdrop.modal-enter {
+  animation: wos-fade-in 0.2s ease-out;
+}
+.modal-backdrop.modal-enter .modal {
+  animation: wos-sheet-up 0.3s cubic-bezier(0.2, 0.85, 0.25, 1);
+}
+.modal-backdrop {
+  bottom: var(--kb, 0px);
+}
+.modal {
+  max-height: calc(92vh - var(--kb, 0px));
+  overscroll-behavior: contain;
+}
+
+/* The app's own question sheet (replaces the browser's confirm and alert boxes). */
+.ask-sheet {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  width: min(420px, calc(100% - 24px));
+  max-width: 100%;
+  overflow: visible;
+}
+.ask-sheet::backdrop {
+  background: rgba(15, 23, 42, 0.48);
+}
+.ask-card {
+  background: var(--panel);
+  color: var(--text);
+  border-radius: 22px;
+  padding: 20px 18px 16px;
+  display: grid;
+  gap: 16px;
+  box-shadow: 0 30px 80px rgba(15, 23, 42, 0.28);
+}
+.ask-copy h2 {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+.ask-message {
+  margin-top: 7px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.45;
+  display: grid;
+  gap: 8px;
+  overflow-wrap: anywhere;
+}
+.ask-message p {
+  margin: 0;
+}
+.ask-message:empty {
+  display: none;
+}
+.ask-actions {
+  display: flex;
+  flex-direction: row-reverse;
+  gap: 8px;
+}
+.ask-actions .btn {
+  flex: 1;
+}
+.ask-actions .btn[hidden] {
+  display: none;
+}
+.ask-sheet[open] {
+  animation: wos-fade-in 0.18s ease-out;
+}
+.ask-sheet[open]::backdrop {
+  animation: wos-fade-in 0.2s ease-out;
+}
+@media (max-width: 620px) {
+  .ask-sheet {
+    width: 100%;
+    margin: auto 0 var(--kb, 0px);
+  }
+  .ask-card {
+    border-radius: 22px 22px 0 0;
+    padding: 22px 18px calc(14px + env(safe-area-inset-bottom, 0px));
+  }
+  .ask-actions {
+    flex-direction: column;
+  }
+  .ask-actions .btn {
+    min-height: 48px;
+  }
+  .ask-sheet[open] {
+    animation: wos-sheet-up 0.3s cubic-bezier(0.2, 0.85, 0.25, 1);
+  }
+}
+html[data-theme="dark"] .ask-card {
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.5);
+}
+
+/* A problem with what you typed shows above the pop-up's button, so nothing is lost. */
+.form-error {
+  margin: 4px 0 12px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #fef2f2;
+  color: var(--bad);
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.4;
+}
+html[data-theme="dark"] .form-error {
+  background: #3a1d22;
+}
+@keyframes wos-shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-5px); }
+  40% { transform: translateX(5px); }
+  60% { transform: translateX(-3px); }
+  80% { transform: translateX(3px); }
+}
+.form-error.shake {
+  animation: wos-shake 0.32s ease-in-out;
+}
+
+/* Message bar at the top: what was just saved and where it leaves you. */
+.toast {
+  position: fixed;
+  z-index: 70;
+  left: 50%;
+  top: calc(10px + env(safe-area-inset-top, 0px));
+  transform: translate(-50%, -14px);
+  opacity: 0;
+  pointer-events: none;
+  max-width: calc(100% - 28px);
+  padding: 10px 15px;
+  border-radius: 999px;
+  background: #111827;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.35;
+  text-align: center;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.22);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+.toast.show {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+.toast.good::before {
+  content: "✓ ";
+  color: #6ee7b7;
+}
+.toast.bad {
+  background: #7f1d1d;
+}
+html[data-theme="dark"] .toast {
+  background: #e8ebf1;
+  color: #0d1017;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+}
+html[data-theme="dark"] .toast.good::before {
+  color: #0f766e;
+}
+html[data-theme="dark"] .toast.bad {
+  background: #fecaca;
+  color: #450a0a;
+}
+
+/* The entry you just saved glows briefly in the list. */
+@keyframes wos-just-saved {
+  0% { background: rgba(15, 118, 110, 0.16); }
+  100% { background: transparent; }
+}
+.entry-just-saved {
+  animation: wos-just-saved 1.4s ease-out;
+  border-radius: 12px;
+}
+html[data-theme="dark"] .entry-just-saved {
+  animation-name: wos-just-saved-dark;
+}
+@keyframes wos-just-saved-dark {
+  0% { background: rgba(79, 209, 165, 0.16); }
+  100% { background: transparent; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn, .tab, .cat-tile, .filter-chip, .theme-option, .period-step, .row-menu, .text-btn, .project-strip-row,
+  .tab-add-circle, .tab .tab-icon, .toast {
+    transition: none;
+  }
+  .btn:active:not(:disabled), .filter-chip:active, .theme-option:active, .period-step:active:not(:disabled),
+  .row-menu:active, .text-btn:active, .project-strip-row:active, .cat-tile:active, .tab:active .tab-icon,
+  .tab-add:active .tab-add-circle {
+    transform: none;
+  }
+  .cat-tile.selected .cat-ic, .modal-backdrop.modal-enter, .modal-backdrop.modal-enter .modal, .ask-sheet[open],
+  .ask-sheet[open]::backdrop, .form-error.shake, .entry-just-saved {
+    animation: none;
+  }
+}
+
+/* Activity grouped by day (v1.16): a small heading with the day's totals above each day's entries. */
+.activity-quick {
+  margin-top: 0;
+}
+.day-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 18px 4px 8px;
+  font-size: 13px;
+  font-weight: 750;
+  color: var(--muted);
+}
+.day-head .day-name {
+  color: var(--text);
+}
+.day-total {
+  display: inline-flex;
+  gap: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.day-total .good {
+  color: var(--good);
+}
+.filter-chips + .day-head {
+  margin-top: 12px;
+}
+.activity-list + .day-head {
+  margin-top: 20px;
+}
+.tx-title {
+  overflow-wrap: break-word;
+}
+@media (max-width: 380px) {
+  .activity-list {
+    padding: 2px 10px;
+  }
+  .tx.has-ic {
+    grid-template-columns: 34px minmax(0, 1fr) auto auto;
+    gap: 8px;
+  }
+  .tx.has-ic .cat-ic {
+    width: 34px;
+    height: 34px;
+  }
+  .row-menu {
+    width: 32px;
+    height: 32px;
+  }
+}
+.tx-note {
+  font-weight: 500;
+  color: var(--muted);
+}
+.tx .amount {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }

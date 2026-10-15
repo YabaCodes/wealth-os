@@ -32,6 +32,7 @@ import {
   simulateWealthStrategy,
   simulateWealthStrategyWithGrowth,
 } from "./calc.js";
+import { askConfirm, notify, showError, toast, snapshotBars, animateBars, motionAllowed, watchKeyboard } from "./ui.js";
 
 const root = document.querySelector("#app");
 let tab = "home";
@@ -41,7 +42,7 @@ let selectedPeriodId = null;
 let activityFilter = "all";
 let activitySearch = "";
 let modalDirty = false;
-const APP_VERSION = "1.15.0";
+const APP_VERSION = "1.16.0";
 const THEME_KEY = "wealthOSTheme";
 // Theme: 'system' follows the phone's light/dark setting. A copy is kept in localStorage so
 // index.html can apply it before the first paint (IndexedDB is too slow for that).
@@ -1799,7 +1800,14 @@ function applyPrivacyMask() {
   for (const node of nodes) node.nodeValue = (node.nodeValue || "").replace(replace, "$1••••");
 }
 
+// v1.16: what the last redraw showed, so bars move only when something changed and the pop-up slides in
+// only when it opens (not on every redraw while it's open).
+let lastShell = { tab: null, period: null, modal: false },
+  pendingHighlight = null;
 function shell(content) {
+  const before = snapshotBars(root),
+    entering = lastShell.tab !== tab || lastShell.period !== selectedPeriodId,
+    modalOpening = !!modal && !lastShell.modal;
   const footer =
     tab === "transactions"
       ? ""
@@ -1819,6 +1827,13 @@ function shell(content) {
   linkFieldLabels();
   modalDirty = false;
   root.querySelector(".modal")?.addEventListener("input", () => (modalDirty = true));
+  lastShell = { tab, period: selectedPeriodId, modal: !!modal };
+  if (modalOpening && motionAllowed()) root.querySelector(".modal-backdrop")?.classList.add("modal-enter");
+  animateBars(root, before, entering);
+  if (pendingHighlight) {
+    root.querySelector(`[data-entry="${pendingHighlight}"]`)?.classList.add("entry-just-saved");
+    pendingHighlight = null;
+  }
 }
 // Connect each form label to its field so screen readers announce what the field is for.
 function linkFieldLabels() {
@@ -1984,7 +1999,7 @@ function homeView() {
     <div class="hero-tiles"><div class="hero-tile"><span>Net worth</span><strong>${privateMoney(state.wealth.financialNetWorth)}</strong></div><div class="hero-tile"><span>Non-core funds</span><strong>${privateMoney(nonCore)}</strong></div></div>
     ${
       em
-        ? `<div class="hero-goal"><div class="hero-goal-row"><strong>${esc(em.name || "Emergency Fund")}</strong><span>${privateMoney(eb)} of ${money(em.targetAmount)}</span></div><div class="hero-bar" role="img" aria-label="${esc(em.name || "Emergency Fund")} ${pct(ep)} funded"><span style="width:${(ep * 100).toFixed(1)}%"></span></div><div class="hero-sub">${ep >= 1 ? "Complete" : pct(ep)}${isPriority ? " · current wealth priority" : active ? ` · priority now: ${esc(active.name)}` : ""}</div></div>`
+        ? `<div class="hero-goal"><div class="hero-goal-row"><strong>${esc(em.name || "Emergency Fund")}</strong><span>${privateMoney(eb)} of ${money(em.targetAmount)}</span></div><div class="hero-bar" role="img" aria-label="${esc(em.name || "Emergency Fund")} ${pct(ep)} funded"><span data-bar="emergency" style="width:${(ep * 100).toFixed(1)}%"></span></div><div class="hero-sub">${ep >= 1 ? "Complete" : pct(ep)}${isPriority ? " · current wealth priority" : active ? ` · priority now: ${esc(active.name)}` : ""}</div></div>`
         : ""
     }
   </section>
@@ -1993,7 +2008,7 @@ function homeView() {
     <div class="month-stats"><div><span>Income</span><strong>${privateMoney(plan.salary)}</strong></div><div><span>Spent</span><strong>${money(spent)}</strong></div><div><span>To wealth</span><strong class="good-text">${pct(contributionRate)}</strong></div></div>
     <div class="month-divider"></div>
     <div class="pace-head"><strong>Flexible spending</strong><span>${money(capsSpent)} of ${money(capsBudget)}</span></div>
-    <div class="pace-bar" role="img" aria-label="Flexible spending ${money(capsSpent)} of ${money(capsBudget)}${ctx.isCurrent ? `; today's mark ${money(todaysMark)}` : ""}"><span class="pace-fill ${paceTone === "bad" ? "over" : ""}" style="width:${fillPct.toFixed(1)}%"></span>${ctx.isCurrent && capsBudget > 0 ? `<span class="pace-mark" style="left:${markPct.toFixed(1)}%"></span>` : ""}</div>
+    <div class="pace-bar" role="img" aria-label="Flexible spending ${money(capsSpent)} of ${money(capsBudget)}${ctx.isCurrent ? `; today's mark ${money(todaysMark)}` : ""}"><span class="pace-fill ${paceTone === "bad" ? "over" : ""}" data-bar="flex-pace" style="width:${fillPct.toFixed(1)}%"></span>${ctx.isCurrent && capsBudget > 0 ? `<span class="pace-mark" style="left:${markPct.toFixed(1)}%"></span>` : ""}</div>
     <div class="pace-status pace-${paceTone}">${paceTone === "good" ? icon("check") : ""}<span>${paceText}</span></div>
     <div class="month-actions"><button class="btn ghost small" data-action="month-close">Month-End Review</button>${newPaycheckButton()}</div>
   </section>
@@ -2007,7 +2022,7 @@ function homeView() {
       ? recent
           .map(
             (x) =>
-              `<div class="home-tx">${catIcon(txVisual(x))}<div class="home-tx-copy"><strong>${esc(x._title)}</strong><span>${esc([dayLabel(x._date), x._account].filter(Boolean).join(" · "))}</span></div><span class="amount ${x._kind === "income" ? "good" : ""}">${money(x._amount)}</span></div>`,
+              `<div class="home-tx" data-entry="${x._kind}:${esc(x.id)}">${catIcon(txVisual(x))}<div class="home-tx-copy"><strong>${esc(x._title)}</strong><span>${esc([dayLabel(x._date), x._account].filter(Boolean).join(" · "))}</span></div><span class="amount ${x._kind === "income" ? "good" : ""}">${money(x._amount)}</span></div>`,
           )
           .join("")
       : `<div class="empty compact-empty"><strong>No activity in ${esc(monthName)} yet.</strong><span>Tap + to add the first one.</span></div>`
@@ -2057,7 +2072,7 @@ function homeQuickCapture(p) {
 function budgetMini(name, budget, actual) {
   const r = budget - actual;
   const u = budget ? Math.min(1, actual / budget) : 0;
-  return `<div class="row"><div style="flex:1"><strong>${name}</strong><div class="progress"><span style="width:${u * 100}%"></span></div><div class="sub">${money(actual)} of ${money(budget)}</div></div><div class="amount ${r < 0 ? "bad" : ""}">${r < 0 ? `${money(-r)} over` : `${money(r)} left`}</div></div>`;
+  return `<div class="row"><div style="flex:1"><strong>${name}</strong><div class="progress"><span data-bar="mini-${esc(name)}" style="width:${u * 100}%"></span></div><div class="sub">${money(actual)} of ${money(budget)}</div></div><div class="amount ${r < 0 ? "bad" : ""}">${r < 0 ? `${money(-r)} over` : `${money(r)} left`}</div></div>`;
 }
 function row(label, value) {
   return `<div class="row"><span>${label}</span><span class="amount">${value}</span></div>`;
@@ -2108,7 +2123,7 @@ function budgetView() {
   const overPlanned = Math.max(0, -Number(plan.immediateWealth || 0));
   const planCard = `<section class="card plan-card"><div class="plan-head"><h2>Where ${privateMoney(salary)} goes</h2><span class="sub">Your paycheck plan for ${monthLabel(p.id)}</span></div>${
     salary > 0
-      ? `<div class="plan-bar" role="img" aria-label="${parts.map((x) => `${x.name} ${Math.round((x.amount / salary) * 100)}%`).join(", ")}">${parts.map((x) => `<span class="plan-seg k-${x.key}" style="width:${((x.amount / Math.max(salary, plan.assignedBeforeWealth)) * 100).toFixed(2)}%"></span>`).join("")}</div>`
+      ? `<div class="plan-bar" role="img" aria-label="${parts.map((x) => `${x.name} ${Math.round((x.amount / salary) * 100)}%`).join(", ")}">${parts.map((x) => `<span class="plan-seg k-${x.key}" data-bar="plan-${x.key}" style="width:${((x.amount / Math.max(salary, plan.assignedBeforeWealth)) * 100).toFixed(2)}%"></span>`).join("")}</div>`
       : ""
   }<div class="plan-rows">${parts
     .map(
@@ -2151,7 +2166,7 @@ function budgetView() {
             pace = capPace(x, spent, ctx),
             v = categoryVisual(x),
             fill = budget > 0 ? Math.min(100, (spent / budget) * 100) : spent > 0 ? 100 : 0;
-          return `<div class="cap-row"><div class="cap-top">${catIcon(v, "sm")}<div class="cap-copy"><strong>${esc(x.name)}</strong><span class="st-${pace.tone}">${pace.text}</span></div><div class="cap-nums"><strong class="${left < -0.5 ? "bad" : ""}">${money(Math.abs(left))} ${left < -0.5 ? "over" : "left"}</strong><span>${money(spent)} of ${money(budget)}</span></div></div><div class="cap-bar"><span class="cap-fill t-${v.tone}${left < -0.5 ? " over" : ""}" style="width:${fill.toFixed(1)}%"></span>${ctx.isCurrent && !pace.noMark && budget > 0 ? `<span class="cap-mark" style="left:${fp.markPct.toFixed(1)}%"></span>` : ""}</div></div>`;
+          return `<div class="cap-row"><div class="cap-top">${catIcon(v, "sm")}<div class="cap-copy"><strong>${esc(x.name)}</strong><span class="st-${pace.tone}">${pace.text}</span></div><div class="cap-nums"><strong class="${left < -0.5 ? "bad" : ""}">${money(Math.abs(left))} ${left < -0.5 ? "over" : "left"}</strong><span>${money(spent)} of ${money(budget)}</span></div></div><div class="cap-bar"><span class="cap-fill t-${v.tone}${left < -0.5 ? " over" : ""}" data-bar="cap-${x.id}" style="width:${fill.toFixed(1)}%"></span>${ctx.isCurrent && !pace.noMark && budget > 0 ? `<span class="cap-mark" style="left:${fp.markPct.toFixed(1)}%"></span>` : ""}</div></div>`;
         })
         .join("")}</section>`
     : "";
@@ -2266,7 +2281,7 @@ function flexRing(fp, totals) {
     .sort((a, b) => b.spent - a.spent)
     .map(({ l, spent }) => {
       const len = total > 0 ? (spent / total) * C : 0,
-        seg = `<circle class="ring-seg t-${categoryVisual(l).tone}" cx="110" cy="110" r="${r}" stroke-dasharray="${Math.max(0, len - 1.5).toFixed(1)} ${C.toFixed(1)}" stroke-dashoffset="${(-offset).toFixed(1)}"></circle>`;
+        seg = `<circle class="ring-seg t-${categoryVisual(l).tone}" data-arc="${l.id}" cx="110" cy="110" r="${r}" stroke-dasharray="${Math.max(0, len - 1.5).toFixed(1)} ${C.toFixed(1)}" stroke-dashoffset="${(-offset).toFixed(1)}"></circle>`;
       offset += len;
       return seg;
     })
@@ -2347,10 +2362,11 @@ function transactionsView() {
           .includes(q),
       )
     : filtered;
-  return `<div class="sub page-sub">Expenses, income and transfers</div>
-  <div class="activity-quick"><button class="btn secondary small" data-action="cash-withdraw">${icon("cash")}<span>Withdraw cash</span></button><button class="btn secondary small" data-action="open-projects">${icon("project")}<span>Special projects</span></button></div>
-  <div class="sub activity-add-hint">Add expenses, income and transfers with the + button below.</div>
-  ${projectOverviewStrip()}
+  const active = state.projects.filter((p) => !p.deletedAt && !projectSettlement(p.id)).length;
+  // v1.16: the list comes first, grouped by day with each day's totals. Cash and projects sit in one
+  // compact row; the project list only shows here while a project is active.
+  return `<div class="activity-quick"><button class="btn secondary small" data-action="cash-withdraw">${icon("cash")}<span>Withdraw cash</span></button><button class="btn secondary small" data-action="open-projects">${icon("project")}<span>Special projects</span></button></div>
+  ${active ? projectOverviewStrip() : ""}
   <div class="section-title"><h2>Recent activity</h2><span class="sub">${list.length} shown</span></div>
   <form id="activity-search-form" class="activity-search"><input id="activity-search-input" type="search" value="${esc(activitySearch)}" placeholder="Search description, category or account"><button class="btn ghost small" type="submit">Search</button>${activitySearch ? '<button class="btn ghost small" type="button" data-action="clear-activity-search">Clear</button>' : ""}</form>
   <div class="filter-chips">${[
@@ -2364,7 +2380,38 @@ function transactionsView() {
         `<button class="filter-chip ${activityFilter === id ? "active" : ""}" data-action="activity-filter" data-filter="${id}">${label}</button>`,
     )
     .join("")}</div>
-  <section class="card activity-list">${list.length ? list.slice(0, 150).map(txLine).join("") : `<div class="empty compact-empty"><strong>No matching activity.</strong><span>Try another filter or search term.</span></div>`}</section>`;
+  ${list.length ? activityDays(list.slice(0, 150)) : `<section class="card activity-list"><div class="empty compact-empty"><strong>No matching activity.</strong><span>Try another filter or search term.</span></div></section>`}`;
+}
+// "Today", "Yesterday", or "Mon, Oct 12" (with the year when it isn't this year).
+function dayHeading(iso) {
+  if (!/^\d{4}-\d{2}-\d{2}/.test(iso || "")) return iso || "No date";
+  const t = today(),
+    y = today(new Date(Date.now() - 86400000)),
+    d = iso.slice(0, 10);
+  if (d === t) return "Today";
+  if (d === y) return "Yesterday";
+  const [yy, mm, dd] = d.split("-").map(Number),
+    opts = { weekday: "short", month: "short", day: "numeric", ...(yy !== new Date().getFullYear() ? { year: "numeric" } : {}) };
+  return new Intl.DateTimeFormat("en-US", opts).format(new Date(yy, mm - 1, dd));
+}
+function activityDays(list) {
+  const days = [];
+  list.forEach((x) => {
+    const key = String(x._date || "").slice(0, 10);
+    const last = days.at(-1);
+    if (last && last.key === key) last.items.push(x);
+    else days.push({ key, items: [x] });
+  });
+  return days
+    .map(({ key, items }) => {
+      const spent = items.filter((x) => x._kind === "expense").reduce((n, x) => n + Math.abs(Number(x._amount || 0)), 0),
+        earned = items.filter((x) => x._kind === "income").reduce((n, x) => n + Number(x._amount || 0), 0);
+      const totals = [spent ? `<span>−${money(spent)}</span>` : "", earned ? `<span class="good">+${money(earned)}</span>` : ""]
+        .filter(Boolean)
+        .join("");
+      return `<div class="day-head"><span class="day-name">${esc(dayHeading(key))}</span><span class="day-total">${totals}</span></div><section class="card activity-list">${items.map(txLine).join("")}</section>`;
+    })
+    .join("");
 }
 
 // What can be done with an activity row (shared by the row and its ⋯ menu).
@@ -2388,12 +2435,17 @@ function txActions(x) {
   return { canEdit, canDelete, canComplete, canRoute, canRepeat };
 }
 function txLine(x) {
-  const meta = [dayLabel(x._date), x._account, x._detail].filter(Boolean).join(" · ");
+  // Line 1: what it was (and your note). Line 2: where it came from. The day is in the heading above.
+  const note = x.description ? String(x.description).trim() : "";
+  const fund = x._kind === "expense" && x.fundingBucketId ? bucket(x.fundingBucketId)?.name : "";
+  const kindNote =
+    x._kind === "transfer" ? (isPurposeOnlyTransfer(x) ? "Virtual only · no bank impact" : "Bank transfer") : "";
+  const meta = (x._kind === "transfer" ? [kindNote] : [x._account, fund ? `from ${fund}` : ""]).filter(Boolean).join(" · ");
   const plannedTransfer = x._kind === "transfer" && x.status === "planned";
   const { canEdit, canDelete, canComplete, canRoute, canRepeat } = txActions(x);
   const hasActions = canEdit || canDelete || canComplete || canRoute || canRepeat;
   const amount = money(x._amount);
-  return `<div class="tx has-ic">${catIcon(txVisual(x))}<div class="tx-main"><div class="tx-title">${esc(x._title)}</div><div class="tx-meta">${esc(meta)}</div></div><div class="right"><div class="amount ${x._kind === "income" ? "good" : ""}">${x._kind === "transfer" ? "↔ " : ""}${amount}</div>${plannedTransfer ? '<span class="tag warn-tag">planned</span>' : ""}</div>${hasActions ? `<button class="row-menu" type="button" data-action="row-actions" data-kind="${x._kind}" data-id="${x.id}" aria-label="Options for ${esc(x._title)}">⋯</button>` : ""}</div>`;
+  return `<div class="tx has-ic" data-entry="${x._kind}:${esc(x.id)}">${catIcon(txVisual(x))}<div class="tx-main"><div class="tx-title">${esc(x._title)}${note && x._kind !== "transfer" ? `<span class="tx-note"> · ${esc(note)}</span>` : ""}</div><div class="tx-meta">${esc(meta)}</div></div><div class="right"><div class="amount ${x._kind === "income" ? "good" : ""}">${x._kind === "transfer" ? "↔ " : ""}${amount}</div>${plannedTransfer ? '<span class="tag warn-tag">planned</span>' : ""}</div>${hasActions ? `<button class="row-menu" type="button" data-action="row-actions" data-kind="${x._kind}" data-id="${x.id}" aria-label="Options for ${esc(x._title)}">⋯</button>` : ""}</div>`;
 }
 
 function projectOverviewStrip() {
@@ -2506,7 +2558,7 @@ function goalsView() {
       let paceText = goalPaceText(g);
       if (g.id === "goal-home-trip" && status.key === "waiting")
         paceText = `Expected unlock: ${dateAfterMonths(strategyForecast.sim.events.travelUnlockMonth)}`;
-      return `<section class="card goal-card"><div class="split"><div><strong>${esc(g.name)}</strong><div class="sub">${esc(rule)}</div></div><span class="tag ${status.className}">${status.label}</span></div><div class="goal-metric-row"><div><div class="metric">${privateMoney(b)}</div><div class="sub">${privateMoney(remaining)} remaining</div></div><div class="right"><strong>${pct(p)}</strong><div class="sub">of ${privateMoney(target)}</div></div></div><div class="progress"><span style="width:${p * 100}%"></span></div><div class="goal-pace">${esc(paceText)}</div>${g.targetDate ? `<div class="sub">Target date: ${esc(dayLabel(g.targetDate))}</div>` : ""}<div class="actions goal-actions"><button class="btn secondary" data-action="goal-contribution" data-id="${g.id}">Add Contribution</button><button class="btn ghost" data-action="edit-goal" data-id="${g.id}">Edit Goal</button></div></section>`;
+      return `<section class="card goal-card"><div class="split"><div><strong>${esc(g.name)}</strong><div class="sub">${esc(rule)}</div></div><span class="tag ${status.className}">${status.label}</span></div><div class="goal-metric-row"><div><div class="metric">${privateMoney(b)}</div><div class="sub">${privateMoney(remaining)} remaining</div></div><div class="right"><strong>${pct(p)}</strong><div class="sub">of ${privateMoney(target)}</div></div></div><div class="progress"><span data-bar="goal-${g.id}" style="width:${p * 100}%"></span></div><div class="goal-pace">${esc(paceText)}</div>${g.targetDate ? `<div class="sub">Target date: ${esc(dayLabel(g.targetDate))}</div>` : ""}<div class="actions goal-actions"><button class="btn secondary" data-action="goal-contribution" data-id="${g.id}">Add Contribution</button><button class="btn ghost" data-action="edit-goal" data-id="${g.id}">Edit Goal</button></div></section>`;
     })
     .join("");
   return `<div class="sub page-sub">Your wealth priorities, pace and planned-use funds.</div>
@@ -2705,7 +2757,7 @@ function spendingPaceInsights() {
               : pace.status.key === "warn"
                 ? "warn-tag"
                 : "";
-      return `<section class="card pace-card"><div class="split"><div><strong>${esc(line.name)}</strong><div class="sub">${money(pace.spent)} of ${money(pace.budget)} · ${pct(used)} used</div></div><span class="tag ${tag}">${pace.status.label}</span></div>${spendingPaceSvg(p.id, line, pace)}<div class="pace-bars"><div><div class="split tiny"><span>Budget used</span><span>${pct(used)}</span></div><div class="progress"><span style="width:${Math.min(100, used * 100)}%"></span></div></div><div><div class="split tiny"><span>Month elapsed</span><span>${pct(elapsed)}</span></div><div class="progress muted-progress"><span style="width:${Math.min(100, elapsed * 100)}%"></span></div></div></div><div class="grid g3 pace-metrics"><div><span>Expected by now</span><strong>${money(pace.expected)}</strong></div><div><span>Projected month-end</span><strong class="${pace.projected > pace.budget ? "bad" : ""}">${money(pace.projected)}</strong></div><div><span>Safe daily from now</span><strong>${pace.remaining > 0 ? money(pace.safeDaily) : "—"}</strong></div></div><div class="pace-note">${pace.status.detail} · ${pace.remaining} day${pace.remaining === 1 ? "" : "s"} remaining · ${pace.confidence} forecast confidence.</div></section>`;
+      return `<section class="card pace-card"><div class="split"><div><strong>${esc(line.name)}</strong><div class="sub">${money(pace.spent)} of ${money(pace.budget)} · ${pct(used)} used</div></div><span class="tag ${tag}">${pace.status.label}</span></div>${spendingPaceSvg(p.id, line, pace)}<div class="pace-bars"><div><div class="split tiny"><span>Budget used</span><span>${pct(used)}</span></div><div class="progress"><span data-bar="pace-${line.id}" style="width:${Math.min(100, used * 100)}%"></span></div></div><div><div class="split tiny"><span>Month elapsed</span><span>${pct(elapsed)}</span></div><div class="progress muted-progress"><span data-bar="elapsed-${line.id}" style="width:${Math.min(100, elapsed * 100)}%"></span></div></div></div><div class="grid g3 pace-metrics"><div><span>Expected by now</span><strong>${money(pace.expected)}</strong></div><div><span>Projected month-end</span><strong class="${pace.projected > pace.budget ? "bad" : ""}">${money(pace.projected)}</strong></div><div><span>Safe daily from now</span><strong>${pace.remaining > 0 ? money(pace.safeDaily) : "—"}</strong></div></div><div class="pace-note">${pace.status.detail} · ${pace.remaining} day${pace.remaining === 1 ? "" : "s"} remaining · ${pace.confidence} forecast confidence.</div></section>`;
     })
     .join("");
   return `<div class="pace-summary"><div><strong>${monthLabel(p.id)} spending pace</strong><div class="sub">Day ${ctx.elapsed} of ${ctx.days}. Target pace assumes each capped budget is spread evenly across the month.</div></div></div><div class="pace-grid-cards">${cards}</div><div class="notice compact-notice">Daily pace is most useful for frequent spending such as Food and Transportation. Irregular categories such as Gas or Water can naturally look uneven during the month.</div>`;
@@ -3657,6 +3709,7 @@ async function createPaycheck(form) {
   selectedPeriodId = periodId;
   modal = null;
   await load();
+  toast(`${monthLabel(periodId)} funding plan created`, "good");
 }
 async function saveExpense(form) {
   const fd = new FormData(form),
@@ -3685,8 +3738,25 @@ async function saveExpense(form) {
     updatedAt: new Date().toISOString(),
   };
   await put("expenses", obj);
+  pendingHighlight = `expense:${obj.id}`;
   modal = null;
   await load();
+  toast(...expenseSavedText(obj, !!existing));
+}
+// The message after saving an expense: what was saved and where that leaves its category this month.
+function expenseSavedText(x, edited) {
+  const c = category(x.categoryId),
+    name = c?.name || "Expense",
+    amt = money(x.amount);
+  if (edited) return [`${name} · ${amt} updated`, ""];
+  if (c?.ruleType === "fixed") return [`${name} paid · ${amt}`, "good"];
+  const line = c?.ruleType === "cap" ? planFor(x.budgetPeriodId).lines.find((l) => l.id === c.id) : null;
+  if (line && Number(line.budgetAmount || 0) > 0) {
+    const left = Number(line.budgetAmount || 0) - Number(expenseTotals(x.budgetPeriodId)[c.id] || 0);
+    return left >= 0 ? [`${name} · ${amt} saved · ${money(left)} left`, ""] : [`${name} · ${amt} saved · ${money(-left)} over`, "bad"];
+  }
+  const fund = x.fundingBucketId ? bucket(x.fundingBucketId) : null;
+  return [`${name} · ${amt} saved${fund ? ` · from ${fund.name}` : ""}`, ""];
 }
 function prepareManualTransfer(form) {
   const fd = new FormData(form),
@@ -3761,8 +3831,10 @@ async function commitManualTransfer() {
       goalId: null,
       label: "Manual allocation",
     });
+  pendingHighlight = `transfer:${tid}`;
   modal = null;
   await load();
+  toast(existing ? "Transfer updated" : `Transfer saved · ${money(d.amount)}`);
 }
 
 async function saveIncome(form) {
@@ -3802,13 +3874,16 @@ async function saveIncome(form) {
     updatedAt: new Date().toISOString(),
     deletedAt: null,
   });
+  pendingHighlight = `income:${incomeId}`;
   if (!existing && type !== "regular_income" && fd.get("routing") === "on") {
     modal = { type: "income-routing", incomeId };
     await load();
+    toast(`Income saved · ${money(amount)}`, "good");
     return;
   }
   modal = null;
   await load();
+  toast(`${existing ? "Income updated" : "Income saved"} · ${money(amount)}`, "good");
 }
 async function saveIncomeRouting(form) {
   const incomeId = form.dataset.income,
@@ -3918,8 +3993,10 @@ async function completeTransfer(id) {
   assertPeriodEditable(t.budgetPeriodId || null);
   const stamp = new Date().toISOString();
   await put("transfers", { ...t, status: "completed", completedDate: today(), completedAt: stamp, updatedAt: stamp });
+  pendingHighlight = `transfer:${t.id}`;
   modal = null;
   await load();
+  toast("Transfer completed", "good");
 }
 async function completePaydayTransfer(periodId, accountId) {
   assertPeriodEditable(periodId);
@@ -3963,6 +4040,7 @@ async function completePaydayTransfer(periodId, accountId) {
     );
   modal = null;
   await load();
+  toast("Payday transfer recorded", "good");
 }
 async function createSweep() {
   const p = currentPeriod();
@@ -4031,9 +4109,11 @@ async function closePeriod() {
   if (c.hardBlockers.length) throw new Error(`Month cannot close yet: ${c.hardBlockers.join("; ")}.`);
   if (
     c.missingFixed.length &&
-    !confirm(
-      `${c.missingFixed.length} fixed obligation${c.missingFixed.length === 1 ? " has" : "s have"} no payment recorded. Close the month anyway?`,
-    )
+    !(await askConfirm(
+      "Close the month anyway?",
+      `${c.missingFixed.length} fixed obligation${c.missingFixed.length === 1 ? " has" : "s have"} no payment recorded.`,
+      { ok: "Close month" },
+    ))
   )
     return;
   const stamp = new Date().toISOString(),
@@ -4086,6 +4166,7 @@ async function closePeriod() {
   });
   modal = null;
   await load();
+  toast(`${monthLabel(p.id)} closed`, "good");
 }
 async function reopenPeriod(periodId) {
   const p = state.periods.find((x) => x.id === periodId);
@@ -4167,6 +4248,7 @@ async function saveGoalContribution(form) {
   });
   modal = null;
   await load();
+  toast(`Added ${money(amount)} to ${g.name}`, "good");
 }
 
 async function saveProject(form) {
@@ -4443,6 +4525,7 @@ async function saveCashTransfer(form) {
   });
   modal = null;
   await load();
+  toast(`${mode === "deposit" ? "Cash deposit" : "Cash withdrawal"} saved · ${money(amount)}`);
 }
 
 async function saveInvestment(form) {
@@ -4713,6 +4796,7 @@ async function deleteTransaction(kind, id) {
   if (kind === "income") await put("incomes", { ...x, deletedAt: new Date().toISOString() });
   if (kind === "transfer") await put("transfers", { ...x, deletedAt: new Date().toISOString() });
   await load();
+  toast(`${kind[0].toUpperCase()}${kind.slice(1)} deleted`);
 }
 async function saveSettings(form) {
   const fd = new FormData(form),
@@ -4758,6 +4842,7 @@ async function saveSettings(form) {
     await syncOpenMonthPlan(selected, updatedCategories, updatedSettings, stamp);
   modal = null;
   await load();
+  toast("Settings saved");
 }
 // Refresh an open month's budget plan after budget rules change. Never edits transactions,
 // completed transfers, allocations or any closed-month snapshot.
@@ -4877,9 +4962,11 @@ async function restore(file) {
     when = next.exportedAt ? new Date(next.exportedAt).toLocaleString() : "unknown date",
     line = (x) => `${x.months} month${x.months === 1 ? "" : "s"}, ${x.expenses} expenses, ${x.incomes} incomes, ${x.transfers} transfers`;
   if (
-    !confirm(
-      `Replace all Wealth OS data on this device with this backup?\n\nThis device now: ${line(now)}.\nBackup from ${when}: ${line(next)}.\n\nA copy of your current data is kept so you can undo this in Settings.`,
-    )
+    !(await askConfirm(
+      "Replace all data with this backup?",
+      `This device now: ${line(now)}.\nBackup from ${when}: ${line(next)}.\n\nA copy of your current data is kept so you can undo this in Settings.`,
+      { ok: "Replace my data", danger: true },
+    ))
   )
     return;
   await saveUndoSnapshot(current);
@@ -4887,18 +4974,24 @@ async function restore(file) {
   modal = { type: "settings" };
   selectedPeriodId = null;
   await load();
-  alert("Backup restored. If this was a mistake, use Settings → Undo restore.");
+  toast("Backup restored. Settings → Undo restore puts your old data back.", "good");
 }
 async function undoRestore() {
   const snap = await getUndoSnapshot();
   if (!snap?.payload) throw new Error("No undo copy was found.");
-  if (!confirm(`Put back the data you had before the last restore (saved ${new Date(snap.savedAt).toLocaleString()})? The restored data will be replaced.`))
+  if (
+    !(await askConfirm(
+      "Put back your previous data?",
+      `The data you had before the last restore (saved ${new Date(snap.savedAt).toLocaleString()}) comes back, and the restored data is replaced.`,
+      { ok: "Put it back" },
+    ))
+  )
     return;
   await importData(snap.payload);
   await clearUndoSnapshot();
   selectedPeriodId = null;
   await load();
-  alert("Previous data is back.");
+  toast("Previous data is back.", "good");
 }
 function runScenario() {
   const salary = Number(document.querySelector("#scenario-salary").value || 0),
@@ -4954,13 +5047,19 @@ function bind() {
           if (a === "edit-project-expense")
             modal = { type: "project-expense", projectId: b.dataset.project, expenseId: b.dataset.id };
           if (a === "delete-project-expense") {
-            if (confirm("Delete this project expense?")) return deleteProjectExpense(b.dataset.project, b.dataset.id);
+            if (await askConfirm("Delete this project expense?", "", { ok: "Delete", danger: true }))
+              return deleteProjectExpense(b.dataset.project, b.dataset.id);
             return;
           }
           if (a === "settle-project") modal = { type: "project-settle", projectId: b.dataset.id };
           if (a === "confirm-project-card-clearing") return confirmProjectCardClearing(b.dataset.id);
           if (a === "undo-project-settlement") {
-            if (confirm("Undo this project settlement and its generated personal-ledger entries?"))
+            if (
+              await askConfirm("Undo this project settlement?", "Its generated personal-ledger entries are removed too.", {
+                ok: "Undo settlement",
+                danger: true,
+              })
+            )
               return undoProjectSettlement(b.dataset.id);
             return;
           }
@@ -5018,14 +5117,21 @@ function bind() {
           if (a === "edit-goal") modal = { type: "edit-goal", goalId: b.dataset.id };
           if (a === "goal-contribution") modal = { type: "goal-contribution", goalId: b.dataset.id };
           if (a === "confirm-delete-period") {
-            if (confirm(`Delete ${monthLabel(b.dataset.id)} and all of its test data? This cannot be undone.`))
+            if (
+              await askConfirm(`Delete ${monthLabel(b.dataset.id)}?`, "It's removed with all of its data. This can't be undone.", {
+                ok: "Delete month",
+                danger: true,
+              })
+            )
               return deleteFundingMonth(b.dataset.id);
             return;
           }
           if (a === "reverse-allocation") {
             if (
-              confirm(
-                "Reverse this virtual-purpose allocation? This creates a new audit record and does not move bank cash.",
+              await askConfirm(
+                "Reverse this purpose allocation?",
+                "This creates a new audit record and does not move bank cash.",
+                { ok: "Reverse" },
               )
             )
               return reversePurposeAllocation(b.dataset.id);
@@ -5075,7 +5181,7 @@ function bind() {
           }
           if (a === "row-actions") modal = { type: "row-actions", kind: b.dataset.kind, id: b.dataset.id };
           if (a === "delete-transaction") {
-            if (confirm(`Delete this ${b.dataset.kind}?`)) {
+            if (await askConfirm(`Delete this ${b.dataset.kind}?`, "", { ok: "Delete", danger: true })) {
               if (modal?.type === "row-actions") modal = null;
               return deleteTransaction(b.dataset.kind, b.dataset.id);
             }
@@ -5084,13 +5190,19 @@ function bind() {
           if (a === "close-modal") modal = null;
           if (a === "backdrop-close") {
             // Tapping outside a pop-up closes it, but never silently discards what you typed.
-            if (modalDirty && !confirm("Discard what you've entered?")) return;
+            if (
+              modalDirty &&
+              !(await askConfirm("Discard what you've entered?", "", { ok: "Discard", cancel: "Keep editing", danger: true }))
+            )
+              return;
             modal = null;
           }
           if (a === "export-backup") return backup();
           if (a === "undo-restore") return undoRestore();
           if (a === "discard-undo") {
-            if (confirm("Delete the undo copy? You won't be able to undo the last restore.")) {
+            if (
+              await askConfirm("Delete the undo copy?", "You won't be able to undo the last restore.", { ok: "Delete", danger: true })
+            ) {
               await clearUndoSnapshot();
               state.hasUndo = false;
               return render();
@@ -5106,7 +5218,7 @@ function bind() {
           if (a === "run-scenario") return runScenario();
           render();
         } catch (err) {
-          alert(err.message || String(err));
+          showError(err);
         }
       }),
   );
@@ -5114,13 +5226,13 @@ function bind() {
   if (pf)
     pf.onsubmit = (e) => {
       e.preventDefault();
-      createPaycheck(pf).catch((err) => alert(err.message));
+      createPaycheck(pf).catch(showError);
     };
   const ef = document.querySelector("#expense-form");
   if (ef) {
     ef.onsubmit = (e) => {
       e.preventDefault();
-      saveExpense(ef).catch((err) => alert(err.message));
+      saveExpense(ef).catch(showError);
     };
     // Category tiles: highlight the chosen one and show what's left in it.
     const hint = ef.querySelector("#cat-hint");
@@ -5136,7 +5248,7 @@ function bind() {
   if (inf) {
     inf.onsubmit = (e) => {
       e.preventDefault();
-      saveIncome(inf).catch((err) => alert(err.message));
+      saveIncome(inf).catch(showError);
     };
     const it = inf.querySelector("#income-type"),
       tc = inf.querySelector("#income-tithe"),
@@ -5151,7 +5263,7 @@ function bind() {
   if (irf)
     irf.onsubmit = (e) => {
       e.preventDefault();
-      saveIncomeRouting(irf).catch((err) => alert(err.message));
+      saveIncomeRouting(irf).catch(showError);
     };
   const mtf = document.querySelector("#manual-transfer-form");
   if (mtf)
@@ -5160,32 +5272,32 @@ function bind() {
       try {
         prepareManualTransfer(mtf);
       } catch (err) {
-        alert(err.message);
+        showError(err);
       }
     };
   const ctf = document.querySelector("#cash-transfer-form");
   if (ctf)
     ctf.onsubmit = (e) => {
       e.preventDefault();
-      saveCashTransfer(ctf).catch((err) => alert(err.message));
+      saveCashTransfer(ctf).catch(showError);
     };
   const prf = document.querySelector("#project-form");
   if (prf)
     prf.onsubmit = (e) => {
       e.preventDefault();
-      saveProject(prf).catch((err) => alert(err.message));
+      saveProject(prf).catch(showError);
     };
   const pef = document.querySelector("#project-expense-form");
   if (pef)
     pef.onsubmit = (e) => {
       e.preventDefault();
-      saveProjectExpense(pef).catch((err) => alert(err.message));
+      saveProjectExpense(pef).catch(showError);
     };
   const psf = document.querySelector("#project-settlement-form");
   if (psf) {
     psf.onsubmit = (e) => {
       e.preventDefault();
-      saveProjectSettlement(psf).catch((err) => alert(err.message));
+      saveProjectSettlement(psf).catch(showError);
     };
     const inp = psf.querySelector("#project-reimbursement"),
       preview = psf.querySelector("#project-settlement-preview");
@@ -5213,7 +5325,7 @@ function bind() {
   if (inv)
     inv.onsubmit = (e) => {
       e.preventDefault();
-      saveInvestment(inv).catch((err) => alert(err.message));
+      saveInvestment(inv).catch(showError);
     };
   const arf = document.querySelector("#account-reconcile-form");
   if (arf)
@@ -5222,56 +5334,56 @@ function bind() {
       try {
         prepareAccountReconciliation(arf);
       } catch (err) {
-        alert(err.message);
+        showError(err);
       }
     };
   const aaf = document.querySelector("#account-adjustment-form");
   if (aaf)
     aaf.onsubmit = (e) => {
       e.preventDefault();
-      saveAccountAdjustment(aaf).catch((err) => alert(err.message));
+      saveAccountAdjustment(aaf).catch(showError);
     };
   const eal = document.querySelector("#esun-allocation-form");
   if (eal)
     eal.onsubmit = (e) => {
       e.preventDefault();
-      saveEsunAllocation(eal).catch((err) => alert(err.message));
+      saveEsunAllocation(eal).catch(showError);
     };
   const erl = document.querySelector("#esun-reallocation-form");
   if (erl)
     erl.onsubmit = (e) => {
       e.preventDefault();
-      saveEsunReallocation(erl).catch((err) => alert(err.message));
+      saveEsunReallocation(erl).catch(showError);
     };
   const gef = document.querySelector("#goal-edit-form");
   if (gef)
     gef.onsubmit = (e) => {
       e.preventDefault();
-      saveGoal(gef).catch((err) => alert(err.message));
+      saveGoal(gef).catch(showError);
     };
   const gcf = document.querySelector("#goal-contribution-form");
   if (gcf)
     gcf.onsubmit = (e) => {
       e.preventDefault();
-      saveGoalContribution(gcf).catch((err) => alert(err.message));
+      saveGoalContribution(gcf).catch(showError);
     };
   const catf = document.querySelector("#category-form");
   if (catf)
     catf.onsubmit = (e) => {
       e.preventDefault();
-      saveCategory(catf).catch((err) => alert(err.message));
+      saveCategory(catf).catch(showError);
     };
   const fundf = document.querySelector("#fund-form");
   if (fundf)
     fundf.onsubmit = (e) => {
       e.preventDefault();
-      saveFund(fundf).catch((err) => alert(err.message));
+      saveFund(fundf).catch(showError);
     };
   const sf = document.querySelector("#settings-form");
   if (sf)
     sf.onsubmit = (e) => {
       e.preventDefault();
-      saveSettings(sf).catch((err) => alert(err.message));
+      saveSettings(sf).catch(showError);
     };
   const asf = document.querySelector("#activity-search-form");
   if (asf)
@@ -5283,13 +5395,16 @@ function bind() {
   const rf = document.querySelector("#restore-file");
   if (rf)
     rf.onchange = () => {
-      if (rf.files[0]) restore(rf.files[0]).catch((err) => alert(err.message));
+      if (rf.files[0]) restore(rf.files[0]).catch((err) => notify("Couldn't restore that backup", err.message || String(err)));
       rf.value = "";
     };
 }
 
 if ("serviceWorker" in navigator)
   window.addEventListener("load", () => navigator.serviceWorker.register("./sw.js").catch(() => {}));
+watchKeyboard();
+// iOS only shows :active (the press-down feedback on buttons) once a touch listener exists on the page.
+document.addEventListener("touchstart", () => {}, { passive: true });
 load().catch((err) => {
   root.innerHTML = `<pre style="padding:20px">${esc(err.stack || err.message)}</pre>`;
 });

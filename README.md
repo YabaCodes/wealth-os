@@ -1,4 +1,17 @@
-# Wealth OS — v1.17.0
+# Wealth OS — v1.18.0
+
+## v1.18.0 — reliability foundation
+
+This release hardens the existing app without changing financial calculations or redesigning the UI.
+
+- **Automated accounting tests.** Core budget-plan, month-end sweep, goal-routing, forecasting and expense-aggregation rules are covered with deterministic Node tests.
+- **Release consistency tests.** CI verifies that the app version, public defaults, README release heading and service-worker cache version agree, and that every service-worker cached asset exists.
+- **Syntax checks.** Every JavaScript source file and the service worker are syntax-checked before tests run.
+- **GitHub Actions CI.** Every pull request and push runs the same reliability check automatically.
+- **Release metadata self-heal.** On launch, the settings metadata is synchronized to the running app/data-model version after migrations complete. This fixes stale version metadata in backups without touching balances, transactions, transfers, allocations, budgets or month-close snapshots.
+- **Documented financial invariants.** `docs/RELIABILITY.md` records the rules future changes must preserve.
+
+No balances, transactions, budget plans, transfers, reconciliations, projects, settlements or closed-month snapshots are rewritten by this release.
 
 ## v1.17.0 — the week on Home, a month-end summary, tidier Wealth and Budget
 
@@ -147,11 +160,11 @@ This release changes presentation only. It does **not** modify balances, transac
 
 ## Release identity
 
-- App version: **1.15.0**
+- App version: **1.18.0**
 - Data model: **182**
-- Service-worker cache: **wealth-os-v1-15-0**
+- Service-worker cache: **wealth-os-v1-18-0**
 - Manifest: **manifest.webmanifest**
 
 ## Upgrade
 
-Replace the repository files with this package, commit to `main`, wait for GitHub Pages to deploy, then fully close and reopen the installed PWA. Confirm **Settings → Wealth OS v1.15.0 / Data model 182**.
+Replace the repository files with this package, commit to `main`, wait for GitHub Pages to deploy, then fully close and reopen the installed PWA. Confirm **Settings → Wealth OS v1.18.0 / Data model 182**.

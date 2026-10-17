@@ -46,7 +46,7 @@ let modalDirty = false;
 let homeWeekStart = null,
   homeDay = null;
 let reachedGoals = null; // goals at target after the last load (null until the first load)
-const APP_VERSION = "1.17.0";
+const APP_VERSION = "1.18.0";
 const THEME_KEY = "wealthOSTheme";
 // Theme: 'system' follows the phone's light/dark setting. A copy is kept in localStorage so
 // index.html can apply it before the first paint (IndexedDB is too slow for that).
@@ -581,6 +581,19 @@ async function migrateV182() {
   await put("settings", { ...settings, dataModelVersion: 182, appVersion: "1.12.0", updatedAt: stamp });
 }
 
+async function syncReleaseMetadata() {
+  const settings = await getOne("settings", "app");
+  if (!settings) return;
+  const storedModel = Number(settings.dataModelVersion || 0);
+  if (settings.appVersion === APP_VERSION && storedModel === DATA_MODEL_VERSION) return;
+  await put("settings", {
+    ...settings,
+    appVersion: APP_VERSION,
+    dataModelVersion: Math.max(storedModel, DATA_MODEL_VERSION),
+    updatedAt: new Date().toISOString(),
+  });
+}
+
 async function load() {
   await seedIfNeeded();
   await migrateV131();
@@ -598,6 +611,7 @@ async function load() {
   await migrateV180();
   await migrateV181();
   await migrateV182();
+  await syncReleaseMetadata();
   const keys = [
     "accounts",
     "buckets",

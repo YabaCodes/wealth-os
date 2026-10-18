@@ -78,6 +78,7 @@ test("month-end review closes a ready synthetic month and keeps audit snapshot a
 
 test("pending deposit disables Business Trip settlement and new entry defaults to Food", async ({ page }) => {
   await seedSyntheticBrowser(page, { trip: testTrip(), expenses: [trainExpense(), pendingDeposit()] });
+  await page.locator('[data-tab="transactions"]').click();
   await page.locator('[data-action="open-projects"]').first().click();
   await page.locator('[data-action="open-project"][data-id="synthetic-trip"]').click();
   await expect(page.locator('[role="dialog"]')).toContainText("Synthetic Browser Test Trip");
@@ -93,6 +94,7 @@ test("pending deposit disables Business Trip settlement and new entry defaults t
 
 test("actual Business Trip settlement saves once and Undo removes generated surplus", async ({ page }) => {
   await seedSyntheticBrowser(page, { trip: testTrip(), expenses: [trainExpense()] });
+  await page.locator('[data-tab="transactions"]').click();
   await page.locator('[data-action="open-projects"]').first().click();
   await page.locator('[data-action="open-project"][data-id="synthetic-trip"]').click();
   await page.locator('[data-action="settle-project"]').click();

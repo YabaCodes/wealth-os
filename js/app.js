@@ -4374,7 +4374,8 @@ async function closePeriod() {
     ctbcActual: c.ct.actual,
     esunActual: c.es.actual,
     missingFixedIds: c.missingFixed.map((x) => x.id),
-  };  await closeMonthAtomic({ period: p, snapshot, stamp });
+  };
+  await closeMonthAtomic({ period: p, snapshot, stamp });
   modal = { type: "month-summary", periodId: p.id, emergencyFrom };
   await load();
 }

@@ -4855,23 +4855,39 @@ async function undoProjectSettlement(projectId) {
 function exportProjectCsv(projectId) {
   const p = project(projectId);
   if (!p) return;
-  const rows = [["Date", "Category", "Description", "Original Amount", "Currency", "NTD Amount", "Payment Method"]];
+  const rows = [[
+    "Date",
+    "Category",
+    "Treatment",
+    "Entry Type",
+    "Description",
+    "Original Amount",
+    "Currency",
+    "NTD Amount",
+    "Payment Method",
+    "Deposit Status",
+    "Retained NTD",
+  ]];
   for (const x of projectExpenses(projectId))
     rows.push([
       x.date,
       x.category,
+      x.reimbursementType || categoryRuleFor(p, x)?.treatment || "tracking",
+      x.recordType || "expense",
       x.description || "",
       x.originalAmount,
       x.currency,
       x.twdAmount ?? "",
       x.paymentMethod,
+      x.depositStatus || "",
+      x.retainedTwd ?? "",
     ]);
   downloadText(
     `${
-      (p.title || "project")
+      (p.title || "special-budget")
         .replace(/[^a-z0-9]+/gi, "-")
         .replace(/^-|-$/g, "")
-        .toLowerCase() || "project"
+        .toLowerCase() || "special-budget"
     }-${today()}.csv`,
     rows.map((r) => r.map(csvCell).join(",")).join("\n"),
   );

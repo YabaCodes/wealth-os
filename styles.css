@@ -4237,3 +4237,68 @@ html[data-theme="dark"] .ms-bar span {
     display: none;
   }
 }
+
+/* v1.22.0 — in-place, read-only Goals funding scenario */
+.goal-scenario-card {
+  margin-top: 14px;
+}
+.goal-scenario-card h2 {
+  font-size: 18px;
+  margin: 3px 0 0;
+}
+.goal-scenario-card > .sub {
+  margin: 10px 0 0;
+}
+.goal-scenario-inputs {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+  margin-top: 15px;
+}
+.goal-scenario-inputs .field {
+  min-width: 0;
+}
+.goal-scenario-inputs select,
+.goal-scenario-inputs input {
+  width: 100%;
+  min-width: 0;
+}
+.goal-scenario-results {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 15px;
+}
+.goal-scenario-results > div {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.goal-scenario-results strong {
+  display: block;
+  font-size: 18px;
+  margin-top: 3px;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+.goal-scenario-results .goal-scenario-highlight {
+  border-color: #b3dcd1;
+  background: #edf9f5;
+}
+.goal-scenario-message {
+  margin-top: 12px;
+}
+.goal-scenario-disclaimer {
+  line-height: 1.5;
+}
+@media (max-width: 700px) {
+  .goal-scenario-inputs {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 390px) {
+  .goal-scenario-results {
+    grid-template-columns: 1fr;
+  }
+}

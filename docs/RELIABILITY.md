@@ -43,4 +43,6 @@ The Node test suite covers pure accounting calculations, Special Budget / Busine
 
 **v1.21.1 shares the reconciliation baseline and roll-forward implementation** between the account-detail UI and the persisted-wealth/net-worth calculation. Synthetic integration tests verify latest check selection, same-day timestamps, excluded historical and deleted entries, Cash Wallet movements, pending/purpose-only transfers, E.SUN allocation imbalances, tithe exclusion and the consistency of account snapshots with net-worth totals. No financial write paths were modified.
 
-**Remaining gaps:** end-to-end browser/controller UI acceptance, older historical migrations and complete user-interaction tests. Simulated IndexedDB tests do not establish physical iPhone storage durability; device acceptance remains required.
+**v1.21.2 adds full-browser Playwright acceptance** using synthetic, private-origin IndexedDB fixtures and the normal unmodified app controls. Desktop and mobile Chromium test navigation, expense entry, month close/reopen, pending Business Trip refundable holds, Food category default, settlement and undo, and backup rejection. The new CI browser job runs separately from Node integration tests and retains failure traces and screenshots.
+
+**Remaining gaps:** exhaustive UI/controller flows, older historical migrations, and real iPhone Safari/WebKit behavior. Neither simulated IndexedDB nor Chromium mobile emulation proves device storage durability; physical iPhone acceptance remains required.

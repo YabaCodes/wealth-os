@@ -1,11 +1,14 @@
 {
   "name": "wealth-os",
-  "version": "1.19.3",
+  "version": "1.20.0",
   "private": true,
   "type": "module",
   "scripts": {
     "check:syntax": "node --check js/app.js && node --check js/db.js && node --check js/calc.js && node --check js/defaults.js && node --check js/ui.js && node --check js/projects.js && node --check js/pacing.js && node --check js/activity.js && node --check js/special-budgets.js && node --check sw.js",
     "test": "node --test tests/*.test.js",
     "check": "npm run check:syntax && npm test"
+  },
+  "devDependencies": {
+    "fake-indexeddb": "6.2.5"
   }
 }

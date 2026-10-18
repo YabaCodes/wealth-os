@@ -1,5 +1,5 @@
 // Bump CACHE together with APP_VERSION in js/app.js on every release.
-const CACHE = "wealth-os-v1-21-0";
+const CACHE = "wealth-os-v1-21-1";
 // Every file listed here must exist: if one is missing, the service worker fails to install
 // and the app loses offline support (this happened from v1.7.3 to v1.9.0).
 const ASSETS = [
@@ -21,6 +21,7 @@ const ASSETS = [
   "./js/settlement-storage.js",
   "./js/wealth-view-model.js",
   "./js/month-close.js",
+  "./js/reconciliation.js",
   "./icons/icon-32.png",
   "./icons/icon-180.png",
   "./icons/icon-192.png",

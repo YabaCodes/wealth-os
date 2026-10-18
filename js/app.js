@@ -62,6 +62,7 @@ import {
   parseCustomCategoryRules,
   projectBudgetSummary,
   projectCategoryBreakdown,
+  projectCompositionBreakdown,
   mapLegacyBusinessExpense,
   unresolvedDeposits,
   allowanceDays,
@@ -83,7 +84,7 @@ let modalDirty = false;
 let homeWeekStart = null,
   homeDay = null;
 let reachedGoals = null; // goals at target after the last load (null until the first load)
-const APP_VERSION = "1.19.1";
+const APP_VERSION = "1.19.2";
 const THEME_KEY = "wealthOSTheme";
 // Theme: 'system' follows the phone's light/dark setting. A copy is kept in localStorage so
 // index.html can apply it before the first paint (IndexedDB is too slow for that).
@@ -2611,43 +2612,102 @@ function projectExpenseLine(x, p) {
   return `<div class="project-expense-line"><div><strong>${esc(x.category || rule?.name || "Other")}</strong> <span class="tag">${esc(isDeposit ? "Deposit" : treatmentLabel)}</span><div class="sub">${esc(dayLabel(x.date))} · ${esc(projectPaymentLabel(x.paymentMethod))}${x.description ? ` · ${esc(x.description)}` : ""}</div><div class="sub">${esc(formatOriginal(x.originalAmount, x.currency))} · ${twd}${isDeposit ? ` · ${esc(depositStatusLabel(x))}` : ""}</div></div><div class="project-line-actions">${isDeposit && !projectSettlement(x.projectId) ? `<button class="text-btn" data-action="resolve-project-deposit" data-project="${x.projectId}" data-id="${x.id}">Resolve</button>` : ""}<button class="text-btn" data-action="edit-project-expense" data-project="${x.projectId}" data-id="${x.id}">Edit</button><button class="text-btn danger-text" data-action="delete-project-expense" data-project="${x.projectId}" data-id="${x.id}">Delete</button></div></div>`;
 }
 
-function projectTrackerRow(item, denominator, mode) {
-  const amount = Number(item.amount || 0),
-    ratio = denominator > 0 ? Math.max(0, Math.min(1, amount / denominator)) : 0,
-    countText = `${item.count} entr${item.count === 1 ? "y" : "ies"}`;
-  if (mode === "exact") {
-    return `<div class="budget-category special-budget-category"><div class="split"><div><strong>${esc(item.name)}</strong><div class="sub">${countText} · reimbursed at actual amount</div></div><div class="budget-numbers"><strong>${money(amount)}</strong><span>${denominator > 0 ? `${pct(ratio)} of exact total` : "No spend yet"}</span></div></div><div class="progress"><span style="width:${Math.min(100, ratio * 100)}%"></span></div></div>`;
+// Each category keeps the same accent in its bar segment and in the readable legend.
+// Palette values are literals; user-entered category names never enter CSS.
+const SPECIAL_BUDGET_COMPOSITION_COLORS = [
+  "#327bc0", "#0f9487", "#ce8d32", "#885cb7",
+  "#cb6870", "#617c9c", "#609c57", "#a166a3",
+];
+
+function projectCompositionChart(rows, allowance, title, timePct = null) {
+  const result = projectCompositionBreakdown(rows, allowance);
+  if (!result.segments.length) {
+    return '<div class="empty compact-empty"><strong>No spending recorded yet.</strong></div>';
   }
-  return `<div class="budget-category special-budget-category"><div class="split"><div><strong>${esc(item.name)}</strong><div class="sub">${countText} · shared allowance</div></div><div class="budget-numbers"><strong>${money(amount)}</strong><span>${denominator > 0 ? `${pct(ratio)} of allowance` : "No allowance"}</span></div></div><div class="progress"><span style="width:${Math.min(100, ratio * 100)}%"></span></div></div>`;
+  const percentage = (value) => (Math.round(value * 10) / 10).toFixed(1) + "%";
+  const colorFor = (segment, index) =>
+    segment.isRemaining ? "var(--line)" : SPECIAL_BUDGET_COMPOSITION_COLORS[index % SPECIAL_BUDGET_COMPOSITION_COLORS.length];
+  const aria = title + ". " + result.segments.map((segment) =>
+    segment.name + " " + money(segment.amount) + ", " + percentage(segment.barPct) + " of bar"
+  ).join("; ");
+  const fills = result.segments.map((segment, index) =>
+    '<span class="special-budget-composition-segment' + (segment.isRemaining ? ' is-remaining' : '') +
+    '" style="width:' + segment.barPct.toFixed(5) + '%;--segment-color:' + colorFor(segment, index) +
+    '" aria-hidden="true"></span>'
+  ).join("");
+  const marker = Number.isFinite(timePct)
+    ? '<span class="special-budget-time-mark" style="left:' + Math.max(0, Math.min(100, timePct)).toFixed(1) +
+      '%" aria-hidden="true"></span>'
+    : "";
+  const legend = result.segments.map((segment, index) => {
+    const valuePct = allowance === null
+      ? percentage(segment.claimPct) + " of exact claims"
+      : result.cap > 0
+        ? percentage(segment.allowancePct) + " of allowance"
+        : percentage(segment.claimPct) + " of spending";
+    const context = segment.isRemaining ? "Unspent allowance" :
+      (segment.count || 0) + " entr" + (segment.count === 1 ? "y" : "ies");
+    return '<div class="special-budget-legend-row"><div class="special-budget-legend-name">' +
+      '<span class="special-budget-legend-dot" style="background:' + colorFor(segment, index) + '" aria-hidden="true"></span>' +
+      '<div><strong>' + esc(segment.name) + '</strong><div class="sub">' + esc(context) + '</div></div></div>' +
+      '<div class="special-budget-legend-values"><strong>' + money(segment.amount) + '</strong>' +
+      '<span class="sub">' + valuePct + '</span></div></div>';
+  }).join("");
+  return '<div class="special-budget-composition-visual" role="img" aria-label="' + esc(aria) + '">' +
+    '<div class="special-budget-composition-track">' + fills + '</div>' + marker + '</div>' +
+    '<div class="special-budget-legend">' + legend + '</div>';
 }
 
 function projectExactTrackerBlock(p, expenses, summary) {
   if (p.type !== "business_trip") return "";
-  const rows = projectCategoryBreakdown(p, expenses, "exact").filter((x) => x.amount > 0 || x.count > 0);
-  return `<div class="section-title"><h2>Exact reimbursement</h2><span class="sub">${money(summary.exact)} expected back</span></div>
-  <section class="card special-budget-tracker">
-    <div class="special-budget-tracker-head"><div><div class="metric-label">Exact reimbursable spent</div><div class="metric">${money(summary.exact)}</div><div class="sub">Company reimbursement follows the exact NTD amount recorded for each expense.</div></div><div class="budget-numbers"><strong>${money(summary.exact)}</strong><span>expected exact reimbursement</span></div></div>
-    ${rows.length ? `<div class="special-budget-category-list">${rows.map((x) => projectTrackerRow(x, summary.exact, "exact")).join("")}</div><div class="sub special-budget-bar-note">Category bars show each category's share of exact reimbursable spending; they are not spending limits.</div>` : '<div class="empty compact-empty"><strong>No exact-reimbursement spending yet.</strong></div>'}
-  </section>`;
+  const rows = projectCategoryBreakdown(p, expenses, "exact").filter((x) => x.amount > 0);
+  return '<div class="section-title"><h2>Exact reimbursement</h2><span class="sub">' + money(summary.exact) +
+    ' expected back</span></div><section class="card special-budget-tracker">' +
+    '<div class="special-budget-tracker-head"><div><div class="metric-label">Exact reimbursable spent</div><div class="metric">' +
+    money(summary.exact) + '</div><div class="sub">Company reimburses the exact NTD amount recorded for each confirmed expense.</div></div>' +
+    '<div class="budget-numbers"><strong>' + money(summary.exact) +
+    '</strong><span>expected exact reimbursement</span></div></div>' +
+    (rows.length ? projectCompositionChart(rows, null, "Exact reimbursement category composition") :
+      '<div class="empty compact-empty"><strong>No exact-reimbursement spending yet.</strong></div>') +
+    (rows.length ? '<div class="sub special-budget-bar-note">100% of confirmed exact claims, split by category. This is a distribution, not a spending limit.</div>' : '') +
+    '</section>';
 }
 
 function projectFlexibleTrackerBlock(p, expenses, summary) {
   if (p.type !== "business_trip") return "";
-  const rows = projectCategoryBreakdown(p, expenses, "flexible"),
+  const rows = projectCategoryBreakdown(p, expenses, "flexible").filter((x) => x.amount > 0),
     usedPct = summary.allowance > 0 ? Math.max(0, (summary.flexible / summary.allowance) * 100) : 0,
     timePct = summary.totalAllowanceDays > 0 ? Math.max(0, Math.min(100, (summary.elapsedAllowanceDays / summary.totalAllowanceDays) * 100)) : 0,
     avgDaily = summary.elapsedAllowanceDays > 0 ? summary.flexible / summary.elapsedAllowanceDays : 0,
     remainingText = summary.flexible <= summary.allowance
-      ? `${money(summary.remainingAllowance)} left`
-      : `${money(summary.flexible - summary.allowance)} over`;
-  return `<div class="section-title"><h2>Flexible allowance</h2><span class="tag ${summary.paceKey === "good" ? "good-tag" : summary.paceKey === "bad" ? "warn-tag" : ""}">${esc(summary.paceLabel)}</span></div>
-  <section class="card special-budget-tracker">
-    <div class="special-budget-tracker-head"><div><div class="metric-label">Shared trip allowance</div><div class="metric ${summary.flexible > summary.allowance ? "bad" : ""}">${remainingText}</div><div class="sub">${money(summary.flexible)} spent of ${money(summary.allowance)}</div></div><div class="budget-numbers"><strong class="${summary.flexible > summary.allowance ? "bad" : ""}">${usedPct.toFixed(0)}%</strong><span>allowance used</span></div></div>
-    <div class="special-budget-progress" aria-label="${usedPct.toFixed(0)} percent of flexible allowance used; ${timePct.toFixed(0)} percent of trip allowance time elapsed"><div class="progress ${summary.flexible > summary.allowance ? "over" : ""}"><span style="width:${Math.min(100, usedPct).toFixed(1)}%"></span></div><span class="special-budget-time-mark" style="left:${timePct.toFixed(1)}%" aria-hidden="true"></span></div>
-    <div class="sub special-budget-pace-caption">${usedPct.toFixed(0)}% allowance used · ${timePct.toFixed(0)}% trip time elapsed · ${summary.elapsedAllowanceDays.toFixed(1)} of ${summary.totalAllowanceDays} allowance days</div>
-    <div class="special-budget-category-list">${rows.map((x) => projectTrackerRow(x, summary.allowance, "flexible")).join("")}</div>
-    <div class="grid g2 special-budget-stats"><div><span class="metric-label">Average flexible spend</span><strong>${money(avgDaily)}/day</strong></div><div><span class="metric-label">Safe remaining pace</span><strong>${money(summary.safeDaily)}/day</strong></div><div><span class="metric-label">Projected flexible spend</span><strong>${money(summary.projectedFlexible)}</strong></div><div><span class="metric-label">Expected trip result</span><strong class="${summary.expectedResult >= 0 ? "good" : "bad"}">${summary.expectedResult >= 0 ? "+" : "−"}${money(Math.abs(summary.expectedResult))}</strong></div></div>
-  </section>`;
+      ? money(summary.remainingAllowance) + " left"
+      : money(summary.flexible - summary.allowance) + " over",
+    overAllowance = summary.flexible > summary.allowance;
+  return '<div class="section-title"><h2>Flexible allowance</h2><span class="tag ' +
+    (summary.paceKey === "good" ? "good-tag" : summary.paceKey === "bad" ? "warn-tag" : "") + '">' +
+    esc(summary.paceLabel) + '</span></div><section class="card special-budget-tracker">' +
+    '<div class="special-budget-tracker-head"><div><div class="metric-label">Shared trip allowance</div><div class="metric ' +
+    (overAllowance ? "bad" : "") + '">' + remainingText + '</div><div class="sub">' +
+    money(summary.flexible) + ' spent of ' + money(summary.allowance) + '</div></div>' +
+    '<div class="budget-numbers"><strong class="' + (overAllowance ? "bad" : "") + '">' +
+    usedPct.toFixed(0) + '%</strong><span>allowance used</span></div></div>' +
+    projectCompositionChart(rows, summary.allowance,
+      "Flexible spending composition; " + money(summary.flexible) + " spent of " + money(summary.allowance),
+      timePct) +
+    '<div class="sub special-budget-pace-caption">' + usedPct.toFixed(0) + '% allowance used · ' +
+    timePct.toFixed(0) + '% trip time elapsed · ' + summary.elapsedAllowanceDays.toFixed(1) +
+    ' of ' + summary.totalAllowanceDays + ' allowance days</div>' +
+    (overAllowance
+      ? '<div class="sub special-budget-bar-note bad">Allowance exceeded by ' + money(summary.flexible - summary.allowance) +
+        '. The full bar is normalized to spending; the breakdown percentages remain relative to the allowance.</div>'
+      : '<div class="sub special-budget-bar-note">Colored sections are category spending; gray is the allowance still available. The amber line shows trip time elapsed.</div>') +
+    '<div class="grid g2 special-budget-stats"><div><span class="metric-label">Average flexible spend</span><strong>' +
+    money(avgDaily) + '/day</strong></div><div><span class="metric-label">Safe remaining pace</span><strong>' +
+    money(summary.safeDaily) + '/day</strong></div><div><span class="metric-label">Projected flexible spend</span><strong>' +
+    money(summary.projectedFlexible) + '</strong></div><div><span class="metric-label">Expected trip result</span>' +
+    '<strong class="' + (summary.expectedResult >= 0 ? "good" : "bad") + '">' +
+    (summary.expectedResult >= 0 ? "+" : "−") + money(Math.abs(summary.expectedResult)) +
+    '</strong></div></div></section>';
 }
 
 function projectDetailView(projectId) {
@@ -2690,13 +2750,14 @@ function projectDetailView(projectId) {
     : `<div class="grid g2 project-summary-grid" style="margin-top:14px"><section class="card nested-card"><div class="metric-label">Counted NTD spend</div><div class="metric">${money(known)}</div><div class="sub">${missing.length ? `${missing.length} NTD conversion${missing.length === 1 ? "" : "s"} pending` : "All counted expenses valued"}</div></section><section class="card nested-card"><div class="metric-label">Original currency totals</div><strong>${esc(originalText)}</strong><div class="sub">Preserved exactly as entered</div></section></div>`;
 
   return `<div class="split"><div><h3 class="project-title">${esc(p.title)}</h3><div class="sub">${esc(kind)}</div><div class="sub">${metadata}</div></div>${projectStatusTag(p)}</div>
+    <div class="actions project-top-actions" style="margin-top:14px">${!settlement ? `<button class="btn" data-action="add-project-expense" data-project="${p.id}">Add Entry</button><button class="btn secondary" data-action="edit-project" data-id="${p.id}">Edit Budget</button>` : ""}<button class="btn ghost" data-action="export-project-csv" data-id="${p.id}">Export CSV</button></div>
     ${legacyConvert}
     ${nonTripSummary}
     ${projectExactTrackerBlock(p, expenses, summary)}
     ${projectFlexibleTrackerBlock(p, expenses, summary)}
     ${walletBlock}
     ${summary.depositsPending ? `<div class="section-title"><h2>Refundable deposits</h2><span class="tag warn-tag">${summary.depositsPending} pending</span></div><section class="card"><strong>${money(summary.depositsPendingTwd)} currently held</strong><div class="sub">Excluded from spending and expected reimbursement until the refund outcome is resolved.</div></section>` : ""}
-    <div class="actions project-top-actions" style="margin-top:14px">${!settlement ? `<button class="btn" data-action="add-project-expense" data-project="${p.id}">Add Entry</button><button class="btn secondary" data-action="edit-project" data-id="${p.id}">Edit Budget</button>` : ""}<button class="btn ghost" data-action="export-project-csv" data-id="${p.id}">Export CSV</button></div>
+
     ${settlementBlock}
     <div class="section-title"><h2>Activity</h2><span class="sub">${expenses.length} recorded</span></div><section class="card project-expense-list">${expenses.length ? expenses.map((x) => projectExpenseLine(x, p)).join("") : '<div class="empty compact-empty"><strong>No activity yet.</strong><span>Add expenses or refundable deposits here.</span></div>'}</section>`;
 }

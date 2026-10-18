@@ -80,7 +80,7 @@ For v1.20.3, checks covered version/data model, Wealth balances/reconciliation, 
 
 ## v1.21.0 — Month-Close & Reconciliation Assurance
 
-**Status: implementation in review; CI and physical iPhone acceptance required.** Prioritize end-to-end confidence in the month-close/reopen path before expanding accounting features.
+**Status: completed, PR #21 merged and physically accepted (2026-10-18).** Prioritize end-to-end confidence in the month-close/reopen path before expanding accounting features.
 
 1. Completed: extract the live close-readiness decision gate for direct testing without changing its blocker calculations or display wording.
 2. Completed: atomically persist the period closed flag and complete audit snapshot; atomically reopen both records while preserving the financial snapshot.
@@ -91,8 +91,19 @@ For v1.20.3, checks covered version/data model, Wealth balances/reconciliation, 
 
 **Release gate:** automated CI green, no existing-ledger mutation/migration, reproducible closed-month snapshot assertions, and manual iPhone acceptance following an external backup.
 
+## v1.21.1 — Reconciliation Roll-Forward Protection
+
+**Status: implementation in review; physical iPhone acceptance pending.**
+
+- Consolidate duplicate bank-reconciliation read logic used by Wealth Overview and Wealth Metrics into one pure module, without modifying current calculation semantics.
+- Regression-test bank-check baseline selection, same-day record timestamps, older adjustments, later income/expenses, Cash Wallet, completed physical transfers and pending/virtual transfers.
+- Verify E.SUN physical bank balances versus virtual allocations and ensure tithe remains excluded from net worth.
+- Preserve personal financial records, account balances, the current UI, data model 190 and IndexedDB schema 3.
+- Continue to require passing CI, external backup and installed iPhone acceptance.
+
 ### Later candidates (not committed)
 
+- Browser-level UI acceptance tests for destructive flows, using isolated test data.
 - Goal-planning and Insights usability improvements based on observed user workflows.
 - Additional modularization where tests show it reduces change risk.
 

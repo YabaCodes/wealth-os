@@ -802,6 +802,11 @@ function projectPaymentTwd(projectId, method) {
 function projectOriginalTotals(projectId) {
   return projectOriginalTotalsFromRows(state.projectExpenses, projectId);
 }
+function activeSpecialBudgetReserve() {
+  return state.projects
+    .filter((p) => !p.deletedAt && p.fundingMode === "trip_wallet" && !projectSettlement(p.id))
+    .reduce((sum, p) => sum + Math.max(0, Number(p.tripWalletAllocatedTwd || 0)), 0);
+}
 function projectStatusTag(p) {
   const settled = projectSettlement(p.id);
   if (settled) return '<span class="tag good-tag">Settled</span>';
@@ -2747,7 +2752,9 @@ function goalsView() {
 
 function wealthView() {
   const fx = state.settings.usdTwdRate;
-  const ct = accountSnapshot("ctbc");
+  const ct = accountSnapshot("ctbc"),
+    specialBudgetReserve = activeSpecialBudgetReserve(),
+    operatingAvailable = Number(ct.actual || 0) - specialBudgetReserve;
   const es = esunSnapshot();
   const cash = accountSnapshot("cash");
   const ctStatus = !ct.verified ? "Not checked" : Math.abs(ct.difference) < 0.5 ? "Reconciled" : "Ledger mismatch";
@@ -2791,6 +2798,7 @@ function wealthView() {
   <section class="card account-detail-card">
     <div class="account-balance-head"><div><div class="metric-label">Tracked current balance</div><div class="metric">${money(ct.actual)}</div>${ct.verified ? `<div class="sub">Last checked ${esc(ct.reconciliation.date || "")}${ct.isEstimated ? " · updated by recorded activity" : ""}</div>` : `<div class="sub">Using ledger balance until you confirm it</div>`}</div></div>
     <div class="reconcile-grid two-col"><div><span class="sub">Ledger expected</span><strong>${money(ct.expected)}</strong></div><div><span class="sub">Bank vs ledger</span><strong class="${Math.abs(ct.difference) < 0.5 ? "good" : ct.difference < 0 ? "bad" : "warn"}">${ct.difference > 0 ? "+" : ""}${money(ct.difference)}</strong></div></div>
+    ${specialBudgetReserve > 0 ? `<div class="row"><div><strong>Special Budget reserve</strong><div class="sub">Virtual Trip Wallet money reserved from operating cash</div></div><strong class="amount">${money(specialBudgetReserve)}</strong></div><div class="row"><div><strong>Available operating cash</strong><div class="sub">Tracked CTBC balance minus active Special Budget reserves</div></div><strong class="amount">${money(operatingAvailable)}</strong></div>` : ""}
     <div class="row"><div><strong>Electricity Reserve</strong><div class="sub">Virtual reserve held inside CTBC · no bank transfer required</div></div><strong class="amount">${money(state.bucketBalances.electricity || 0)}</strong></div>
     ${accountActions(`<button class="btn secondary" data-action="account-reconcile" data-id="ctbc">Update Balance</button>`, "ctbc")}
   </section>

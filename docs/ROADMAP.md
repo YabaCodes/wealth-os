@@ -37,16 +37,22 @@ Completed; merged and physically accepted:
 ## Reliability continuation
 
 ### v1.20.0 — IndexedDB and restore integration foundation
-Implementation prepared; GitHub CI and physical iPhone acceptance required:
+Completed, merged and physically accepted (all six iPhone checks PASS):
 - Isolated IndexedDB integration harness using dev-only fake-indexeddb.
 - Real db.js CRUD, seed, export/import, undo snapshot and atomic restore regression tests.
 - Abort import transaction if any record fails synchronously during IDB put.
 - Basic account-transfer balance classification.
 - Keep IndexedDB schema 3 and financial data model 190 unchanged.
 
+### v1.20.1 — Financial history regression coverage
+Implementation in review; automated and physical acceptance pending:
+- Test real IndexedDB migrations v182 Household and v190 Special Budget metadata including repeat upgrades and frozen history.
+- Test shared closed-month guard and open-month sync persisted writes without mutating completed records.
+- Test bank movement versus virtual allocation accounting before/after budget sync.
+- Keep model 190 and IndexedDB schema 3 unchanged.
+
 ### Follow-on priorities
-1. v1.20.1 — integration coverage for app migration paths, physical-vs-purpose transfer workflows, closed-month protections and open-month plan sync.
-2. v1.20.2 — Special Budget settlement, undo and reimbursement integration tests.
-3. v1.20.3 — controlled modularization of Wealth/goal presentation and read-only helpers, protected by established tests.
+1. v1.20.2 — Special Budget settlement, undo and reimbursement integration tests.
+2. v1.20.3 — controlled modularization of Wealth/goal presentation and read-only helpers, protected by established tests.
 
 Persistence, migrations and restore code must not be aggressively refactored without a passing integration safety net.

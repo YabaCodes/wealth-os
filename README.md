@@ -1,4 +1,17 @@
-# Wealth OS — v1.20.0
+# Wealth OS — v1.20.1
+
+## v1.20.1 — Financial history, migration and month-close regression protection
+
+- Adds automated integration tests that exercise **real IndexedDB persistence** for the v1.12 Household category migration (data model 182) and v1.19 Special Budget metadata migration (data model 190).
+- Confirms historical upgrades are **idempotent**: re-running them does not duplicate categories, change completed financial records, rewrite closed-month snapshots, or reclassify legacy Special Budget expenses.
+- Shares the existing **closed-month edit guard** across the live app and test suite; month-linked expense, income, transfer and goal contribution edits remain blocked until a month is reopened.
+- Extracts only the **open-month budget sync** operation into a tested module. It refreshes the selected open month’s plan/routing preview without rewriting actual transactions, recorded transfer allocations, reconciliations or closed-month summaries. It also rechecks persisted period state before writing to avoid changing a period that has since closed.
+- Tests that real completed physical transfers move bank-account balances, planned transfers do not, and purpose-only allocations affect virtual bucket balances without moving bank balances, even after plan sync.
+- Exports the tested migrations and period safety functions without changing their established successful behavior. Existing UI and finance flows remain unchanged.
+- No personal data or live device records are modified by the tests. **Financial data model remains 190; IndexedDB database schema remains version 3.**
+- The new modules are included in JavaScript syntax checks and service-worker precaching for offline iPhone operation.
+
+
 
 ## v1.20.0 — IndexedDB persistence and restore safety test foundation
 

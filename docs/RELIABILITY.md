@@ -35,4 +35,6 @@ The Node test suite covers pure accounting calculations, Special Budget / Busine
 
 **v1.20.1 adds shared live-code integration tests** for model migrations v182 (Household/open-versus-closed month) and v190 (metadata-only Special Budgets), explicit closed-month edit guards, guarded open-month plan synchronization, and physical/virtual transfer invariants before and after a sync. Historical transactions, monthly-close snapshots, legacy Special Budgets, and completed transfers are asserted to stay byte-equivalent across upgrades and planning edits.
 
-**Remaining gaps:** end-to-end controller/UI testing of older legacy migrations, month-close/reopen workflows, full user-interaction tests, and Special Budget settlement/undo integration. Simulated IndexedDB tests do not prove real-device storage durability or replace iPhone physical acceptance.
+**v1.20.2 adds atomic Special Budget settlement/undo transactions** with a fresh-IDB check for stale expenses, unresolved deposits, missing exact NTD values, closed funding periods and prior settlement. Concurrent settlement attempts cannot generate duplicate incomes or settled records. A failed write rolls back all generated records together, and completed routing transfers still prevent unsafe undo. Isolated IndexedDB tests cover success and rejection cases.
+
+**Remaining gaps:** end-to-end controller/UI testing of older legacy migrations, month-close/reopen workflows and complete user-interaction tests. Simulated IndexedDB tests do not prove real-device storage durability or replace iPhone physical acceptance.

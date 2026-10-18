@@ -21,3 +21,29 @@ jobs:
         run: npm install --ignore-scripts --no-audit --no-fund
       - name: Run syntax, accounting, and IndexedDB integration checks
         run: npm run check
+
+  browser-acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install test dependencies (no install scripts)
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Install Playwright Chromium and browser dependencies
+        run: npx playwright install --with-deps chromium
+      - name: Run isolated browser acceptance on localhost
+        run: npm run check:browser
+      - name: Upload Playwright failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wealth-os-browser-failures
+          path: |
+            test-results/browser
+            playwright-report
+          if-no-files-found: ignore

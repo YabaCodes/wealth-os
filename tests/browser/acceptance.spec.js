@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { readFile } from "node:fs/promises";
 import {
   seedSyntheticBrowser, readBrowserStore, syntheticPeriod,
   testTrip, trainExpense, pendingDeposit,
@@ -132,5 +133,30 @@ test("invalid backup through actual Restore control does not replace local data"
     buffer: Buffer.from('{"not":"a wealth os backup"}'),
   });
   await expect(page.locator("body")).toContainText("Couldn't restore that backup");
+  expect(await readBrowserStore(page, "periods")).toEqual(before);
+});
+
+test("Export Backup downloads valid JSON and a restore preview can be safely cancelled", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name === "chromium-mobile", "Mobile share sheet is covered by physical iPhone acceptance");
+  await seedSyntheticBrowser(page);
+  await page.locator('[data-action="settings"]').first().click();
+  const [download] = await Promise.all([
+    page.waitForEvent("download"),
+    page.locator('[data-action="export-backup"]').click(),
+  ]);
+  expect(download.suggestedFilename()).toMatch(/^wealth-os-backup-\\d{4}-\\d{2}-\\d{2}\\.json$/);
+  const payload = JSON.parse(await readFile(await download.path(), "utf8"));
+  expect(payload.version).toBe(1);
+  expect(payload.data.periods).toHaveLength(1);
+  expect(payload.data.periods[0].id).toBe("2026-10");
+  const before = await readBrowserStore(page, "periods");
+
+  await page.locator("#restore-file").setInputFiles({
+    name: "valid-synthetic-backup.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify(payload)),
+  });
+  await expect(page.locator(".ask-sheet")).toContainText("Replace all data with this backup?");
+  await page.locator("#ask-cancel").click();
   expect(await readBrowserStore(page, "periods")).toEqual(before);
 });

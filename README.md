@@ -1,4 +1,12 @@
-# Wealth OS — v1.19.0
+# Wealth OS — v1.19.1
+
+## v1.19.1 — Special Budget tracker polish
+
+- Business Trip detail now has two dedicated tracker sections: **Exact reimbursement** and **Flexible allowance**.
+- Exact-reimbursement categories show their recorded NTD totals and share of exact reimbursable spending.
+- Flexible allowance shows pooled allowance usage, a spending bar with the trip-time marker, per-category usage, average daily spend, safe remaining pace, projection and expected trip result.
+- The reimbursement action stacks safely on mobile so the button no longer overlaps its status text.
+- Special Budget **Activity** now appears at the end of the detail view.
 
 ## v1.19.0 — Special Budgets and Business Trips
 

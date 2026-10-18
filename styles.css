@@ -1681,7 +1681,102 @@ button {
 .project-summary-grid strong {
   font-variant-numeric: tabular-nums;
 }
+.special-budget-tracker {
+  padding-top: 14px;
+  padding-bottom: 10px;
+}
+.special-budget-tracker-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: end;
+  padding-bottom: 12px;
+}
+.special-budget-tracker-head .metric {
+  font-size: 24px;
+}
+.special-budget-category-list {
+  border-top: 1px solid var(--line);
+}
+.special-budget-category {
+  padding-left: 0;
+  padding-right: 0;
+}
+.special-budget-category .budget-numbers {
+  max-width: 46%;
+}
+.special-budget-bar-note,
+.special-budget-pace-caption {
+  margin-top: 8px;
+  line-height: 1.45;
+}
+.special-budget-progress {
+  position: relative;
+}
+.special-budget-progress .progress {
+  margin: 8px 0 0;
+}
+.special-budget-time-mark {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  width: 3px;
+  border-radius: 999px;
+  background: var(--warn);
+  transform: translateX(-1px);
+  pointer-events: none;
+}
+.special-budget-stats {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+.special-budget-stats > div {
+  min-width: 0;
+}
+.special-budget-stats .metric-label {
+  display: block;
+  margin-bottom: 3px;
+}
+.project-settlement-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: start;
+}
+.project-settlement-copy {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.project-settlement-cta {
+  max-width: 190px;
+  white-space: normal;
+  text-align: center;
+  line-height: 1.2;
+}
 @media (max-width: 700px) {
+  .special-budget-tracker-head,
+  .project-settlement-layout {
+    grid-template-columns: 1fr;
+  }
+  .special-budget-tracker-head {
+    align-items: start;
+  }
+  .special-budget-tracker-head .budget-numbers {
+    text-align: left;
+    white-space: normal;
+  }
+  .special-budget-category .split {
+    align-items: flex-start;
+  }
+  .special-budget-category .budget-numbers {
+    max-width: 48%;
+    white-space: normal;
+  }
+  .project-settlement-cta {
+    width: 100%;
+    max-width: none;
+  }
   .quick-action-grid.project-ready {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -1703,6 +1798,17 @@ button {
   }
 }
 @media (max-width: 390px) {
+  .special-budget-category .split {
+    flex-direction: column;
+    gap: 6px;
+  }
+  .special-budget-category .budget-numbers {
+    max-width: none;
+    text-align: left;
+  }
+  .special-budget-stats {
+    grid-template-columns: 1fr;
+  }
   .project-top-actions .btn {
     flex: 1 1 100%;
   }

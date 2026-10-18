@@ -4487,7 +4487,14 @@ async function saveProject(form) {
     fundingMode = fd.get("fundingMode") || "reimbursement",
     wallet = Math.max(0, Number(fd.get("tripWalletAllocatedTwd") || 0));
   if (startDate && endDate && String(endDate) < String(startDate)) throw new Error("Return/end date cannot be before the start date.");
-  if (fundingMode === "trip_wallet" && !(wallet > 0)) throw new Error("Enter the amount to reserve in the Trip Wallet.");
+  if (fundingMode === "trip_wallet") {
+    if (!(wallet > 0)) throw new Error("Enter the amount to reserve in the Trip Wallet.");
+    const existingReserve = existing?.fundingMode === "trip_wallet" ? Math.max(0, Number(existing.tripWalletAllocatedTwd || 0)) : 0,
+      otherReserves = Math.max(0, activeSpecialBudgetReserve() - existingReserve),
+      availableOperating = Math.max(0, Number(accountSnapshot("ctbc").actual || 0) - otherReserves);
+    if (wallet > availableOperating + 0.5)
+      throw new Error(`Trip Wallet allocation cannot exceed available CTBC operating cash of ${money(availableOperating)}.`);
+  }
 
   let categoryRules = existing?.categoryRules || [];
   const obj = {

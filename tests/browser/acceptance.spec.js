@@ -13,7 +13,7 @@ test("navigation, Settings release identity and actual expense form persist thro
 
   await page.locator('[data-tab="budget"]').click();
   await expect(page.locator(".topbar h1")).toHaveText("Budget");
-  await page.locator('[data-tab="transactions"]').click();
+  await page.locator('nav [data-tab="transactions"]').click();
   await expect(page.locator(".topbar h1")).toHaveText("Activity");
   await page.locator('[data-tab="wealth"]').click();
   await expect(page.locator(".topbar h1")).toHaveText("Wealth");
@@ -33,7 +33,7 @@ test("navigation, Settings release identity and actual expense form persist thro
     description: "Browser test lunch",
   });
   await page.reload();
-  await page.locator('[data-tab="transactions"]').click();
+  await page.locator('nav [data-tab="transactions"]').click();
   await expect(page.locator(".tx")).toContainText(["Browser test lunch"]);
 });
 
@@ -65,7 +65,7 @@ test("month-end review closes a ready synthetic month and keeps audit snapshot a
   await page.reload();
   await page.locator('[data-action="month-close"]').first().click();
   await expect(page.locator('[role="dialog"]')).toContainText("Saved month-end snapshot");
-  await page.locator('[data-action="reopen-period"]').first().click();
+  await page.locator('[role="dialog"] [data-action="reopen-period"]').click();
   await expect.poll(async () =>
     (await readBrowserStore(page, "periods")).find((p) => p.id === "2026-10")?.state,
   ).toBe("reopened");
@@ -75,7 +75,7 @@ test("month-end review closes a ready synthetic month and keeps audit snapshot a
 
 test("pending deposit disables Business Trip settlement and new entry defaults to Food", async ({ page }) => {
   await seedSyntheticBrowser(page, { trip: testTrip(), expenses: [trainExpense(), pendingDeposit()] });
-  await page.locator('[data-tab="transactions"]').click();
+  await page.locator('nav [data-tab="transactions"]').click();
   await page.locator('[data-action="open-projects"]').first().click();
   await page.locator('[data-action="open-project"][data-id="synthetic-trip"]').click();
   await expect(page.locator('[role="dialog"]')).toContainText("Synthetic Browser Test Trip");
@@ -91,7 +91,7 @@ test("pending deposit disables Business Trip settlement and new entry defaults t
 
 test("actual Business Trip settlement saves once and Undo removes generated surplus", async ({ page }) => {
   await seedSyntheticBrowser(page, { trip: testTrip(), expenses: [trainExpense()] });
-  await page.locator('[data-tab="transactions"]').click();
+  await page.locator('nav [data-tab="transactions"]').click();
   await page.locator('[data-action="open-projects"]').first().click();
   await page.locator('[data-action="open-project"][data-id="synthetic-trip"]').click();
   await page.locator('[data-action="settle-project"]').click();

@@ -14,6 +14,7 @@ const ASSETS = [
   "./js/ui.js",
   "./js/projects.js",
   "./js/pacing.js",
+  "./js/activity.js",
   "./icons/icon-32.png",
   "./icons/icon-180.png",
   "./icons/icon-192.png",

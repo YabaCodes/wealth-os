@@ -18,6 +18,13 @@ This release hardens the existing app without changing financial calculations or
 - Deterministic tests pin month-day calculations, current/past/future month handling, pacing thresholds and expense cutoffs.
 - Home, Budget and Insights keep their existing UI while using the extracted calculations.
 
+### Hardening phase 4 — Activity transformation extraction
+
+- Activity normalization for expenses, income and transfers now lives in `js/activity.js`.
+- Search/filter logic, purpose-only transfer classification and daily grouping/totals are now pure/testable helpers.
+- Day labels (Today / Yesterday / dated headings) are deterministic in tests.
+- Activity rendering and row actions remain in `app.js`, so the visible UI and behavior remain unchanged.
+
 - **Automated accounting tests.** Core budget-plan, month-end sweep, goal-routing, forecasting and expense-aggregation rules are covered with deterministic Node tests.
 - **Release consistency tests.** CI verifies that the app version, public defaults, README release heading and service-worker cache version agree, and that every service-worker cached asset exists.
 - **Syntax checks.** Every JavaScript source file and the service worker are syntax-checked before tests run.

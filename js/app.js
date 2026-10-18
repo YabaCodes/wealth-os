@@ -50,6 +50,13 @@ import {
   monthPaceContext,
   spendingPaceFor as spendingPaceForRows,
 } from "./pacing.js";
+import {
+  buildActivityRecords,
+  filterActivityRecords,
+  groupActivityByDay,
+  dayHeading,
+  isPurposeOnlyTransfer,
+} from "./activity.js";
 
 const root = document.querySelector("#app");
 let tab = "home";
@@ -784,51 +791,14 @@ function entryPeriodId() {
   return [...state.periods].filter((p) => p.state !== "closed").sort((a, b) => b.id.localeCompare(a.id))[0]?.id || null;
 }
 function activityRecords() {
-  return [
-    ...state.expenses
-      .filter((x) => !x.deletedAt)
-      .map((x) => ({
-        ...x,
-        _kind: "expense",
-        _date: x.date,
-        _amount: -Number(x.amount),
-        _title: category(x.categoryId)?.name || "Expense",
-        _account: physicalAccount(x.accountId)?.name || "",
-        _detail: ["Physical expense", x.description || ""].filter(Boolean).join(" · "),
-      })),
-    ...state.incomes
-      .filter((x) => !x.deletedAt)
-      .map((x) => ({
-        ...x,
-        _kind: "income",
-        _date: x.dateReceived,
-        _amount: Number(x.amount),
-        _title: INCOME_TYPES.find((t) => t[0] === x.incomeType)?.[1] || "Income",
-        _account: physicalAccount(x.accountId)?.name || "",
-        _detail: ["Physical income", x.description || ""].filter(Boolean).join(" · "),
-      })),
-    ...state.transfers
-      .filter((x) => !x.deletedAt && ["planned", "completed"].includes(x.status))
-      .map((x) => {
-        const virtualOnly = isPurposeOnlyTransfer(x);
-        const internalName = physicalAccount(x.fromAccountId)?.name || "Account";
-        return {
-          ...x,
-          _kind: "transfer",
-          _date: x.completedDate || x.plannedDate,
-          _amount: Number(x.amount || 0),
-          _title: virtualOnly
-            ? `${internalName} purpose allocation`
-            : `${physicalAccount(x.fromAccountId)?.name || x.fromAccountId} → ${physicalAccount(x.toAccountId)?.name || x.toAccountId}`,
-          _account: virtualOnly ? "Virtual purpose ledger" : "Physical bank transfer",
-          _detail: `${virtualOnly ? "Virtual only · bank impact NT$0" : "Physical transfer · spending impact NT$0"} · ${x.status}`,
-        };
-      }),
-  ].sort(
-    (a, b) =>
-      String(b._date).localeCompare(String(a._date)) ||
-      String(b.createdAt || "").localeCompare(String(a.createdAt || "")),
-  );
+  return buildActivityRecords({
+    expenses: state.expenses,
+    incomes: state.incomes,
+    transfers: state.transfers,
+    categories: state.categories,
+    accounts: state.accounts,
+    incomeTypes: INCOME_TYPES,
+  });
 }
 // v1.12 sweep rules: recorded fixed bills count their difference from the budget, and payday money already
 // sent beyond the current plan is taken off the sweep. Open months use them; months closed before v1.12
@@ -1582,16 +1552,6 @@ function dataHealthView() {
   return `<div class="notice ${summaryClass}"><strong>${esc(status)}</strong><br>Data Health looks for reconciliation gaps, stale checks, negative buckets, exact duplicate patterns, pending transfers and month-state problems. It never changes data automatically.</div><section class="card health-list" style="margin-top:14px">${items}</section><div class="sub" style="margin-top:12px">Last evaluated live from the records currently stored on this device.</div>`;
 }
 
-function isPurposeOnlyTransfer(t) {
-  return (
-    !!t &&
-    (t.affectsPhysicalBalance === false ||
-      t.fromAccountId === t.toAccountId ||
-      ["bucket_allocation", "reserve_allocation", "allocation_reversal", "purpose_reallocation"].includes(
-        t.transferType,
-      ))
-  );
-}
 function allocationsForTransfer(transferId) {
   return state.transferAllocations.filter((a) => a.transferId === transferId);
 }
@@ -2378,17 +2338,11 @@ function budgetCategoryRow(x, periodId) {
 
 function transactionsView() {
   const all = activityRecords();
-  const q = activitySearch.trim().toLowerCase();
-  const filtered = activityFilter === "all" ? all : all.filter((x) => x._kind === activityFilter);
-  const list = q
-    ? filtered.filter((x) =>
-        [x._title, x._detail, x._account, x._date, x.description, category(x.categoryId)?.name]
-          .filter(Boolean)
-          .join(" ")
-          .toLowerCase()
-          .includes(q),
-      )
-    : filtered;
+  const list = filterActivityRecords(all, {
+    kind: activityFilter,
+    query: activitySearch,
+    categories: state.categories,
+  });
   const active = state.projects.filter((p) => !p.deletedAt && !projectSettlement(p.id)).length;
   // v1.16: the list comes first, grouped by day with each day's totals. Cash and projects sit in one
   // compact row; the project list only shows here while a project is active.
@@ -2409,34 +2363,13 @@ function transactionsView() {
     .join("")}</div>
   ${list.length ? activityDays(list.slice(0, 150)) : `<section class="card activity-list"><div class="empty compact-empty"><strong>No matching activity.</strong><span>Try another filter or search term.</span></div></section>`}`;
 }
-// "Today", "Yesterday", or "Mon, Oct 12" (with the year when it isn't this year).
-function dayHeading(iso) {
-  if (!/^\d{4}-\d{2}-\d{2}/.test(iso || "")) return iso || "No date";
-  const t = today(),
-    y = today(new Date(Date.now() - 86400000)),
-    d = iso.slice(0, 10);
-  if (d === t) return "Today";
-  if (d === y) return "Yesterday";
-  const [yy, mm, dd] = d.split("-").map(Number),
-    opts = { weekday: "short", month: "short", day: "numeric", ...(yy !== new Date().getFullYear() ? { year: "numeric" } : {}) };
-  return new Intl.DateTimeFormat("en-US", opts).format(new Date(yy, mm - 1, dd));
-}
 function activityDays(list) {
-  const days = [];
-  list.forEach((x) => {
-    const key = String(x._date || "").slice(0, 10);
-    const last = days.at(-1);
-    if (last && last.key === key) last.items.push(x);
-    else days.push({ key, items: [x] });
-  });
-  return days
-    .map(({ key, items }) => {
-      const spent = items.filter((x) => x._kind === "expense").reduce((n, x) => n + Math.abs(Number(x._amount || 0)), 0),
-        earned = items.filter((x) => x._kind === "income").reduce((n, x) => n + Number(x._amount || 0), 0);
+  return groupActivityByDay(list)
+    .map(({ key, items, spent, earned }) => {
       const totals = [spent ? `<span>−${money(spent)}</span>` : "", earned ? `<span class="good">+${money(earned)}</span>` : ""]
         .filter(Boolean)
         .join("");
-      return `<div class="day-head"><span class="day-name">${esc(dayHeading(key))}</span><span class="day-total">${totals}</span></div><section class="card activity-list">${items.map(txLine).join("")}</section>`;
+      return `<div class="day-head"><span class="day-name">${esc(dayHeading(key, today()))}</span><span class="day-total">${totals}</span></div><section class="card activity-list">${items.map(txLine).join("")}</section>`;
     })
     .join("");
 }

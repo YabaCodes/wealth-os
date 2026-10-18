@@ -142,7 +142,7 @@ test("Export Backup downloads valid JSON and a restore preview can be safely can
   await page.locator('[data-action="settings"]').first().click();
   const [download] = await Promise.all([
     page.waitForEvent("download"),
-    page.locator('[data-action="export-backup"]').click(),
+    page.locator('[role="dialog"] [data-action="export-backup"]').click(),
   ]);
   expect(download.suggestedFilename()).toMatch(/^wealth-os-backup-\d{4}-\d{2}-\d{2}\.json$/);
   const payload = JSON.parse(await readFile(await download.path(), "utf8"));

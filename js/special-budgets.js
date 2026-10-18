@@ -29,6 +29,26 @@ export function businessTripCategoryRules() {
   ];
 }
 
+/**
+ * Choose the initial category for a Special Budget entry.
+ * New entries prefer Food when that category is configured. Existing entries
+ * keep their recorded category, and projects without Food use their first rule.
+ * This is a form-only preference: it never rewrites stored transactions.
+ */
+export function preferredProjectEntryCategoryId(rules, expense = null) {
+  const available = Array.isArray(rules) ? rules : [];
+  if (expense) {
+    return expense.categoryId ||
+      available.find((rule) => rule.name === expense.category)?.id ||
+      available[0]?.id || "other";
+  }
+  const food = available.find((rule) =>
+    String(rule.id || "").trim().toLowerCase() === "food" ||
+    String(rule.name || "").trim().toLowerCase() === "food"
+  );
+  return food?.id || available[0]?.id || "other";
+}
+
 export function categoryRuleFor(project, expense) {
   const rules = Array.isArray(project?.categoryRules)
     ? project.categoryRules

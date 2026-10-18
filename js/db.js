@@ -1,4 +1,5 @@
 import { DEFAULTS } from "./defaults.js";
+import { physicalDeltaSinceReconciliation } from "./reconciliation.js";
 
 const DB_NAME = "wealth-os-db";
 const DB_VERSION = 3;
@@ -323,52 +324,6 @@ export async function accountBalances() {
     }
   }
   return out;
-}
-
-function recordAfterReconciliation(rec, effectiveDate, stamp) {
-  const rd = String(rec?.date || ""),
-    ed = String(effectiveDate || "");
-  if (ed > rd) return true;
-  if (ed < rd) return false;
-  return String(stamp || "") > String(rec?.createdAt || "");
-}
-function physicalDeltaSinceReconciliation(accountId, rec, { incomes, expenses, transfers, adjustments }) {
-  let delta = 0;
-  for (const x of incomes) {
-    if (
-      !x.deletedAt &&
-      x.accountId === accountId &&
-      recordAfterReconciliation(rec, x.dateReceived || x.date, x.createdAt || x.updatedAt)
-    )
-      delta += Number(x.amount || 0);
-  }
-  for (const x of expenses) {
-    if (
-      !x.deletedAt &&
-      x.accountId === accountId &&
-      recordAfterReconciliation(rec, x.dateReceived || x.date, x.createdAt || x.updatedAt)
-    )
-      delta -= Number(x.amount || 0);
-  }
-  for (const t of transfers) {
-    if (t.deletedAt || t.status !== "completed") continue;
-    const purposeOnly =
-      t.affectsPhysicalBalance === false ||
-      t.fromAccountId === t.toAccountId ||
-      ["bucket_allocation", "reserve_allocation"].includes(t.transferType);
-    if (
-      purposeOnly ||
-      !recordAfterReconciliation(rec, t.completedDate || t.plannedDate, t.completedAt || t.updatedAt || t.createdAt)
-    )
-      continue;
-    if (t.toAccountId === accountId) delta += Number(t.amount || 0);
-    if (t.fromAccountId === accountId) delta -= Number(t.amount || 0);
-  }
-  for (const a of adjustments) {
-    if (!a.deletedAt && a.accountId === accountId && recordAfterReconciliation(rec, a.date, a.createdAt || a.updatedAt))
-      delta += Number(a.amount || 0);
-  }
-  return delta;
 }
 
 export async function wealthMetrics() {

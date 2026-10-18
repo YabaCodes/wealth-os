@@ -2373,7 +2373,7 @@ function transactionsView() {
   const active = state.projects.filter((p) => !p.deletedAt && !projectSettlement(p.id)).length;
   // v1.16: the list comes first, grouped by day with each day's totals. Cash and projects sit in one
   // compact row; the project list only shows here while a project is active.
-  return `<div class="activity-quick"><button class="btn secondary small" data-action="cash-withdraw">${icon("cash")}<span>Withdraw cash</span></button><button class="btn secondary small" data-action="open-projects">${icon("project")}<span>Special projects</span></button></div>
+  return `<div class="activity-quick"><button class="btn secondary small" data-action="cash-withdraw">${icon("cash")}<span>Withdraw cash</span></button><button class="btn secondary small" data-action="open-projects">${icon("project")}<span>Special budgets</span></button></div>
   ${active ? projectOverviewStrip() : ""}
   <div class="section-title"><h2>Recent activity</h2><span class="sub">${list.length} shown</span></div>
   <form id="activity-search-form" class="activity-search"><input id="activity-search-input" type="search" value="${esc(activitySearch)}" placeholder="Search description, category or account"><button class="btn ghost small" type="submit">Search</button>${activitySearch ? '<button class="btn ghost small" type="button" data-action="clear-activity-search">Clear</button>' : ""}</form>
@@ -2438,8 +2438,8 @@ function txLine(x) {
 function projectOverviewStrip() {
   const active = state.projects.filter((p) => !p.deletedAt && !projectSettlement(p.id));
   if (!active.length)
-    return `<div class="section-title"><h2>Special projects</h2><span class="sub">Separate from monthly budget</span></div><section class="card project-empty"><div><strong>No active special project.</strong><div class="sub">Create one for a reimbursable business trip or another temporary expense ledger.</div></div><button class="btn secondary" data-action="new-project">Create Project</button></section>`;
-  return `<div class="section-title"><h2>Special projects</h2><span class="sub">${active.length} active</span></div><section class="card project-strip">${active
+    return `<div class="section-title"><h2>Special budgets</h2><span class="sub">Separate from monthly budget</span></div><section class="card project-empty"><div><strong>No active special budget.</strong><div class="sub">Create a Business Trip or another temporary budget.</div></div><button class="btn secondary" data-action="new-project">Create Special Budget</button></section>`;
+  return `<div class="section-title"><h2>Special budgets</h2><span class="sub">${active.length} active</span></div><section class="card project-strip">${active
     .slice(0, 3)
     .map((p) => {
       const total = projectKnownTwd(p.id),
@@ -3045,7 +3045,7 @@ function renderModal() {
         : kind === "transfer"
           ? manualTransferForm(null)
           : expenseForm(null, null, modal.periodId || entryPeriodId());
-    const extra = `<div class="entry-extras"><button type="button" class="text-btn" data-action="cash-withdraw">Withdraw cash</button><button type="button" class="text-btn" data-action="open-projects">Special projects</button></div>`;
+    const extra = `<div class="entry-extras"><button type="button" class="text-btn" data-action="cash-withdraw">Withdraw cash</button><button type="button" class="text-btn" data-action="open-projects">Special budgets</button></div>`;
     return modalWrap("New entry", kinds + body + extra);
   }
   if (modal.type === "income-routing") return modalWrap("Route Supplemental Income", incomeRoutingView(modal.incomeId));

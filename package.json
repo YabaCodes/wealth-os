@@ -1,10 +1,10 @@
 {
   "name": "wealth-os",
-  "version": "1.21.0",
+  "version": "1.21.1",
   "private": true,
   "type": "module",
   "scripts": {
-    "check:syntax": "node --check js/app.js && node --check js/db.js && node --check js/calc.js && node --check js/defaults.js && node --check js/ui.js && node --check js/projects.js && node --check js/pacing.js && node --check js/activity.js && node --check js/special-budgets.js && node --check js/migrations.js && node --check js/period-safety.js && node --check js/settlement-storage.js && node --check js/wealth-view-model.js && node --check js/month-close.js && node --check sw.js",
+    "check:syntax": "node --check js/app.js && node --check js/db.js && node --check js/calc.js && node --check js/defaults.js && node --check js/ui.js && node --check js/projects.js && node --check js/pacing.js && node --check js/activity.js && node --check js/special-budgets.js && node --check js/migrations.js && node --check js/period-safety.js && node --check js/settlement-storage.js && node --check js/wealth-view-model.js && node --check js/month-close.js && node --check js/reconciliation.js && node --check sw.js",
     "test": "node --test tests/*.test.js",
     "check": "npm run check:syntax && npm test"
   },

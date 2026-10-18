@@ -29,7 +29,7 @@ test("flexible pace totals only cap lines and preserves the daily mark", () => {
   );
   assert.equal(result.capsBudget, 11000);
   assert.equal(result.capsSpent, 4500);
-  assert.equal(result.todaysMark, 11000 * 18 / 31);
+  assert.ok(Math.abs(result.todaysMark - (11000 * 18 / 31)) < 1e-9);
   assert.equal(result.tone, "good");
 });
 

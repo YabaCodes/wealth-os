@@ -84,6 +84,8 @@ test("v182 migration updates an open plan with zero Household but freezes closed
   await reset();
   await put("settings", { ...(await getOne("settings", "app")), dataModelVersion: 181, appVersion: "1.8.1" });
   const { closed } = await seedPeriods();
+  // Simulate an actual pre-v182 installation, not the latest clean-install defaults.
+  await clearStore("categories");
   await bulkPut("categories", [
     { id: "water", name: "Water", sort: 33, ruleType: "fixed" },
     { id: "misc", name: "Misc", sort: 34, ruleType: "cap" },
@@ -110,6 +112,7 @@ test("v182 with an existing Household category never duplicates or edits previou
   await reset();
   await put("settings", { ...(await getOne("settings", "app")), dataModelVersion: 181 });
   await seedPeriods();
+  await clearStore("categories");
   await put("categories", { id: "custom-household", name: "HOUSEHOLD", ruleType: "cap", defaultAmount: 700 });
   const before = (await exportData()).data;
   await migrateV182();
@@ -153,7 +156,8 @@ test("closed-month period guard rejects linked changes, while reopened and unlin
   assert.doesNotThrow(() => assertPeriodEditable(periods, MONTH_OPEN));
   assert.doesNotThrow(() => assertPeriodEditable(periods, null));
   await put("periods", { ...(await getOne("periods", MONTH_CLOSED)), state: "reopened" });
-  assert.doesNotThrow(() => assertPeriodEditable(await getAll("periods"), MONTH_CLOSED));
+  const reopened = await getAll("periods");
+  assert.doesNotThrow(() => assertPeriodEditable(reopened, MONTH_CLOSED));
 });
 
 test("budget sync changes only the open plan and leaves completed history and closed snapshots byte-equivalent", async () => {

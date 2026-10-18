@@ -152,6 +152,47 @@ export function projectCategoryBreakdown(project, expenses, treatment) {
   return [...totals.values()];
 }
 
+
+/**
+ * Composition-only presentation data. Exact claims use the sum of confirmed category
+ * expenses (100% of claims); flexible spending uses the fixed shared allowance as
+ * capacity and adds the unspent remainder. If spending exceeds the allowance the bar
+ * is normalized to actual spend, while the overage remains available separately.
+ *
+ * Pending refundable holds are excluded upstream by projectCategoryBreakdown.
+ */
+export function projectCompositionBreakdown(rows, allowance = null) {
+  const used = (rows || [])
+    .filter((row) => Number.isFinite(Number(row?.amount)) && Number(row.amount) > 0)
+    .map((row) => ({ ...row, amount: Number(row.amount) }));
+  const spent = used.reduce((sum, row) => sum + row.amount, 0);
+  const isAllowance = typeof allowance === "number" && Number.isFinite(allowance) && allowance >= 0;
+  const cap = isAllowance ? allowance : null;
+  const remaining = isAllowance ? Math.max(0, cap - spent) : 0;
+  const over = isAllowance ? Math.max(0, spent - cap) : 0;
+  const visualTotal = isAllowance ? Math.max(cap, spent) : spent;
+  const segments = used.map((row) => ({
+    ...row,
+    barPct: visualTotal > 0 ? (row.amount / visualTotal) * 100 : 0,
+    claimPct: spent > 0 ? (row.amount / spent) * 100 : 0,
+    allowancePct: isAllowance && cap > 0 ? (row.amount / cap) * 100 : null,
+    isRemaining: false,
+  }));
+  if (remaining > 0) {
+    segments.push({
+      id: "__remaining",
+      name: "Remaining",
+      amount: remaining,
+      count: 0,
+      barPct: visualTotal > 0 ? (remaining / visualTotal) * 100 : 0,
+      claimPct: 0,
+      allowancePct: cap > 0 ? (remaining / cap) * 100 : 0,
+      isRemaining: true,
+    });
+  }
+  return { spent, cap, remaining, over, visualTotal, segments };
+}
+
 export function projectBudgetSummary(project, expenses, currentDate) {
   const rows = (expenses || []).filter((x) => !x.deletedAt);
   let exact = 0, flexible = 0, tracking = 0, depositsPending = 0, depositsPendingTwd = 0;

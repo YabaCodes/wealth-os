@@ -4468,58 +4468,209 @@ async function saveProject(form) {
     id = fd.get("id") || uid("proj"),
     existing = project(id),
     stamp = new Date().toISOString(),
-    title = String(fd.get("title") || "").trim();
-  if (!title) throw new Error("Enter a project title.");
-  if (existing && projectSettlement(id)) throw new Error("Undo the settlement before editing this project.");
+    title = String(fd.get("title") || "").trim(),
+    type = form.dataset.type || existing?.type || "custom",
+    converting = form.dataset.convert === "true";
+  if (!title) throw new Error("Enter a Special Budget name.");
+  if (existing && projectSettlement(id)) throw new Error("Undo the settlement before editing this Special Budget.");
+
+  const startDate = fd.get("startDate") || null,
+    endDate = fd.get("endDate") || null,
+    fundingMode = fd.get("fundingMode") || "reimbursement",
+    wallet = Math.max(0, Number(fd.get("tripWalletAllocatedTwd") || 0));
+  if (startDate && endDate && String(endDate) < String(startDate)) throw new Error("Return/end date cannot be before the start date.");
+  if (fundingMode === "trip_wallet" && !(wallet > 0)) throw new Error("Enter the amount to reserve in the Trip Wallet.");
+
+  let categoryRules = existing?.categoryRules || [];
   const obj = {
     ...(existing || {}),
     id,
+    type,
     title,
-    startDate: fd.get("startDate") || null,
-    endDate: fd.get("endDate") || null,
-    defaultCurrency: fd.get("defaultCurrency") || "EUR",
+    startDate,
+    endDate,
+    defaultCurrency: fd.get("defaultCurrency") || existing?.defaultCurrency || "EUR",
+    fundingMode,
+    tripWalletAllocatedTwd: fundingMode === "trip_wallet" ? wallet : 0,
+    tripWalletSourceAccountId: fundingMode === "trip_wallet" ? "ctbc" : null,
     status: "active",
     createdAt: existing?.createdAt || stamp,
     updatedAt: stamp,
   };
+
+  if (type === "business_trip") {
+    const destination = String(fd.get("destination") || "").trim(),
+      purpose = String(fd.get("purpose") || "").trim(),
+      dailyAllowanceTwd = Number(fd.get("dailyAllowanceTwd")),
+      defaultCurrency = String(fd.get("defaultCurrency") || ""),
+      mainPaymentMethod = String(fd.get("mainPaymentMethod") || ""),
+      reimbursementAccountId = String(fd.get("reimbursementAccountId") || "");
+    if (!destination) throw new Error("Enter the trip destination.");
+    if (!purpose) throw new Error("Enter the business purpose.");
+    if (!startDate || !endDate) throw new Error("Enter both departure and return dates.");
+    if (!(allowanceDays(startDate, endDate) > 0)) throw new Error("Enter a valid trip date range.");
+    if (!(dailyAllowanceTwd > 0)) throw new Error("Enter the daily allowance.");
+    if (!defaultCurrency) throw new Error("Select the default trip currency.");
+    if (!mainPaymentMethod) throw new Error("Select the main payment method.");
+    if (!reimbursementAccountId) throw new Error("Select where reimbursement will be received.");
+    categoryRules = businessTripCategoryRules();
+    Object.assign(obj, {
+      destination,
+      purpose,
+      dailyAllowanceTwd,
+      allowanceRule: "departure_return_combined",
+      categoryRules,
+      defaultCurrency,
+      mainPaymentMethod,
+      reimbursementAccountId,
+    });
+  } else {
+    categoryRules = parseCustomCategoryRules({
+      exact: fd.get("exactCategories"),
+      flexible: fd.get("flexibleCategories"),
+      tracking: fd.get("trackingCategories"),
+    });
+    if (!categoryRules.length) {
+      categoryRules = PROJECT_CATEGORIES.map((name) => ({
+        id: String(name).toLowerCase().replace(/[^a-z0-9]+/g, "_"),
+        name,
+        treatment: "tracking",
+      }));
+    }
+    Object.assign(obj, {
+      categoryRules,
+      flexibleCapTwd: Math.max(0, Number(fd.get("flexibleCapTwd") || 0)),
+      destination: null,
+      purpose: null,
+      dailyAllowanceTwd: null,
+      allowanceRule: null,
+      mainPaymentMethod: existing?.mainPaymentMethod || "esun_card",
+      reimbursementAccountId: existing?.reimbursementAccountId || "ctbc",
+    });
+  }
+
   await put("projects", obj);
+
+  if (converting && type === "business_trip") {
+    for (const old of state.projectExpenses.filter((x) => x.projectId === id && !x.deletedAt)) {
+      const mapped = mapLegacyBusinessExpense(old);
+      await put("projectExpenses", {
+        ...old,
+        ...mapped,
+        updatedAt: stamp,
+      });
+    }
+  }
+
   modal = { type: "project-detail", id };
   await load();
+  toast(converting ? "Converted to Business Trip" : existing ? "Special Budget updated" : "Special Budget created", "good");
 }
+
 async function saveProjectExpense(form) {
   const fd = new FormData(form),
     projectId = form.dataset.project,
     p = project(projectId);
-  if (!p) throw new Error("Project not found.");
-  if (projectSettlement(projectId)) throw new Error("Undo the settlement before editing project expenses.");
+  if (!p) throw new Error("Special Budget not found.");
+  if (projectSettlement(projectId)) throw new Error("Undo the settlement before editing Special Budget entries.");
+
   const originalAmount = Number(fd.get("originalAmount")),
-    currency = fd.get("currency") || p.defaultCurrency || "EUR";
-  if (!(originalAmount > 0)) throw new Error("Enter an expense amount greater than zero.");
+    currency = fd.get("currency") || p.defaultCurrency || "EUR",
+    rules = projectCategoryRules(p),
+    categoryId = String(fd.get("categoryId") || ""),
+    rule = rules.find((x) => x.id === categoryId) || rules[0],
+    recordType = fd.get("recordType") === "refundable_deposit" ? "refundable_deposit" : "expense";
+  if (!(originalAmount > 0)) throw new Error("Enter an amount greater than zero.");
+  if (!rule) throw new Error("Select an expense category.");
+
   let raw = String(fd.get("twdAmount") ?? "").trim(),
     twdAmount = raw === "" ? null : Number(raw);
   if (currency === "TWD" && (twdAmount === null || !Number.isFinite(twdAmount))) twdAmount = originalAmount;
   if (twdAmount !== null && (!(twdAmount > 0) || !Number.isFinite(twdAmount)))
-    throw new Error("Enter a valid NTD amount or leave it blank while traveling.");
+    throw new Error("Enter a valid exact NTD amount or leave it blank while traveling.");
+
   const id = fd.get("id") || uid("pexp"),
     old = state.projectExpenses.find((x) => x.id === id),
-    stamp = new Date().toISOString();
-  await put("projectExpenses", {
+    stamp = new Date().toISOString(),
+    wasDeposit = isRefundableDeposit(old);
+  const obj = {
     ...(old || {}),
     id,
     projectId,
     date: fd.get("date") || today(),
-    category: fd.get("category") || "Other",
+    categoryId: rule.id,
+    category: rule.name,
+    reimbursementType: rule.treatment,
+    recordType,
     description: String(fd.get("description") || "").trim(),
     originalAmount,
     currency,
     twdAmount,
-    paymentMethod: fd.get("paymentMethod") || "esun_card",
+    paymentMethod: fd.get("paymentMethod") || p.mainPaymentMethod || "esun_card",
     createdAt: old?.createdAt || stamp,
+    updatedAt: stamp,
+  };
+  if (recordType === "refundable_deposit") {
+    if (!wasDeposit) {
+      obj.depositStatus = "pending";
+      obj.retainedTwd = null;
+      obj.retainedOriginalAmount = null;
+    }
+  } else {
+    obj.depositStatus = null;
+    obj.retainedTwd = null;
+    obj.retainedOriginalAmount = null;
+  }
+  await put("projectExpenses", obj);
+  modal = { type: "project-detail", id: projectId };
+  await load();
+}
+
+async function saveProjectDeposit(form) {
+  const fd = new FormData(form),
+    projectId = form.dataset.project,
+    id = form.dataset.id,
+    p = project(projectId),
+    x = state.projectExpenses.find((row) => row.id === id && !row.deletedAt);
+  if (!p || !x || !isRefundableDeposit(x)) throw new Error("Refundable deposit not found.");
+  if (projectSettlement(projectId)) throw new Error("Undo the settlement before changing deposit status.");
+
+  const status = String(fd.get("depositStatus") || "pending"),
+    rules = projectCategoryRules(p),
+    rule = rules.find((r) => r.id === fd.get("categoryId")) || categoryRuleFor(p, x),
+    stamp = new Date().toISOString();
+  let retainedTwd = null,
+    retainedOriginalAmount = null;
+  if (["partial", "retained"].includes(status)) {
+    retainedTwd = Number(fd.get("retainedTwd"));
+    if (!(retainedTwd > 0) || !Number.isFinite(retainedTwd))
+      throw new Error("Enter the NTD amount that was retained.");
+    if (Number(x.twdAmount) > 0 && retainedTwd > Number(x.twdAmount) + 0.5)
+      throw new Error("The retained amount cannot exceed the original deposit hold.");
+    if (!rule) throw new Error("Choose how the retained amount should be classified.");
+    retainedOriginalAmount =
+      Number(x.twdAmount) > 0
+        ? Number(x.originalAmount || 0) * (retainedTwd / Number(x.twdAmount))
+        : x.currency === "TWD"
+          ? retainedTwd
+          : null;
+  }
+  await put("projectExpenses", {
+    ...x,
+    depositStatus: status,
+    retainedTwd: status === "refunded" || status === "pending" ? null : retainedTwd,
+    retainedOriginalAmount: status === "refunded" || status === "pending" ? null : retainedOriginalAmount,
+    ...(rule && ["partial", "retained"].includes(status)
+      ? { categoryId: rule.id, category: rule.name, reimbursementType: rule.treatment }
+      : {}),
+    depositResolvedAt: ["refunded", "partial", "retained"].includes(status) ? stamp : null,
     updatedAt: stamp,
   });
   modal = { type: "project-detail", id: projectId };
   await load();
+  toast(status === "refunded" ? "Deposit marked refunded" : status === "pending" ? "Deposit remains pending" : "Deposit outcome saved", "good");
 }
+
 async function deleteProjectExpense(projectId, id) {
   if (projectSettlement(projectId)) throw new Error("Undo the settlement before deleting project expenses.");
   const x = state.projectExpenses.find((e) => e.id === id && !e.deletedAt);

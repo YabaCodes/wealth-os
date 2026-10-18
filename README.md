@@ -1,4 +1,15 @@
-# Wealth OS — v1.20.3
+# Wealth OS — v1.21.0
+
+## v1.21.0 — Month-Close & Reconciliation Assurance
+
+- **Close/reopen persistence is atomic:** period state and month-end snapshot are now committed together in a single IndexedDB transaction, preventing half-closed months after storage errors. Reopening likewise updates the period and its snapshot status in one transaction while retaining the audited financial snapshot.
+- **Duplicate and stale closes rejected:** a previously closed month cannot be silently closed again, and a funding month changed since the close preview requires a refreshed close confirmation. Intentional reopening allows a later corrected close and new replacement snapshot.
+- **Original accounting and UI behavior preserved:** all existing close-readiness blockers, bank-check requirements, sweep, tithe, payday, reserve funding, and optional unpaid fixed-bill confirmation remain unchanged. Their readiness gate is now shared by the UI and tests.
+- **Synthetic integration tests:** validate readiness blockers, committed snapshots, concurrent duplicate closes, stale forms, fail-atomic rollback, reopen/reclose, closed-month budget sync protection, and physical-vs-purpose transfers including Cash Wallet.
+- No new financial calculations, schema migrations, or personal data changes; only save/reopen transaction boundaries improve. **Data model stays 190 and IndexedDB schema stays 3.** New module is precached for offline PWA support.
+- CI must pass before PR merge and installed iPhone PWA acceptance is required. Do not close/reopen a real funding month merely to test this release.
+
+
 
 ## v1.20.3 — Wealth and Goals view-model modularization
 

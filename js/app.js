@@ -3103,22 +3103,27 @@ function renderModal() {
       modal.mode === "deposit" ? "Deposit Cash" : "Withdraw Cash",
       cashTransferForm(modal.mode || "withdrawal"),
     );
-  if (modal.type === "projects-list") return modalWrap("Special Projects", projectsListView());
+  if (modal.type === "projects-list") return modalWrap("Special Budgets", projectsListView());
+  if (modal.type === "project-type") return modalWrap("Create Special Budget", specialBudgetTypeView());
   if (modal.type === "project-form")
     return modalWrap(
-      modal.id ? "Edit Project" : "Create Project",
-      projectFormView(modal.id ? project(modal.id) : null),
+      modal.id ? "Edit Special Budget" : modal.budgetType === "business_trip" ? "Create Business Trip" : "Create Custom Budget",
+      projectFormView(modal.id ? project(modal.id) : null, modal.budgetType || null, false),
     );
+  if (modal.type === "project-convert-business")
+    return modalWrap("Convert to Business Trip", projectFormView(project(modal.id), "business_trip", true));
   if (modal.type === "project-detail")
-    return modalWrap(project(modal.id)?.title || "Project", projectDetailView(modal.id));
+    return modalWrap(project(modal.id)?.title || "Special Budget", projectDetailView(modal.id));
   if (modal.type === "project-expense")
     return modalWrap(
-      modal.expenseId ? "Edit Project Expense" : "Add Project Expense",
+      modal.expenseId ? "Edit Special Budget Entry" : "Add Special Budget Entry",
       projectExpenseFormView(
         modal.projectId,
         modal.expenseId ? state.projectExpenses.find((x) => x.id === modal.expenseId && !x.deletedAt) : null,
       ),
     );
+  if (modal.type === "project-deposit")
+    return modalWrap("Resolve Refundable Deposit", projectDepositResolveView(modal.projectId, modal.expenseId));
   if (modal.type === "project-settle")
     return modalWrap("Settle Reimbursement", projectSettlementFormView(modal.projectId));
   if (modal.type === "row-actions") {

@@ -153,14 +153,22 @@ export async function importData(payload) {
   const db = await openDb();
   await new Promise((resolve, reject) => {
     const tx = db.transaction(STORES, "readwrite");
-    for (const s of STORES) {
-      const os = tx.objectStore(s);
-      os.clear();
-      for (const row of payload.data[s] || []) os.put(row);
-    }
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
     tx.onabort = () => reject(tx.error || new Error("Restore was cancelled; nothing was changed."));
+    try {
+      for (const s of STORES) {
+        const os = tx.objectStore(s);
+        os.clear();
+        for (const row of payload.data[s] || []) os.put(row);
+      }
+    } catch (error) {
+      // Some damaged (or programmatically supplied) records pass structural validation
+      // but throw synchronously during IDB put(), e.g. an uncloneable value. Without an
+      // explicit abort, queued clear() calls could still commit despite the rejected restore.
+      try { tx.abort(); } catch {}
+      reject(error);
+    }
   });
 }
 

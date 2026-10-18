@@ -84,6 +84,7 @@ import {
   goalPaceTextFor,
   wealthAccountLabels,
 } from "./wealth-view-model.js";
+import { assessMonthClose, closeMonthAtomic, reopenMonthAtomic } from "./month-close.js";
 import { migrateV182, migrateV190 } from "./migrations.js";
 import { isClosedPeriod as periodIsClosed, assertPeriodEditable as guardPeriodEditable, syncOpenMonthPlanPersisted } from "./period-safety.js";
 
@@ -99,7 +100,7 @@ let modalDirty = false;
 let homeWeekStart = null,
   homeDay = null;
 let reachedGoals = null; // goals at target after the last load (null until the first load)
-const APP_VERSION = "1.20.3";
+const APP_VERSION = "1.21.0";
 const THEME_KEY = "wealthOSTheme";
 // Theme: 'system' follows the phone's light/dark setting. A copy is kept in localStorage so
 // index.html can apply it before the first paint (IndexedDB is too slow for that).
@@ -874,36 +875,10 @@ function monthCloseStatus(periodId) {
   const titheAllocated = completedTithe(periodId),
     titheExpected = expectedTithe(periodId);
   const payday = paydayRequirements(periodId);
-  const fundingOk = reserveFunded + 0.5 >= plan.sinking && payday.totalOutstanding <= 0.5;
-  const bankOk = ct.verified && Math.abs(ct.difference) < 0.5 && es.verified && es.bankOk && es.allocationOk;
-  const hardBlockers = [];
-  if (pending.length)
-    hardBlockers.push(`${pending.length} planned transfer${pending.length === 1 ? "" : "s"} still pending`);
-  if (sweep.available > 0.5) hardBlockers.push(`${money(sweep.available)} still available to sweep`);
-  if (sweep.overSwept > 0.5)
-    hardBlockers.push(`${money(sweep.overSwept)} was swept beyond the current available amount`);
-  if (!fundingOk) hardBlockers.push("payday allocations are incomplete");
-  if (titheAllocated + 0.5 < titheExpected)
-    hardBlockers.push(`${money(titheExpected - titheAllocated)} of tithe is not yet allocated`);
-  if (!bankOk) hardBlockers.push("bank reconciliation or E.SUN purpose allocation is incomplete");
-  return {
-    p,
-    plan,
-    totals,
-    sweep,
-    pending,
-    missingFixed,
-    ct,
-    es,
-    reserveFunded,
-    titheAllocated,
-    titheExpected,
-    payday,
-    fundingOk,
-    bankOk,
-    hardBlockers,
-    ready: hardBlockers.length === 0,
-  };
+  return assessMonthClose({
+    p, plan, totals, sweep, pending, missingFixed, ct, es,
+    reserveFunded, titheAllocated, titheExpected, payday,
+  });
 }
 function latestInvestmentTwd() {
   const usd = Number(state.accountBalances?.ibkr || 0);
@@ -4359,8 +4334,7 @@ async function closePeriod() {
       .reduce((sum, i) => sum + Number(i.amount || 0), 0),
     regularIncome = periodRegularIncome(p.id),
     health = dataHealthReport();
-  await put("periods", { ...p, state: "closed", closedAt: stamp, updatedAt: stamp, sweepRules: c.sweep.rules });
-  await put("monthlyCloses", {
+  const snapshot = {
     id: p.id,
     budgetPeriodId: p.id,
     status: "closed",
@@ -4400,17 +4374,14 @@ async function closePeriod() {
     ctbcActual: c.ct.actual,
     esunActual: c.es.actual,
     missingFixedIds: c.missingFixed.map((x) => x.id),
-  });
+  };  await closeMonthAtomic({ period: p, snapshot, stamp });
   modal = { type: "month-summary", periodId: p.id, emergencyFrom };
   await load();
 }
 async function reopenPeriod(periodId) {
   const p = state.periods.find((x) => x.id === periodId);
   if (!p || p.state !== "closed") return;
-  const stamp = new Date().toISOString();
-  await put("periods", { ...p, state: "reopened", reopenedAt: stamp, updatedAt: stamp });
-  const rec = state.monthlyCloses.find((x) => x.budgetPeriodId === periodId || x.id === periodId);
-  if (rec) await put("monthlyCloses", { ...rec, status: "reopened", reopenedAt: stamp });
+  await reopenMonthAtomic(periodId, new Date().toISOString());
   selectedPeriodId = periodId;
   modal = null;
   await load();

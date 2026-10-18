@@ -83,6 +83,7 @@ import {
   dateAfterMonthsFor,
   goalPaceTextFor,
   wealthAccountLabels,
+  goalWhatIfFor,
 } from "./wealth-view-model.js";
 import { assessMonthClose, closeMonthAtomic, reopenMonthAtomic } from "./month-close.js";
 import {
@@ -105,7 +106,7 @@ let modalDirty = false;
 let homeWeekStart = null,
   homeDay = null;
 let reachedGoals = null; // goals at target after the last load (null until the first load)
-const APP_VERSION = "1.21.2";
+const APP_VERSION = "1.22.0";
 const THEME_KEY = "wealthOSTheme";
 // Theme: 'system' follows the phone's light/dark setting. A copy is kept in localStorage so
 // index.html can apply it before the first paint (IndexedDB is too slow for that).
@@ -2646,6 +2647,67 @@ function projectSettlementFormView(projectId) {
   </form>`;
 }
 
+function goalWhatIfView() {
+  const available = [...state.goals]
+    .filter((g) => g.status !== "archived" && g.bucketId)
+    .sort((a, b) => a.priority - b.priority);
+  if (!available.length) return "";
+  const chosen = available.find((g) => goalStatus(g).key === "active") || available[0];
+  return `<section class="card goal-scenario-card" id="goal-scenario-planner">
+    <div class="split"><div><div class="metric-label">Goal funding scenario</div><h2>What if I save more?</h2></div><span class="tag">Preview only</span></div>
+    <p class="sub">See how an additional monthly contribution <strong>to one goal</strong> could change its completion date.</p>
+    <div class="goal-scenario-inputs">
+      <div class="field"><label for="goal-scenario-select">Choose a goal</label><select id="goal-scenario-select">${available.map((g) => `<option value="${esc(g.id)}" ${g.id === chosen.id ? "selected" : ""}>${esc(g.name)}</option>`).join("")}</select></div>
+      <div class="field"><label for="goal-scenario-extra">Extra monthly contribution (NT$)</label><input id="goal-scenario-extra" type="number" inputmode="numeric" min="0" max="1000000" step="1000" value="0"></div>
+    </div>
+    <div id="goal-scenario-result" aria-live="polite"></div>
+    <p class="sub goal-scenario-disclaimer">Illustrative only: uses recorded goal allocations from the last three funding months, assumes a fixed monthly amount and ignores investment returns. Actual routing rules and prerequisites still apply. No money is moved and nothing is saved.</p>
+  </section>`;
+}
+
+function updateGoalWhatIfPreview() {
+  const panel = document.querySelector("#goal-scenario-result");
+  const id = document.querySelector("#goal-scenario-select")?.value;
+  const input = document.querySelector("#goal-scenario-extra");
+  const chosen = state.goals.find((g) => g.id === id);
+  if (!panel || !input || !chosen) return;
+  const scenario = goalWhatIfFor({
+    goal: chosen,
+    goals: state.goals,
+    bucketBalances: state.bucketBalances,
+    recentHistory: recentHistory(3),
+    completedAllocation: completedAllocationToBucket,
+    extraMonthly: input.value,
+  });
+  let message = "";
+  if (scenario.status === "complete") {
+    message = "This goal has reached its target. No additional contributions are needed for this target.";
+  } else if (scenario.status === "paused") {
+    message = "This goal is paused. Activate it before relying on a funding projection.";
+  } else if (scenario.status === "waiting") {
+    const prerequisite = state.goals.find((g) => g.id === chosen.prerequisiteGoalId);
+    message = `This goal is waiting for ${esc(prerequisite?.name || "its prerequisite")} to reach ${privateMoney(chosen.prerequisiteAmount || 0)}. Dates cannot be projected until it unlocks.`;
+  } else if (!(scenario.target > 0)) {
+    message = "Set a target amount on this goal before projecting a completion date.";
+  } else if (scenario.scenarioMonths === null) {
+    message = "No recorded monthly contributions to this goal yet. Enter an extra monthly contribution to explore a date.";
+  } else if (scenario.baseMonths === null) {
+    message = "No recorded funding pace yet; the illustrated date depends entirely on the extra monthly amount entered.";
+  } else if (scenario.monthsSaved > 0) {
+    message = `Approximately ${scenario.monthsSaved} month${scenario.monthsSaved === 1 ? "" : "s"} sooner than the recorded pace, if this additional amount is contributed every month.`;
+  } else {
+    message = "Both scenarios currently point to the same estimated completion month.";
+  }
+  panel.innerHTML = `<div class="goal-scenario-results">
+    <div><div class="metric-label">Remaining to target</div><strong>${privateMoney(scenario.remaining)}</strong></div>
+    <div><div class="metric-label">Recorded monthly pace</div><strong>${privateMoney(scenario.baseMonthly)}</strong></div>
+    <div><div class="metric-label">Illustrated monthly pace</div><strong>${privateMoney(scenario.scenarioMonthly)}</strong></div>
+    <div><div class="metric-label">Current pace ETA</div><strong>${esc(scenario.baseDate || "No estimate")}</strong></div>
+    <div class="goal-scenario-highlight"><div class="metric-label">With additional contribution</div><strong>${esc(scenario.scenarioDate || "No estimate")}</strong></div>
+  </div><div class="sub goal-scenario-message">${message}</div>`;
+  applyPrivacyMask();
+}
+
 function goalsView() {
   const emergency = goal("goal-emergency"),
     travel = goal("goal-home-trip");
@@ -2678,6 +2740,7 @@ function goalsView() {
     .join("");
   return `<div class="sub page-sub">Your wealth priorities, pace and planned-use funds.</div>
   <section class="card strategy-card" style="margin-top:14px"><div class="split"><div><div class="metric-label">Current routing strategy</div><strong>${esc(active?.name || "Core cash goals complete")}</strong></div><div class="right"><strong>${privateMoney(pace)}</strong><div class="sub">recent monthly core-wealth pace</div></div></div><div class="strategy-steps"><span class="${emergencyBal < 200000 ? "active-step" : ""}">1. Emergency to ${money(200000)}</span><span class="${emergencyBal >= 200000 && travelBal < (travel?.targetAmount || 100000) ? "active-step" : ""}">2. Home Travel ${money(travel?.monthlyTarget || 10000)}/mo + continue Emergency</span><span class="${emergencyBal >= (emergency?.targetAmount || 300000) ? "active-step" : ""}">3. After Emergency target, remaining surplus becomes investable</span></div></section>
+  ${goalWhatIfView()}
   <div class="grid g2 goals-grid" style="margin-top:14px">${cards}</div>`;
 }
 
@@ -5692,6 +5755,13 @@ function bind() {
       e.preventDefault();
       saveEsunReallocation(erl).catch(showError);
     };
+  const goalScenarioSelect = document.querySelector("#goal-scenario-select");
+  const goalScenarioExtra = document.querySelector("#goal-scenario-extra");
+  if (goalScenarioSelect && goalScenarioExtra) {
+    goalScenarioSelect.onchange = updateGoalWhatIfPreview;
+    goalScenarioExtra.oninput = updateGoalWhatIfPreview;
+    updateGoalWhatIfPreview();
+  }
   const gef = document.querySelector("#goal-edit-form");
   if (gef)
     gef.onsubmit = (e) => {

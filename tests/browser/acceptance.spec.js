@@ -8,7 +8,7 @@ import {
 test("navigation, Settings release identity and actual expense form persist through reload", async ({ page }) => {
   await seedSyntheticBrowser(page);
   await page.locator('[data-action="settings"]').first().click();
-  await expect(page.locator('[role="dialog"]')).toContainText("Wealth OS v1.21.2");
+  await expect(page.locator('[role="dialog"]')).toContainText("Wealth OS v1.22.0");
   await expect(page.locator('[role="dialog"]')).toContainText("Data model 190");
   await page.locator('[data-action="close-modal"]').click();
 
@@ -163,7 +163,8 @@ test("Export Backup downloads valid JSON and a restore preview can be safely can
 
 test("Goals what-if preview responds to inputs and never writes financial records", async ({ page }) => {
   await seedSyntheticBrowser(page);
-  await page.locator('nav [data-tab="goals"]').click();
+  await page.locator('nav [data-tab="wealth"]').click();
+  await page.locator('.wealth-switch [data-tab="goals"]').click();
   await expect(page.locator("#goal-scenario-planner")).toBeVisible();
   await expect(page.locator("#goal-scenario-select")).toHaveValue("goal-emergency");
   await expect(page.locator("#goal-scenario-result")).toContainText("No recorded monthly contributions");
@@ -186,7 +187,8 @@ test("Goals what-if preview responds to inputs and never writes financial record
   expect(after.data).toEqual(before.data);
 
   await page.reload();
-  await page.locator('nav [data-tab="goals"]').click();
+  await page.locator('nav [data-tab="wealth"]').click();
+  await page.locator('.wealth-switch [data-tab="goals"]').click();
   await expect(page.locator("#goal-scenario-extra")).toHaveValue("0");
 });
 
@@ -209,7 +211,8 @@ test("Goals what-if uses completed allocations and restores private-money maskin
     });
   });
   await page.reload();
-  await page.locator('nav [data-tab="goals"]').click();
+  await page.locator('nav [data-tab="wealth"]').click();
+  await page.locator('.wealth-switch [data-tab="goals"]').click();
   await expect(page.locator("#goal-scenario-result")).toContainText("NT$6,000");
   await page.locator("#goal-scenario-extra").fill("10000");
   await expect(page.locator("#goal-scenario-result")).toContainText("NT$16,000");

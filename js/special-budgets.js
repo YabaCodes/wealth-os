@@ -122,6 +122,36 @@ export function unresolvedDeposits(expenses) {
   return (expenses || []).filter((x) => !x.deletedAt && isRefundableDeposit(x) && !depositResolved(x));
 }
 
+export function projectCategoryBreakdown(project, expenses, treatment) {
+  const rules = (Array.isArray(project?.categoryRules) && project.categoryRules.length
+    ? project.categoryRules
+    : project?.type === "business_trip"
+      ? businessTripCategoryRules()
+      : []
+  ).filter((rule) => rule.treatment === treatment);
+
+  const totals = new Map(rules.map((rule) => [rule.id, { ...rule, amount: 0, count: 0 }]));
+  for (const expense of expenses || []) {
+    if (!expense || expense.deletedAt) continue;
+    if (isRefundableDeposit(expense) && !depositResolved(expense)) continue;
+    const rule = categoryRuleFor(project, expense);
+    const rowTreatment = expense.reimbursementType || rule?.treatment || "tracking";
+    if (rowTreatment !== treatment) continue;
+    const id = rule?.id || expense.categoryId || String(expense.category || "other").toLowerCase().replace(/[^a-z0-9]+/g, "_");
+    const current = totals.get(id) || {
+      id,
+      name: rule?.name || expense.category || "Other",
+      treatment,
+      amount: 0,
+      count: 0,
+    };
+    current.amount += effectiveTwd(expense);
+    current.count += 1;
+    totals.set(id, current);
+  }
+  return [...totals.values()];
+}
+
 export function projectBudgetSummary(project, expenses, currentDate) {
   const rows = (expenses || []).filter((x) => !x.deletedAt);
   let exact = 0, flexible = 0, tracking = 0, depositsPending = 0, depositsPendingTwd = 0;

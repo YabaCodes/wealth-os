@@ -22,15 +22,21 @@ Completed:
 Completed: responsive reimbursement actions, separate exact/flexible trackers, Activity last.
 
 ### v1.19.2 — Composition tracker polish
-PR prepared for review; physical iPhone acceptance pending:
+Completed and accepted on iPhone:
 - Move Add Entry to the top of Business Trip detail.
 - Exact reimbursement: 100% stacked claims composition; no remaining-spend impression.
 - Flexible allowance: category composition + remaining allowance + trip-time marker.
 - Preserve all persisted financial data and settlement rules.
 
-## Resume after v1.19.2 physical acceptance
+### v1.19.3 — Entry form default category
+PR prepared; physical iPhone acceptance pending:
+- New Business Trip and Special Budget entries prefer Food when the category exists.
+- Editing an existing expense preserves its saved category.
+- No data model or accounting changes.
 
-Once v1.19 is physically accepted, return to the controlled hardening work that was underway before the feature request:
+## Resume after v1.19.3 physical acceptance
+
+After v1.19.3 is physically accepted, return to the controlled hardening work that was underway before the feature request:
 
 1. Continue low-risk modularization with Wealth/goal presentation and read-side helpers.
 2. Add persistence/integration test infrastructure before refactoring IndexedDB-heavy code.

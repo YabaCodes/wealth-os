@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   allowanceDays,
+  businessTripCategoryRules,
   totalFlexibleAllowance,
   elapsedAllowanceDays,
   projectBudgetSummary,

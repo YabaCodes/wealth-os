@@ -37,4 +37,6 @@ The Node test suite covers pure accounting calculations, Special Budget / Busine
 
 **v1.20.2 adds atomic Special Budget settlement/undo transactions** with a fresh-IDB check for stale expenses, unresolved deposits, missing exact NTD values, closed funding periods and prior settlement. Concurrent settlement attempts cannot generate duplicate incomes or settled records. A failed write rolls back all generated records together, and completed routing transfers still prevent unsafe undo. Isolated IndexedDB tests cover success and rejection cases.
 
+**v1.20.3 extracts read-only Wealth/Goals view models** from the UI controller and tests goal progression, prerequisites, contribution pacing, account reconciliation labels, E.SUN virtual allocation states and operating cash after Trip Wallet reserves. Calculations remain side-effect-free, while the UI uses the shared helpers. No physical-bank accounting or database writes were changed.
+
 **Remaining gaps:** end-to-end controller/UI testing of older legacy migrations, month-close/reopen workflows and complete user-interaction tests. Simulated IndexedDB tests do not prove real-device storage durability or replace iPhone physical acceptance.

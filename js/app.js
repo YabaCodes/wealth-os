@@ -2448,71 +2448,263 @@ function projectOverviewStrip() {
     })
     .join("")}</section>`;
 }
+function specialBudgetTypeView() {
+  return `<div class="sub">Choose the structure that matches what you are tracking.</div>
+  <div class="grid g2" style="margin-top:14px">
+    <button class="card choice-card" data-action="new-business-trip" type="button"><strong>Business Trip</strong><span class="sub">Exact reimbursements + fixed daily allowance + deposits + trip pacing.</span></button>
+    <button class="card choice-card" data-action="new-custom-budget" type="button"><strong>Custom Budget</strong><span class="sub">Define your own dates, categories, reimbursement rules and optional cap.</span></button>
+  </div>`;
+}
+
+function projectCategoryRules(p) {
+  if (Array.isArray(p?.categoryRules) && p.categoryRules.length) return p.categoryRules;
+  if (p?.type === "business_trip") return businessTripCategoryRules();
+  return PROJECT_CATEGORIES.map((name) => ({
+    id: String(name).toLowerCase().replace(/[^a-z0-9]+/g, "_"),
+    name,
+    treatment: "tracking",
+  }));
+}
+
+function projectPaymentLabel(method) {
+  if (method === "esun_card") return "E.SUN Credit Card";
+  if (method === "cash") return "Cash";
+  if (method === "ctbc") return "CTBC Operating";
+  if (method === "trip_wallet") return "Trip Wallet";
+  return "Other";
+}
+
+function projectPaymentOptions(selected = "") {
+  return [
+    ["esun_card", "E.SUN Credit Card"],
+    ["cash", "Cash"],
+    ["ctbc", "CTBC Operating"],
+    ["other", "Other"],
+  ]
+    .map(([id, label]) => `<option value="${id}" ${selected === id ? "selected" : ""}>${label}</option>`)
+    .join("");
+}
+
+function projectReimbursementAccountOptions(selected = "") {
+  return [
+    ["ctbc", "CTBC Operating"],
+    ["esun", "E.SUN Reserved"],
+    ["cash", "Cash Wallet"],
+  ]
+    .map(([id, label]) => `<option value="${id}" ${selected === id ? "selected" : ""}>${label}</option>`)
+    .join("");
+}
+
+function categoryRulesText(p, treatment) {
+  return (p?.categoryRules || [])
+    .filter((x) => x.treatment === treatment)
+    .map((x) => x.name)
+    .join("\n");
+}
+
 function projectsListView() {
   const items = state.projects
     .filter((p) => !p.deletedAt)
     .sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
-  return `<div class="notice"><strong>Projects stay outside your monthly budget.</strong><br>Track reimbursable spending here. Only the final surplus or personal shortfall enters your normal Wealth OS ledger.</div><div class="actions" style="margin-top:14px"><button class="btn" data-action="new-project">Create Project</button></div><div class="section-title"><h2>Your projects</h2><span class="sub">${items.length} total</span></div><section class="card project-list">${
+  return `<div class="notice"><strong>Special Budgets stay outside your normal monthly budget.</strong><br>Use them for reimbursable trips or temporary spending envelopes. Only final settlement surplus/shortfall enters your personal ledger.</div>
+  <div class="actions" style="margin-top:14px"><button class="btn" data-action="new-project">Create Special Budget</button></div>
+  <div class="section-title"><h2>Your special budgets</h2><span class="sub">${items.length} total</span></div>
+  <section class="card project-list">${
     items.length
-      ? items
-          .map((p) => {
-            const settlement = projectSettlement(p.id),
-              missing = projectMissingTwd(p.id).length;
-            return `<button class="project-list-row" data-action="open-project" data-id="${p.id}"><div><div class="split tight"><strong>${esc(p.title)}</strong>${projectStatusTag(p)}</div><div class="sub">${p.startDate ? esc(p.startDate) : "No start date"}${p.endDate ? ` → ${esc(p.endDate)}` : ""} · default ${esc(p.defaultCurrency || "EUR")}</div><div class="sub">${money(projectKnownTwd(p.id))} known spend${missing ? ` · ${missing} missing NTD equivalent` : ""}${settlement ? ` · reimbursement ${money(settlement.reimbursementTwd)}` : ""}</div></div><span class="project-chevron">›</span></button>`;
-          })
-          .join("")
-      : `<div class="empty compact-empty"><strong>No projects yet.</strong><span>Create one and name it however you want.</span></div>`
+      ? items.map((p) => {
+          const settlement = projectSettlement(p.id),
+            missing = projectMissingTwd(p.id).length,
+            summary = projectBudgetSummary(p, projectExpenses(p.id), today()),
+            kind = p.type === "business_trip" ? "Business Trip" : p.type === "custom" ? "Custom" : "Legacy";
+          const budgetText =
+            p.type === "business_trip"
+              ? ` · allowance ${money(summary.allowance)}`
+              : Number(p.flexibleCapTwd || 0) > 0
+                ? ` · cap ${money(p.flexibleCapTwd)}`
+                : "";
+          return `<button class="project-list-row" data-action="open-project" data-id="${p.id}"><div><div class="split tight"><strong>${esc(p.title)}</strong>${projectStatusTag(p)}</div><div class="sub">${esc(kind)} · ${p.startDate ? esc(p.startDate) : "No start date"}${p.endDate ? ` → ${esc(p.endDate)}` : ""}${budgetText}</div><div class="sub">${money(projectKnownTwd(p.id))} counted spend${missing ? ` · ${missing} missing NTD` : ""}${summary.depositsPending ? ` · ${summary.depositsPending} deposit pending` : ""}${settlement ? ` · reimbursement ${money(settlement.reimbursementTwd)}` : ""}</div></div><span class="project-chevron">›</span></button>`;
+        }).join("")
+      : `<div class="empty compact-empty"><strong>No special budgets yet.</strong><span>Create a Business Trip or a Custom Budget.</span></div>`
   }</section>`;
 }
-function projectFormView(p = null) {
+
+function projectFormView(p = null, forcedType = null, converting = false) {
   const locked = p && projectSettlement(p.id);
   if (locked)
-    return `<div class="notice"><strong>This project is settled.</strong><br>Undo the settlement before editing project details.</div>`;
-  return `<form id="project-form"><input type="hidden" name="id" value="${p?.id || ""}"><div class="field"><label>Project title</label><input name="title" value="${esc(p?.title || "")}" placeholder="e.g. Vendor visit, business trip..." required></div><div class="form-grid"><div class="field"><label>Start date</label><input name="startDate" type="date" value="${p?.startDate || today()}"></div><div class="field"><label>End date (optional)</label><input name="endDate" type="date" value="${p?.endDate || ""}"></div></div><div class="field"><label>Default expense currency</label><select name="defaultCurrency">${PROJECT_CURRENCIES.map((c) => `<option value="${c}" ${c === (p?.defaultCurrency || "EUR") ? "selected" : ""}>${c}</option>`).join("")}</select></div><div class="notice">Project expenses remain separate from Food, Transportation and other monthly caps. You can rename this project anytime before settlement.</div><button class="btn" style="width:100%;margin-top:14px">${p ? "Save Project" : "Create Project"}</button></form>`;
+    return `<div class="notice"><strong>This Special Budget is settled.</strong><br>Undo the settlement before editing it.</div>`;
+  const type = forcedType || p?.type || "custom";
+  const fundingMode = p?.fundingMode || "reimbursement";
+  const wallet = Number(p?.tripWalletAllocatedTwd || 0);
+  const id = p?.id || "";
+  if (type === "business_trip") {
+    return `<form id="project-form" data-type="business_trip" data-convert="${converting ? "true" : "false"}">
+      <input type="hidden" name="id" value="${id}">
+      <div class="field"><label>Trip name</label><input name="title" value="${esc(p?.title || "")}" required></div>
+      <div class="form-grid"><div class="field"><label>Destination</label><input name="destination" value="${esc(p?.destination || "")}" required></div><div class="field"><label>Business purpose</label><input name="purpose" value="${esc(p?.purpose || "")}" required></div></div>
+      <div class="form-grid"><div class="field"><label>Departure date</label><input name="startDate" type="date" value="${p?.startDate || today()}" required></div><div class="field"><label>Return date</label><input name="endDate" type="date" value="${p?.endDate || ""}" required></div></div>
+      <div class="field"><label>Daily allowance (NTD)</label><input name="dailyAllowanceTwd" type="number" min="0" step="1" value="${p?.dailyAllowanceTwd ?? ""}" required><div class="sub">Departure and return together count as one allowance day. The full allowance is paid regardless of flexible spending.</div></div>
+      <div class="form-grid"><div class="field"><label>Default trip currency</label><select name="defaultCurrency"><option value="">Select currency</option>${PROJECT_CURRENCIES.map((cur) => `<option value="${cur}" ${cur === (p?.defaultCurrency || "") ? "selected" : ""}>${cur}</option>`).join("")}</select></div><div class="field"><label>Main payment method</label><select name="mainPaymentMethod"><option value="">Select method</option>${projectPaymentOptions(p?.mainPaymentMethod || "")}</select></div></div>
+      <div class="field"><label>Reimbursement received into</label><select name="reimbursementAccountId"><option value="">Select account</option>${projectReimbursementAccountOptions(p?.reimbursementAccountId || "")}</select></div>
+      <div class="field"><label>Trip funding</label><select name="fundingMode"><option value="reimbursement" ${fundingMode === "reimbursement" ? "selected" : ""}>Reimbursement only — no Trip Wallet</option><option value="trip_wallet" ${fundingMode === "trip_wallet" ? "selected" : ""}>Reserve operating cash in a Trip Wallet</option></select></div>
+      <div class="field"><label>Trip Wallet allocation (NTD)</label><input name="tripWalletAllocatedTwd" type="number" min="0" step="1" value="${wallet || ""}" placeholder="Required only when Trip Wallet is selected"><div class="sub">A Trip Wallet is a virtual reserve from operating cash; it does not create a fake bank transfer.</div></div>
+      <div class="notice"><strong>Business Trip categories are automatic.</strong><br>Exact reimbursement: VISA, visa delivery, car rental, hotel, SIM, FX fee, train, Uber, city tax, parking and gas. Flexible allowance: Personal Expenses, Food, Shopping and Others. Refundable deposits are tracked separately.</div>
+      ${converting ? '<div class="notice warn"><strong>Existing expenses will be converted, not duplicated.</strong><br>Wealth OS will map the current project rows into Business Trip categories while preserving every original amount, exact NTD amount, payment method and date.</div>' : ""}
+      <button class="btn" style="width:100%;margin-top:14px">${converting ? "Convert to Business Trip" : p ? "Save Business Trip" : "Create Business Trip"}</button>
+    </form>`;
+  }
+  return `<form id="project-form" data-type="custom">
+    <input type="hidden" name="id" value="${id}">
+    <div class="field"><label>Special Budget name</label><input name="title" value="${esc(p?.title || "")}" required></div>
+    <div class="form-grid"><div class="field"><label>Start date</label><input name="startDate" type="date" value="${p?.startDate || today()}"></div><div class="field"><label>End date (optional)</label><input name="endDate" type="date" value="${p?.endDate || ""}"></div></div>
+    <div class="form-grid"><div class="field"><label>Default currency</label><select name="defaultCurrency">${PROJECT_CURRENCIES.map((cur) => `<option value="${cur}" ${cur === (p?.defaultCurrency || "EUR") ? "selected" : ""}>${cur}</option>`).join("")}</select></div><div class="field"><label>Shared flexible cap (NTD, optional)</label><input name="flexibleCapTwd" type="number" min="0" step="1" value="${p?.flexibleCapTwd ?? ""}"></div></div>
+    <div class="field"><label>Exact-reimbursement categories</label><textarea name="exactCategories" rows="3" placeholder="One category per line">${esc(categoryRulesText(p, "exact"))}</textarea></div>
+    <div class="field"><label>Flexible / capped categories</label><textarea name="flexibleCategories" rows="3" placeholder="One category per line">${esc(categoryRulesText(p, "flexible"))}</textarea></div>
+    <div class="field"><label>Tracking-only categories</label><textarea name="trackingCategories" rows="3" placeholder="One category per line">${esc(categoryRulesText(p, "tracking") || (!p?.categoryRules ? PROJECT_CATEGORIES.join("\n") : ""))}</textarea></div>
+    <div class="field"><label>Funding</label><select name="fundingMode"><option value="reimbursement" ${fundingMode === "reimbursement" ? "selected" : ""}>No Trip Wallet / reserve</option><option value="trip_wallet" ${fundingMode === "trip_wallet" ? "selected" : ""}>Reserve operating cash in a wallet</option></select></div>
+    <div class="field"><label>Wallet allocation (NTD)</label><input name="tripWalletAllocatedTwd" type="number" min="0" step="1" value="${wallet || ""}"></div>
+    <button class="btn" style="width:100%;margin-top:14px">${p ? "Save Special Budget" : "Create Special Budget"}</button>
+  </form>`;
 }
+
 function projectExpenseFormView(projectId, x = null) {
   const p = project(projectId);
-  if (!p) return '<div class="empty">Project not found.</div>';
+  if (!p) return '<div class="empty">Special Budget not found.</div>';
   if (projectSettlement(projectId))
-    return '<div class="notice"><strong>Project settled.</strong><br>Undo the settlement before adding or editing project expenses.</div>';
+    return '<div class="notice"><strong>Special Budget settled.</strong><br>Undo the settlement before adding or editing entries.</div>';
   const cur = x?.currency || p.defaultCurrency || "EUR";
-  return `<form id="project-expense-form" data-project="${p.id}"><input type="hidden" name="id" value="${x?.id || ""}"><div class="notice"><strong>${esc(p.title)}</strong><br>This expense is isolated from your personal monthly budget and account balances until project settlement.</div><div class="form-grid" style="margin-top:14px"><div class="field"><label>Original amount</label><input name="originalAmount" type="number" min="0" step="0.01" value="${x?.originalAmount ?? ""}" required></div><div class="field"><label>Currency</label><select name="currency">${PROJECT_CURRENCIES.map((c) => `<option value="${c}" ${c === cur ? "selected" : ""}>${c}</option>`).join("")}</select></div></div><div class="field"><label>Exact NTD amount (optional while traveling)</label><input name="twdAmount" type="number" min="0" step="1" value="${x?.twdAmount ?? ""}" placeholder="Enter the exact NTD card notification when available"><div class="sub">If the expense is in TWD, leave this blank and Wealth OS will use the original amount. Settlement is blocked until every expense has an NTD equivalent.</div></div><div class="form-grid"><div class="field"><label>Category</label><select name="category">${PROJECT_CATEGORIES.map((c) => `<option value="${c}" ${c === (x?.category || "Food") ? "selected" : ""}>${c}</option>`).join("")}</select></div><div class="field"><label>Payment method</label><select name="paymentMethod"><option value="esun_card" ${x?.paymentMethod === "esun_card" ? "selected" : ""}>E.SUN credit card</option><option value="cash" ${x?.paymentMethod === "cash" ? "selected" : ""}>Cash</option><option value="other" ${x?.paymentMethod === "other" ? "selected" : ""}>Other</option></select></div></div><div class="field"><label>Date</label><input name="date" type="date" value="${x?.date || today()}" required></div><div class="field"><label>Description (optional)</label><input name="description" value="${esc(x?.description || "")}" placeholder="Hotel, dinner, rental fuel..."></div><button class="btn" style="width:100%">${x ? "Save Changes" : "Add Project Expense"}</button></form>`;
+  const rules = projectCategoryRules(p);
+  const selectedCategoryId = x?.categoryId || rules.find((r) => r.name === x?.category)?.id || rules[0]?.id || "other";
+  const recordType = x?.recordType || "expense";
+  return `<form id="project-expense-form" data-project="${p.id}">
+    <input type="hidden" name="id" value="${x?.id || ""}">
+    <div class="notice"><strong>${esc(p.title)}</strong><br>This entry remains isolated from your normal monthly budget until settlement.</div>
+    ${p.type === "business_trip" ? `<div class="field" style="margin-top:14px"><label>Entry type</label><select name="recordType"><option value="expense" ${recordType === "expense" ? "selected" : ""}>Expense</option><option value="refundable_deposit" ${recordType === "refundable_deposit" ? "selected" : ""}>Refundable deposit / card hold</option></select><div class="sub">Deposits do not count as spending unless some amount is ultimately retained.</div></div>` : '<input type="hidden" name="recordType" value="expense">'}
+    <div class="form-grid" style="margin-top:14px"><div class="field"><label>Original amount</label><input name="originalAmount" type="number" min="0" step="0.01" value="${x?.originalAmount ?? ""}" required></div><div class="field"><label>Currency</label><select name="currency">${PROJECT_CURRENCIES.map((cur2) => `<option value="${cur2}" ${cur2 === cur ? "selected" : ""}>${cur2}</option>`).join("")}</select></div></div>
+    <div class="field"><label>Exact NTD amount</label><input name="twdAmount" type="number" min="0" step="1" value="${x?.twdAmount ?? ""}" placeholder="Exact amount shown in your card/bank app"><div class="sub">This exact NTD value is used for reimbursement and trip totals. If the entry itself is TWD, Wealth OS uses the original amount when this is blank.</div></div>
+    <div class="form-grid"><div class="field"><label>Category</label><select name="categoryId">${rules.map((rule) => `<option value="${rule.id}" ${rule.id === selectedCategoryId ? "selected" : ""}>${esc(rule.name)} · ${rule.treatment === "exact" ? "Exact" : rule.treatment === "flexible" ? "Flexible" : "Tracking"}</option>`).join("")}</select></div><div class="field"><label>Payment method</label><select name="paymentMethod">${projectPaymentOptions(x?.paymentMethod || p.mainPaymentMethod || "esun_card")}</select></div></div>
+    <div class="field"><label>Date</label><input name="date" type="date" value="${x?.date || today()}" required></div>
+    <div class="field"><label>Description (optional)</label><input name="description" value="${esc(x?.description || "")}"></div>
+    <button class="btn" style="width:100%">${x ? "Save Changes" : "Add Entry"}</button>
+  </form>`;
 }
-function projectExpenseLine(x) {
+
+function depositStatusLabel(x) {
+  if (!isRefundableDeposit(x)) return "";
+  if (!depositResolved(x)) return "Pending refund";
+  if (x.depositStatus === "refunded") return "Refunded";
+  if (x.depositStatus === "partial") return `Partially retained · ${money(x.retainedTwd || 0)}`;
+  return `Not refunded · ${money(x.retainedTwd || 0)} retained`;
+}
+
+function projectExpenseLine(x, p) {
+  const isDeposit = isRefundableDeposit(x);
   const twd = Number(x.twdAmount) > 0 ? money(x.twdAmount) : '<span class="warn">NTD pending</span>';
-  return `<div class="project-expense-line"><div><strong>${esc(x.category)}</strong><div class="sub">${esc(dayLabel(x.date))} · ${esc(x.paymentMethod === "esun_card" ? "E.SUN card" : x.paymentMethod === "cash" ? "Cash" : "Other")}${x.description ? ` · ${esc(x.description)}` : ""}</div><div class="sub">${esc(formatOriginal(x.originalAmount, x.currency))} · ${twd}</div></div><div class="project-line-actions"><button class="text-btn" data-action="edit-project-expense" data-project="${x.projectId}" data-id="${x.id}">Edit</button><button class="text-btn danger-text" data-action="delete-project-expense" data-project="${x.projectId}" data-id="${x.id}">Delete</button></div></div>`;
+  const rule = categoryRuleFor(p, x);
+  const treatment = x.reimbursementType || rule?.treatment || "tracking";
+  const treatmentLabel = treatment === "exact" ? "Exact reimbursement" : treatment === "flexible" ? "Flexible allowance" : "Tracking";
+  return `<div class="project-expense-line"><div><strong>${esc(x.category || rule?.name || "Other")}</strong> <span class="tag">${esc(isDeposit ? "Deposit" : treatmentLabel)}</span><div class="sub">${esc(dayLabel(x.date))} · ${esc(projectPaymentLabel(x.paymentMethod))}${x.description ? ` · ${esc(x.description)}` : ""}</div><div class="sub">${esc(formatOriginal(x.originalAmount, x.currency))} · ${twd}${isDeposit ? ` · ${esc(depositStatusLabel(x))}` : ""}</div></div><div class="project-line-actions">${isDeposit && !projectSettlement(x.projectId) ? `<button class="text-btn" data-action="resolve-project-deposit" data-project="${x.projectId}" data-id="${x.id}">Resolve</button>` : ""}<button class="text-btn" data-action="edit-project-expense" data-project="${x.projectId}" data-id="${x.id}">Edit</button><button class="text-btn danger-text" data-action="delete-project-expense" data-project="${x.projectId}" data-id="${x.id}">Delete</button></div></div>`;
 }
+
+function projectPaceBlock(p, summary) {
+  if (p.type !== "business_trip") return "";
+  const usedPct = summary.allowance > 0 ? Math.min(100, (summary.flexible / summary.allowance) * 100) : 0;
+  const timePct = summary.totalAllowanceDays > 0 ? Math.min(100, (summary.elapsedAllowanceDays / summary.totalAllowanceDays) * 100) : 0;
+  return `<div class="section-title"><h2>Flexible allowance pace</h2><span class="tag ${summary.paceKey === "good" ? "good-tag" : summary.paceKey === "bad" ? "warn-tag" : ""}">${esc(summary.paceLabel)}</span></div>
+  <section class="card">
+    <div class="split"><div><div class="metric-label">Flexible spending</div><div class="metric">${money(summary.flexible)}</div><div class="sub">of ${money(summary.allowance)} allowance</div></div><div class="right"><strong>${usedPct.toFixed(0)}%</strong><div class="sub">allowance used</div></div></div>
+    <div class="progress" style="margin-top:12px"><span style="width:${usedPct.toFixed(1)}%"></span></div>
+    <div class="sub" style="margin-top:8px">Trip allowance time elapsed: ${timePct.toFixed(0)}% · ${summary.elapsedAllowanceDays.toFixed(1)} of ${summary.totalAllowanceDays} allowance days</div>
+    <div class="grid g2" style="margin-top:14px"><div><span class="metric-label">Remaining allowance</span><strong>${money(summary.remainingAllowance)}</strong></div><div><span class="metric-label">Safe remaining pace</span><strong>${money(summary.safeDaily)}/day</strong></div><div><span class="metric-label">Projected flexible spend</span><strong>${money(summary.projectedFlexible)}</strong></div><div><span class="metric-label">Expected trip result</span><strong class="${summary.expectedResult >= 0 ? "good" : "bad"}">${summary.expectedResult >= 0 ? "+" : "−"}${money(Math.abs(summary.expectedResult))}</strong></div></div>
+  </section>`;
+}
+
 function projectDetailView(projectId) {
   const p = project(projectId);
-  if (!p) return '<div class="empty">Project not found.</div>';
+  if (!p) return '<div class="empty">Special Budget not found.</div>';
   const expenses = projectExpenses(projectId),
     settlement = projectSettlement(projectId),
     known = projectKnownTwd(projectId),
     missing = projectMissingTwd(projectId),
     original = projectOriginalTotals(projectId),
-    card = projectPaymentTwd(projectId, "esun_card");
+    card = projectPaymentTwd(projectId, "esun_card"),
+    summary = projectBudgetSummary(p, expenses, today()),
+    pendingDeposits = unresolvedDeposits(expenses);
   const originalText =
-    Object.entries(original)
-      .map(([c, v]) => formatOriginal(v, c))
-      .join(" · ") || "No expenses yet";
+    Object.entries(original).map(([cur, v]) => formatOriginal(v, cur)).join(" · ") || "No counted expenses yet";
+  const kind = p.type === "business_trip" ? "Business Trip" : p.type === "custom" ? "Custom Budget" : "Legacy Special Project";
+  const metadata = p.type === "business_trip"
+    ? `${esc(p.destination || "")}${p.purpose ? ` · ${esc(p.purpose)}` : ""}<br>${p.startDate ? esc(dayLabel(p.startDate)) : ""}${p.endDate ? ` → ${esc(dayLabel(p.endDate))}` : ""} · ${allowanceDays(p.startDate, p.endDate)} allowance days · ${money(totalFlexibleAllowance(p))}`
+    : `${p.startDate ? esc(dayLabel(p.startDate)) : ""}${p.endDate ? ` → ${esc(dayLabel(p.endDate))}` : ""} · default ${esc(p.defaultCurrency || "EUR")}`;
+
   let settlementBlock = "";
   if (settlement) {
     const diff = Number(settlement.differenceTwd || 0);
-    settlementBlock = `<div class="section-title"><h2>Settlement</h2><span class="tag good-tag">Settled</span></div><section class="card settlement-card">${row("Project cost", money(settlement.totalProjectCostTwd))}${row("Reimbursement received", money(settlement.reimbursementTwd))}${row(diff >= 0 ? "Surplus" : "Personal responsibility", `${diff >= 0 ? "+" : "−"}${money(Math.abs(diff))}`)}${row("E.SUN card spend", money(settlement.cardPaidTwd || 0))}<div class="notice" style="margin-top:12px">Card-clearing guidance: move the E.SUN card-paid project amount from CTBC to E.SUN as needed before the card debit is due. This can include reimbursed money plus any personal shortfall. Wealth OS uses net-settlement accounting, so that clearing movement and matching card debit are not posted to the personal ledger.</div>${Number(settlement.cardPaidTwd || 0) > 0 && !settlement.cardClearingConfirmed ? `<button class="btn secondary" style="width:100%;margin-top:12px" data-action="confirm-project-card-clearing" data-id="${p.id}">Mark ${money(settlement.cardPaidTwd)} CTBC → E.SUN card funding done</button>` : Number(settlement.cardPaidTwd || 0) > 0 ? `<div class="good-notice notice" style="margin-top:12px">E.SUN card funding marked complete.</div>` : ""}<div class="actions" style="margin-top:12px"><button class="btn ghost" data-action="export-project-csv" data-id="${p.id}">Export CSV</button><button class="btn ghost danger-text" data-action="undo-project-settlement" data-id="${p.id}">Undo Settlement</button></div></section>`;
-  } else
-    settlementBlock = `<div class="section-title"><h2>Reimbursement</h2><span class="sub">Settle when company payment arrives</span></div><section class="card"><div class="split"><div><strong>${missing.length ? `${missing.length} expense${missing.length === 1 ? " needs" : "s need"} NTD amount` : "Ready for settlement"}</strong><div class="sub">Known project cost ${money(known)} · E.SUN card ${money(card)}</div></div><button class="btn" data-action="settle-project" data-id="${p.id}" ${!expenses.length ? "disabled" : ""}>Settle Reimbursement</button></div>${missing.length ? '<div class="sub warn" style="margin-top:8px">Add the NTD equivalent to every expense before settlement.</div>' : ""}</section>`;
-  return `<div class="split"><div><h3 class="project-title">${esc(p.title)}</h3><div class="sub">${p.startDate ? esc(dayLabel(p.startDate)) : ""}${p.endDate ? ` → ${esc(dayLabel(p.endDate))}` : ""} · default ${esc(p.defaultCurrency || "EUR")}</div></div>${projectStatusTag(p)}</div><div class="grid g2 project-summary-grid" style="margin-top:14px"><section class="card nested-card"><div class="metric-label">Known NTD spend</div><div class="metric">${money(known)}</div><div class="sub">${missing.length ? `${missing.length} NTD conversion${missing.length === 1 ? "" : "s"} pending` : "All expenses valued"}</div></section><section class="card nested-card"><div class="metric-label">Original currency totals</div><strong>${esc(originalText)}</strong><div class="sub">Preserved exactly as entered</div></section></div><div class="actions project-top-actions" style="margin-top:14px">${!settlement ? `<button class="btn" data-action="add-project-expense" data-project="${p.id}">Add Expense</button><button class="btn secondary" data-action="edit-project" data-id="${p.id}">Edit Project</button>` : ""}<button class="btn ghost" data-action="export-project-csv" data-id="${p.id}">Export CSV</button></div><div class="section-title"><h2>Expenses</h2><span class="sub">${expenses.length} recorded</span></div><section class="card project-expense-list">${expenses.length ? expenses.map(projectExpenseLine).join("") : `<div class="empty compact-empty"><strong>No project expenses yet.</strong><span>Add expenses here instead of your normal monthly budget.</span></div>`}</section>${settlementBlock}`;
+    settlementBlock = `<div class="section-title"><h2>Settlement</h2><span class="tag good-tag">Settled</span></div><section class="card settlement-card">${p.type === "business_trip" ? row("Expected reimbursement", money(settlement.expectedReimbursementTwd ?? summary.expectedReimbursement)) : ""}${row("Counted project cost", money(settlement.totalProjectCostTwd))}${row("Reimbursement received", money(settlement.reimbursementTwd))}${row(diff >= 0 ? "Surplus" : "Personal responsibility", `${diff >= 0 ? "+" : "−"}${money(Math.abs(diff))}`)}${row("E.SUN card spend", money(settlement.cardPaidTwd || 0))}<div class="notice" style="margin-top:12px">Card-clearing guidance: fund E.SUN for the card-paid project amount as needed before the card debit is due. Wealth OS keeps that clearing movement outside personal spending to avoid double counting.</div>${Number(settlement.cardPaidTwd || 0) > 0 && !settlement.cardClearingConfirmed ? `<button class="btn secondary" style="width:100%;margin-top:12px" data-action="confirm-project-card-clearing" data-id="${p.id}">Mark ${money(settlement.cardPaidTwd)} card funding done</button>` : Number(settlement.cardPaidTwd || 0) > 0 ? '<div class="good-notice notice" style="margin-top:12px">E.SUN card funding marked complete.</div>' : ""}<div class="actions" style="margin-top:12px"><button class="btn ghost" data-action="export-project-csv" data-id="${p.id}">Export CSV</button><button class="btn ghost danger-text" data-action="undo-project-settlement" data-id="${p.id}">Undo Settlement</button></div></section>`;
+  } else {
+    const blocked = missing.length || pendingDeposits.length;
+    settlementBlock = `<div class="section-title"><h2>Reimbursement</h2><span class="sub">Settle when company payment arrives</span></div><section class="card"><div class="split"><div><strong>${blocked ? "Resolve items before settlement" : "Ready for settlement"}</strong><div class="sub">${p.type === "business_trip" ? `Expected reimbursement ${money(summary.expectedReimbursement)} · exact ${money(summary.exact)} + allowance ${money(summary.allowance)}` : `Known project cost ${money(known)}`} · E.SUN card ${money(card)}</div></div><button class="btn" data-action="settle-project" data-id="${p.id}" ${!expenses.length || blocked ? "disabled" : ""}>Settle Reimbursement</button></div>${missing.length ? `<div class="sub warn" style="margin-top:8px">${missing.length} expense${missing.length === 1 ? " needs" : "s need"} an exact NTD amount.</div>` : ""}${pendingDeposits.length ? `<div class="sub warn" style="margin-top:8px">${pendingDeposits.length} refundable deposit${pendingDeposits.length === 1 ? " is" : "s are"} still pending. Resolve the refund status first.</div>` : ""}</section>`;
+  }
+
+  const walletBlock = p.fundingMode === "trip_wallet"
+    ? `<div class="section-title"><h2>Trip Wallet</h2><span class="sub">Virtual reserve from operating cash</span></div><section class="card">${row("Allocated", money(summary.walletAllocated))}${row("Counted spend", money(summary.totalSpend))}${row("Budget balance", money(summary.walletRemaining))}${summary.walletOverspend > 0 ? `<div class="notice warn" style="margin-top:10px">Over the Trip Wallet allocation by ${money(summary.walletOverspend)}.</div>` : ""}</section>`
+    : "";
+
+  const legacyConvert = !p.type && !settlement
+    ? '<div class="notice" style="margin-top:14px"><strong>Legacy Special Project</strong><br>You can keep using it as-is or convert it to the Business Trip format without duplicating the existing expenses.<div class="actions" style="margin-top:10px"><button class="btn secondary" data-action="convert-project-business" data-id="' + p.id + '">Convert to Business Trip</button></div></div>'
+    : "";
+
+  return `<div class="split"><div><h3 class="project-title">${esc(p.title)}</h3><div class="sub">${esc(kind)}</div><div class="sub">${metadata}</div></div>${projectStatusTag(p)}</div>
+    ${legacyConvert}
+    <div class="grid g2 project-summary-grid" style="margin-top:14px">
+      <section class="card nested-card"><div class="metric-label">${p.type === "business_trip" ? "Exact reimbursable" : "Counted NTD spend"}</div><div class="metric">${money(p.type === "business_trip" ? summary.exact : known)}</div><div class="sub">${missing.length ? `${missing.length} NTD conversion${missing.length === 1 ? "" : "s"} pending` : "All counted expenses valued"}</div></section>
+      <section class="card nested-card"><div class="metric-label">${p.type === "business_trip" ? "Flexible allowance" : "Original currency totals"}</div><strong>${p.type === "business_trip" ? `${money(summary.flexible)} / ${money(summary.allowance)}` : esc(originalText)}</strong><div class="sub">${p.type === "business_trip" ? `${money(summary.remainingAllowance)} remaining` : "Preserved exactly as entered"}</div></section>
+    </div>
+    ${projectPaceBlock(p, summary)}
+    ${walletBlock}
+    ${summary.depositsPending ? `<div class="section-title"><h2>Refundable deposits</h2><span class="tag warn-tag">${summary.depositsPending} pending</span></div><section class="card"><strong>${money(summary.depositsPendingTwd)} currently held</strong><div class="sub">Excluded from spending and expected reimbursement until the refund outcome is resolved.</div></section>` : ""}
+    <div class="actions project-top-actions" style="margin-top:14px">${!settlement ? `<button class="btn" data-action="add-project-expense" data-project="${p.id}">Add Entry</button><button class="btn secondary" data-action="edit-project" data-id="${p.id}">Edit Budget</button>` : ""}<button class="btn ghost" data-action="export-project-csv" data-id="${p.id}">Export CSV</button></div>
+    <div class="section-title"><h2>Entries</h2><span class="sub">${expenses.length} recorded</span></div><section class="card project-expense-list">${expenses.length ? expenses.map((x) => projectExpenseLine(x, p)).join("") : '<div class="empty compact-empty"><strong>No entries yet.</strong><span>Add expenses or refundable deposits here.</span></div>'}</section>
+    ${settlementBlock}`;
 }
+
+function projectDepositResolveView(projectId, expenseId) {
+  const p = project(projectId),
+    x = state.projectExpenses.find((e) => e.id === expenseId && !e.deletedAt);
+  if (!p || !x || !isRefundableDeposit(x)) return '<div class="empty">Deposit not found.</div>';
+  const rules = projectCategoryRules(p);
+  const selected = x.categoryId || "car_rental";
+  return `<form id="project-deposit-form" data-project="${projectId}" data-id="${expenseId}">
+    <div class="notice"><strong>${esc(x.description || x.category || "Refundable deposit")}</strong><br>Original hold: ${esc(formatOriginal(x.originalAmount, x.currency))} · ${Number(x.twdAmount) > 0 ? money(x.twdAmount) : "NTD pending"}.</div>
+    <div class="field" style="margin-top:14px"><label>Refund outcome</label><select name="depositStatus"><option value="pending" ${!depositResolved(x) ? "selected" : ""}>Still pending</option><option value="refunded" ${x.depositStatus === "refunded" ? "selected" : ""}>Fully refunded / authorization released</option><option value="partial" ${x.depositStatus === "partial" ? "selected" : ""}>Partially refunded</option><option value="retained" ${x.depositStatus === "retained" ? "selected" : ""}>Not refunded</option></select></div>
+    <div class="field"><label>Amount retained (NTD)</label><input name="retainedTwd" type="number" min="0" step="1" value="${x.retainedTwd ?? ""}" placeholder="Required for partial or not refunded"></div>
+    <div class="field"><label>If money was retained, classify it as</label><select name="categoryId">${rules.map((rule) => `<option value="${rule.id}" ${rule.id === selected ? "selected" : ""}>${esc(rule.name)} · ${rule.treatment === "exact" ? "Exact" : rule.treatment === "flexible" ? "Flexible" : "Tracking"}</option>`).join("")}</select></div>
+    <button class="btn" style="width:100%">Save Deposit Status</button>
+  </form>`;
+}
+
 function projectSettlementFormView(projectId) {
   const p = project(projectId);
-  if (!p) return '<div class="empty">Project not found.</div>';
-  if (projectSettlement(projectId)) return '<div class="notice">This project is already settled.</div>';
-  const missing = projectMissingTwd(projectId),
+  if (!p) return '<div class="empty">Special Budget not found.</div>';
+  if (projectSettlement(projectId)) return '<div class="notice">This Special Budget is already settled.</div>';
+  const expenses = projectExpenses(projectId),
+    missing = projectMissingTwd(projectId),
+    pending = unresolvedDeposits(expenses),
     total = projectKnownTwd(projectId),
-    card = projectPaymentTwd(projectId, "esun_card");
+    card = projectPaymentTwd(projectId, "esun_card"),
+    summary = projectBudgetSummary(p, expenses, today());
+  if (pending.length)
+    return `<div class="notice"><strong>Settlement blocked.</strong><br>${pending.length} refundable deposit${pending.length === 1 ? " is" : "s are"} unresolved. Confirm whether each hold was refunded first.</div>`;
   if (missing.length)
-    return `<div class="notice"><strong>Settlement blocked.</strong><br>${missing.length} project expense${missing.length === 1 ? " still needs" : "s still need"} an NTD amount. Edit those expenses first so the final reimbursement difference is exact.</div>`;
-  return `<form id="project-settlement-form" data-project="${p.id}"><div class="notice"><strong>Net-settlement accounting</strong><br>Enter the total company reimbursement received into CTBC. Wealth OS posts only the final surplus or personal shortfall to your personal ledger; project spending itself remains isolated.</div><section class="card" style="margin-top:14px">${row("Total project cost", money(total))}${row("E.SUN card-paid subtotal", money(card))}${row("Cash / other subtotal", money(Math.max(0, total - card)))}</section><div class="form-grid" style="margin-top:14px"><div class="field"><label>Total reimbursement received (NTD)</label><input id="project-reimbursement" name="reimbursementTwd" type="number" min="0" step="1" required></div><div class="field"><label>Date received</label><input name="date" type="date" value="${today()}" required></div></div><div id="project-settlement-preview" class="notice">Enter the reimbursement amount to calculate the settlement difference.</div><div class="field" style="margin-top:14px"><label>If there is a surplus</label><select name="surplusRoute"><option value="keep">Keep in CTBC Operating</option><option value="emergency">Emergency Fund</option><option value="home-trip">Home Travel Fund</option><option value="equipment">Equipment Fund</option><option value="invest">Investments</option></select></div><div class="sub">If there is a shortfall, Wealth OS records only that difference as a personal Project Shortfall and reminds you to fund E.SUN from CTBC for the card payment.</div><button class="btn" style="width:100%;margin-top:14px">Confirm Project Settlement</button></form>`;
+    return `<div class="notice"><strong>Settlement blocked.</strong><br>${missing.length} expense${missing.length === 1 ? " still needs" : "s still need"} an exact NTD amount.</div>`;
+  const expected = p.type === "business_trip" ? Math.round(summary.expectedReimbursement) : "";
+  return `<form id="project-settlement-form" data-project="${p.id}">
+    <div class="notice"><strong>Net-settlement accounting</strong><br>Enter the actual company reimbursement received. Wealth OS posts only the final surplus or personal shortfall to your personal ledger.</div>
+    <section class="card" style="margin-top:14px">${p.type === "business_trip" ? row("Exact reimbursable", money(summary.exact)) + row("Fixed allowance", money(summary.allowance)) + row("Expected reimbursement", money(summary.expectedReimbursement)) : ""}${row("Counted project cost", money(total))}${row("E.SUN card-paid subtotal", money(card))}${row("Cash / other subtotal", money(Math.max(0, total - card)))}</section>
+    <div class="form-grid" style="margin-top:14px"><div class="field"><label>Actual reimbursement received (NTD)</label><input id="project-reimbursement" name="reimbursementTwd" type="number" min="0" step="1" value="${expected}" required></div><div class="field"><label>Date received</label><input name="date" type="date" value="${today()}" required></div></div>
+    <div id="project-settlement-preview" class="notice">Enter the reimbursement amount to calculate the final result.</div>
+    <div class="field" style="margin-top:14px"><label>If there is a surplus</label><select name="surplusRoute"><option value="keep">Keep in reimbursement account</option><option value="emergency">Emergency Fund</option><option value="home-trip">Home Travel Fund</option><option value="equipment">Equipment Fund</option><option value="invest">Investments</option></select></div>
+    <button class="btn" style="width:100%;margin-top:14px">Confirm Settlement</button>
+  </form>`;
 }
 
 function goalsView() {

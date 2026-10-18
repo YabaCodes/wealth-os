@@ -85,6 +85,11 @@ import {
   wealthAccountLabels,
 } from "./wealth-view-model.js";
 import { assessMonthClose, closeMonthAtomic, reopenMonthAtomic } from "./month-close.js";
+import {
+  latestReconciliationFor,
+  accountSnapshotFor,
+  esunSnapshotFor,
+} from "./reconciliation.js";
 import { migrateV182, migrateV190 } from "./migrations.js";
 import { isClosedPeriod as periodIsClosed, assertPeriodEditable as guardPeriodEditable, syncOpenMonthPlanPersisted } from "./period-safety.js";
 
@@ -100,7 +105,7 @@ let modalDirty = false;
 let homeWeekStart = null,
   homeDay = null;
 let reachedGoals = null; // goals at target after the last load (null until the first load)
-const APP_VERSION = "1.21.0";
+const APP_VERSION = "1.21.1";
 const THEME_KEY = "wealthOSTheme";
 // Theme: 'system' follows the phone's light/dark setting. A copy is kept in localStorage so
 // index.html can apply it before the first paint (IndexedDB is too slow for that).
@@ -1201,103 +1206,18 @@ const SHORT_CATEGORY_NAMES = {
   "Equipment Purchase": "Equipment",
 };
 function latestReconciliation(accountId) {
-  return (
-    [...state.reconciliations]
-      .filter((r) => r.accountId === accountId && !r.deletedAt)
-      .sort((a, b) => `${a.date || ""}${a.createdAt || ""}`.localeCompare(`${b.date || ""}${b.createdAt || ""}`))
-      .at(-1) || null
-  );
-}
-function recordAfterReconciliation(rec, effectiveDate, stamp) {
-  const rd = String(rec?.date || ""),
-    ed = String(effectiveDate || "");
-  if (ed > rd) return true;
-  if (ed < rd) return false;
-  return String(stamp || "") > String(rec?.createdAt || "");
-}
-function physicalDeltaSinceReconciliation(accountId, rec) {
-  let delta = 0;
-  for (const x of state.incomes || []) {
-    if (
-      !x.deletedAt &&
-      x.accountId === accountId &&
-      recordAfterReconciliation(rec, x.dateReceived || x.date, x.createdAt || x.updatedAt)
-    )
-      delta += Number(x.amount || 0);
-  }
-  for (const x of state.expenses || []) {
-    if (
-      !x.deletedAt &&
-      x.accountId === accountId &&
-      recordAfterReconciliation(rec, x.dateReceived || x.date, x.createdAt || x.updatedAt)
-    )
-      delta -= Number(x.amount || 0);
-  }
-  for (const t of state.transfers || []) {
-    if (t.deletedAt || t.status !== "completed") continue;
-    const purposeOnly =
-      t.affectsPhysicalBalance === false ||
-      t.fromAccountId === t.toAccountId ||
-      ["bucket_allocation", "reserve_allocation"].includes(t.transferType);
-    if (
-      purposeOnly ||
-      !recordAfterReconciliation(rec, t.completedDate || t.plannedDate, t.completedAt || t.updatedAt || t.createdAt)
-    )
-      continue;
-    if (t.toAccountId === accountId) delta += Number(t.amount || 0);
-    if (t.fromAccountId === accountId) delta -= Number(t.amount || 0);
-  }
-  for (const a of state.adjustments || []) {
-    if (!a.deletedAt && a.accountId === accountId && recordAfterReconciliation(rec, a.date, a.createdAt || a.updatedAt))
-      delta += Number(a.amount || 0);
-  }
-  return delta;
+  return latestReconciliationFor(state.reconciliations, accountId);
 }
 function accountSnapshot(accountId) {
-  const rawExpected = Number(state.accountBalances[accountId] || 0);
-  const rec = latestReconciliation(accountId);
-  if (!rec)
-    return {
-      accountId,
-      expected: rawExpected,
-      rawExpected,
-      actual: rawExpected,
-      difference: 0,
-      verified: false,
-      reconciliation: null,
-      isEstimated: false,
-      ledgerDeltaSinceCheck: 0,
-    };
-  // The exact bank check is the authoritative baseline. Only physical activity that
-  // occurred after that check is allowed to roll the balance forward. Historical
-  // adjustments that helped reach the checked balance are therefore never counted twice.
-  const ledgerDeltaSinceCheck = physicalDeltaSinceReconciliation(accountId, rec);
-  const tracked = Number(rec.actualBalance || 0) + ledgerDeltaSinceCheck;
-  return {
-    accountId,
-    expected: tracked,
-    rawExpected,
-    actual: tracked,
-    difference: 0,
-    verified: true,
-    reconciliation: rec,
-    isEstimated: Math.abs(ledgerDeltaSinceCheck) >= 0.5,
-    ledgerDeltaSinceCheck,
-  };
+  return accountSnapshotFor(accountId, state.accountBalances, state.reconciliations, {
+    incomes: state.incomes,
+    expenses: state.expenses,
+    transfers: state.transfers,
+    adjustments: state.adjustments,
+  });
 }
 function esunSnapshot() {
-  const base = accountSnapshot("esun");
-  const virtualTotal = state.buckets
-    .filter((b) => b.accountId === "esun")
-    .reduce((sum, b) => sum + Number(state.bucketBalances[b.id] || 0), 0);
-  const unassigned = base.actual - virtualTotal;
-  return {
-    ...base,
-    virtualTotal,
-    unassigned,
-    allocationOk: Math.abs(unassigned) < 0.5,
-    bankOk: Math.abs(base.difference) < 0.5,
-  };
+  return esunSnapshotFor(accountSnapshot("esun"), state.buckets, state.bucketBalances);
 }
 
 function daysSince(dateStr) {

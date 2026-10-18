@@ -57,6 +57,18 @@ import {
   dayHeading,
   isPurposeOnlyTransfer,
 } from "./activity.js";
+import {
+  businessTripCategoryRules,
+  parseCustomCategoryRules,
+  projectBudgetSummary,
+  mapLegacyBusinessExpense,
+  unresolvedDeposits,
+  allowanceDays,
+  totalFlexibleAllowance,
+  isRefundableDeposit,
+  depositResolved,
+  categoryRuleFor,
+} from "./special-budgets.js";
 
 const root = document.querySelector("#app");
 let tab = "home";
@@ -70,7 +82,7 @@ let modalDirty = false;
 let homeWeekStart = null,
   homeDay = null;
 let reachedGoals = null; // goals at target after the last load (null until the first load)
-const APP_VERSION = "1.18.0";
+const APP_VERSION = "1.19.0";
 const THEME_KEY = "wealthOSTheme";
 // Theme: 'system' follows the phone's light/dark setting. A copy is kept in localStorage so
 // index.html can apply it before the first paint (IndexedDB is too slow for that).
@@ -96,7 +108,7 @@ if (window.matchMedia) {
   };
   mq.addEventListener ? mq.addEventListener("change", onChange) : mq.addListener?.(onChange);
 }
-const DATA_MODEL_VERSION = 182;
+const DATA_MODEL_VERSION = 190;
 
 const today = (d = new Date()) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -603,6 +615,20 @@ async function migrateV182() {
   await put("settings", { ...settings, dataModelVersion: 182, appVersion: "1.12.0", updatedAt: stamp });
 }
 
+async function migrateV190() {
+  const settings = await getOne("settings", "app");
+  if (Number(settings?.dataModelVersion || 0) >= 190) return;
+  // v1.19 extends the existing Special Project records in-place with optional Special Budget fields.
+  // No historical project or expense record is rewritten automatically; legacy projects remain readable
+  // and can be deliberately converted from their own detail screen.
+  await put("settings", {
+    ...settings,
+    dataModelVersion: 190,
+    appVersion: "1.19.0",
+    updatedAt: new Date().toISOString(),
+  });
+}
+
 async function syncReleaseMetadata() {
   const settings = await getOne("settings", "app");
   if (!settings) return;
@@ -633,6 +659,7 @@ async function load() {
   await migrateV180();
   await migrateV181();
   await migrateV182();
+  await migrateV190();
   await syncReleaseMetadata();
   const keys = [
     "accounts",

@@ -82,7 +82,7 @@ test("pending deposit disables Business Trip settlement and new entry defaults t
   await expect(page.locator('[role="dialog"]')).toContainText("Synthetic Browser Test Trip");
   await expect(page.locator('[role="dialog"]')).toContainText("refund status");
   await expect(page.locator('[data-action="settle-project"]')).toBeDisabled();
-  await page.locator('[data-action="add-project-expense"]').first().click();
+  await page.locator('[role="dialog"] [data-action="add-project-expense"]').click();
   await expect(page.locator("#project-expense-form")).toBeVisible();
   await expect(page.locator('#project-expense-form select[name="categoryId"]')).toHaveValue("food");
   await page.locator('[data-action="close-modal"]').click();

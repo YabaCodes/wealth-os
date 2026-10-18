@@ -29,22 +29,24 @@ Completed and accepted on iPhone:
 - Preserve all persisted financial data and settlement rules.
 
 ### v1.19.3 — Entry form default category
-PR prepared; physical iPhone acceptance pending:
+Completed; merged and physically accepted:
 - New Business Trip and Special Budget entries prefer Food when the category exists.
 - Editing an existing expense preserves its saved category.
 - No data model or accounting changes.
 
-## Resume after v1.19.3 physical acceptance
+## Reliability continuation
 
-After v1.19.3 is physically accepted, return to the controlled hardening work that was underway before the feature request:
+### v1.20.0 — IndexedDB and restore integration foundation
+Implementation prepared; GitHub CI and physical iPhone acceptance required:
+- Isolated IndexedDB integration harness using dev-only fake-indexeddb.
+- Real db.js CRUD, seed, export/import, undo snapshot and atomic restore regression tests.
+- Abort import transaction if any record fails synchronously during IDB put.
+- Basic account-transfer balance classification.
+- Keep IndexedDB schema 3 and financial data model 190 unchanged.
 
-1. Continue low-risk modularization with Wealth/goal presentation and read-side helpers.
-2. Add persistence/integration test infrastructure before refactoring IndexedDB-heavy code.
-3. Add regression coverage for migrations, especially legacy transfer/accounting repairs and the current data-model migration path.
-4. Add backup/restore atomicity tests.
-5. Add closed-month edit-protection integration tests.
-6. Add physical-vs-purpose transfer integration tests.
-7. Add open-month plan-sync tests proving completed financial history is never rewritten.
-8. Expand Special Budget settlement/undo integration coverage.
+### Follow-on priorities
+1. v1.20.1 — integration coverage for app migration paths, physical-vs-purpose transfer workflows, closed-month protections and open-month plan sync.
+2. v1.20.2 — Special Budget settlement, undo and reimbursement integration tests.
+3. v1.20.3 — controlled modularization of Wealth/goal presentation and read-only helpers, protected by established tests.
 
-Persistence, migrations and restore code should not be aggressively refactored until the integration safety net exists.
+Persistence, migrations and restore code must not be aggressively refactored without a passing integration safety net.

@@ -78,16 +78,16 @@ All planned v1.20.0–v1.20.3 revisions are merged and physically accepted:
 
 For v1.20.3, checks covered version/data model, Wealth balances/reconciliation, Goals status/pace, Insights projections, Business Trip trackers/Food default, and data persistence/backup export after reopening. No acceptance defects were reported. The **financial data model remains 190** and the **IndexedDB database schema remains 3**.
 
-## Proposed next milestone — v1.21.0 Month-Close & Reconciliation Assurance
+## v1.21.0 — Month-Close & Reconciliation Assurance
 
-**Status: recommendation; not approved, developed or released.** Prioritize end-to-end confidence in the month-close/reopen path before expanding accounting features.
+**Status: implementation in review; CI and physical iPhone acceptance required.** Prioritize end-to-end confidence in the month-close/reopen path before expanding accounting features.
 
-1. Build integration-level tests around actual month-close validation and persisted snapshot creation: funded-period eligibility, bank checks, completed payday allocations, pending transfers, tithe and sweep reconciliation, and unpaid fixed obligations.
-2. Test closed-month immutability across reopening, intentional corrections and re-closing. Verify original close snapshots are not silently rewritten by later budget edits or changes to unrelated months.
-3. Validate CTBC/E.SUN reconciliation roll-forward, virtual versus physical purpose allocations, Cash Wallet withdrawals, and month-end sweep against real saved ledger data in isolated IndexedDB fixtures.
-4. Test interruption/retry handling for close and reopen operations, including preventing duplicate snapshots or partial financial state changes. Favor narrow atomic persistence fixes only when tests expose concrete risks.
-5. Add targeted UI acceptance scenarios for a real installed iPhone PWA; use non-destructive checks on the live ledger and synthetic fixtures for destructive scenarios.
-6. Keep financial data model 190, IndexedDB schema 3, and existing UI unchanged unless a specific demonstrated bug requires an isolated fix.
+1. Completed: extract the live close-readiness decision gate for direct testing without changing its blocker calculations or display wording.
+2. Completed: atomically persist the period closed flag and complete audit snapshot; atomically reopen both records while preserving the financial snapshot.
+3. Completed: reject concurrent duplicate closes and stale period previews; support intentional reopen and reclose with a corrected snapshot.
+4. Completed: test pending transfers, sweep, tithe, payday/reserve funding and bank reconciliation blockers using the shared production decision gate. Unpaid fixed obligations remain a manual-confirmation warning.
+5. Completed: isolated IndexedDB tests cover Cash Wallet withdrawals and physical versus virtual CTBC/E.SUN account movements, plus refusal to resync a closed month's plan.
+6. Still outstanding: complete browser-driven month-close UI tests and all historical reconciliation roll-forward variants; preserve as follow-on testing priorities.
 
 **Release gate:** automated CI green, no existing-ledger mutation/migration, reproducible closed-month snapshot assertions, and manual iPhone acceptance following an external backup.
 

@@ -1,4 +1,16 @@
-# Wealth OS — v1.21.2
+# Wealth OS — v1.22.0
+
+## v1.22.0 — Read-only Goal Contribution Scenario Planner
+
+- Adds a **What if I save more?** panel to the Goals screen, letting the user select any visible savings goal and enter an additional hypothetical amount per month.
+- Compares the goal's remaining target and its **actual completed average allocation over the latest three funding months** against a simplified hypothetical pace (recorded pace + extra/month). Shows the baseline ETA, scenario ETA and possible months saved.
+- Explicitly handles goals that are paused, waiting for prerequisites, already complete, or missing a target. It does not promise an unlock date, redistribute other goals' funds, or assume the additional contribution will automatically occur.
+- Pure, deterministic calculator `goalWhatIfFor()` shares the existing Goals view-model module. Unit tests check projections, rounding, no history, prerequisite enforcement, negative/invalid inputs, large-value bounds and non-mutation.
+- Desktop/mobile Playwright tests exercise the real selector and number input, privacy mode, screen reload reset and unchanged exported financial records.
+- **Preview only:** user inputs are ephemeral, not saved; no transfers, category changes, financial forecasts, balances or real transactions are created.
+- App version **1.22.0**; **financial data model remains 190 and IndexedDB schema remains 3**. The current PWA interface and existing Goals cards retain their previous behavior.
+
+
 
 ## v1.21.2 — Automated browser acceptance safety net
 

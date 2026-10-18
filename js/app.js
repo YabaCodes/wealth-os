@@ -72,6 +72,7 @@ import {
   depositResolved,
   categoryRuleFor,
 } from "./special-budgets.js";
+import { commitSpecialBudgetSettlementAtomic, undoSpecialBudgetSettlementAtomic } from "./settlement-storage.js";
 import { migrateV182, migrateV190 } from "./migrations.js";
 import { isClosedPeriod as periodIsClosed, assertPeriodEditable as guardPeriodEditable, syncOpenMonthPlanPersisted } from "./period-safety.js";
 
@@ -87,7 +88,7 @@ let modalDirty = false;
 let homeWeekStart = null,
   homeDay = null;
 let reachedGoals = null; // goals at target after the last load (null until the first load)
-const APP_VERSION = "1.20.1";
+const APP_VERSION = "1.20.2";
 const THEME_KEY = "wealthOSTheme";
 // Theme: 'system' follows the phone's light/dark setting. A copy is kept in localStorage so
 // index.html can apply it before the first paint (IndexedDB is too slow for that).
@@ -4780,11 +4781,15 @@ async function saveProjectSettlement(form) {
   const settlementId = uid("pset");
   let generatedIncomeId = null,
     generatedExpenseId = null,
-    generatedTransferId = null;
+    generatedTransferId = null,
+    generatedIncome = null,
+    generatedExpense = null,
+    generatedTransfer = null,
+    generatedAllocation = null;
 
   if (diff > 0.5) {
     generatedIncomeId = uid("inc");
-    await put("incomes", {
+    generatedIncome = {
       id: generatedIncomeId,
       dateReceived: date,
       budgetPeriodId: periodId,
@@ -4798,12 +4803,12 @@ async function saveProjectSettlement(form) {
       sourceProjectId: projectId,
       systemGenerated: true,
       createdAt: stamp,
-    });
+    };
     const target = projectRouteTarget(route);
     if (target) {
       generatedTransferId = uid("tr");
       const sameAccount = reimbursementAccountId === target.accountId;
-      await put("transfers", {
+      generatedTransfer = {
         id: generatedTransferId,
         fromAccountId: reimbursementAccountId,
         toAccountId: target.accountId,
@@ -4819,20 +4824,20 @@ async function saveProjectSettlement(form) {
         systemGenerated: true,
         createdAt: stamp,
         updatedAt: stamp,
-      });
+      };
       if (target.bucketId)
-        await put("transferAllocations", {
+        generatedAllocation = {
           id: uid("ta"),
           transferId: generatedTransferId,
           bucketId: target.bucketId,
           amount: diff,
           goalId: state.goals.find((g) => g.bucketId === target.bucketId)?.id || null,
           label: target.label,
-        });
+        };
     }
   } else if (diff < -0.5) {
     generatedExpenseId = uid("exp");
-    await put("expenses", {
+    generatedExpense = {
       id: generatedExpenseId,
       date,
       budgetPeriodId: periodId,
@@ -4846,10 +4851,10 @@ async function saveProjectSettlement(form) {
       systemGenerated: true,
       createdAt: stamp,
       updatedAt: stamp,
-    });
+    };
   }
 
-  await put("projectSettlements", {
+  const settlementRecord = {
     id: settlementId,
     projectId,
     reimbursementTwd: reimbursement,
@@ -4870,8 +4875,16 @@ async function saveProjectSettlement(form) {
     cardClearingConfirmed: cardPaid <= 0.5,
     createdAt: stamp,
     updatedAt: stamp,
+  };
+  await commitSpecialBudgetSettlementAtomic({
+    projectId,
+    expectedExpenses: expenses,
+    settlement: settlementRecord,
+    generatedIncome,
+    generatedExpense,
+    generatedTransfer,
+    generatedAllocation,
   });
-  await put("projects", { ...p, status: "settled", settledAt: stamp, updatedAt: stamp });
   modal = { type: "project-detail", id: projectId };
   await load();
   toast("Special Budget settled", "good");
@@ -4889,25 +4902,8 @@ async function confirmProjectCardClearing(projectId) {
   await load();
 }
 async function undoProjectSettlement(projectId) {
-  const p = project(projectId),
-    st = projectSettlement(projectId);
-  if (!p || !st) return;
-  if (st.generatedTransferId) {
-    const t = state.transfers.find((x) => x.id === st.generatedTransferId && !x.deletedAt);
-    if (t?.status === "completed")
-      throw new Error(
-        "The surplus transfer is already completed. Reverse that real bank movement manually before undoing the settlement.",
-      );
-    if (t) {
-      for (const a of state.transferAllocations.filter((a) => a.transferId === t.id))
-        await remove("transferAllocations", a.id);
-      await remove("transfers", t.id);
-    }
-  }
-  if (st.generatedIncomeId) await remove("incomes", st.generatedIncomeId);
-  if (st.generatedExpenseId) await remove("expenses", st.generatedExpenseId);
-  await remove("projectSettlements", st.id);
-  await put("projects", { ...p, status: "active", settledAt: null, updatedAt: new Date().toISOString() });
+  if (!project(projectId) || !projectSettlement(projectId)) return;
+  await undoSpecialBudgetSettlementAtomic(projectId, new Date().toISOString());
   modal = { type: "project-detail", id: projectId };
   await load();
 }

@@ -45,14 +45,20 @@ Completed, merged and physically accepted (all six iPhone checks PASS):
 - Keep IndexedDB schema 3 and financial data model 190 unchanged.
 
 ### v1.20.1 — Financial history regression coverage
-Implementation in review; automated and physical acceptance pending:
+Completed, merged and physically accepted:
 - Test real IndexedDB migrations v182 Household and v190 Special Budget metadata including repeat upgrades and frozen history.
 - Test shared closed-month guard and open-month sync persisted writes without mutating completed records.
 - Test bank movement versus virtual allocation accounting before/after budget sync.
 - Keep model 190 and IndexedDB schema 3 unchanged.
 
+### v1.20.2 — Special Budget settlement and undo safety
+Implementation under review; physical iPhone acceptance pending:
+- Commit and undo related project, personal-ledger, transfer and allocation rows in a single atomic IndexedDB transaction.
+- Reject duplicate submissions, unresolved deposits, missing NTD amounts, stale amounts, closed funding periods and accidental partial writes.
+- Keep full Business Trip reimbursement and allowance calculation semantics unchanged.
+- Add integration tests with synthetic projects and no live data modification.
+
 ### Follow-on priorities
-1. v1.20.2 — Special Budget settlement, undo and reimbursement integration tests.
-2. v1.20.3 — controlled modularization of Wealth/goal presentation and read-only helpers, protected by established tests.
+1. v1.20.3 — controlled modularization of Wealth/goal presentation and read-only helpers, protected by established tests.
 
 Persistence, migrations and restore code must not be aggressively refactored without a passing integration safety net.

@@ -4690,27 +4690,39 @@ async function saveProjectSettlement(form) {
   const fd = new FormData(form),
     projectId = form.dataset.project,
     p = project(projectId);
-  if (!p) throw new Error("Project not found.");
-  if (projectSettlement(projectId)) throw new Error("Project is already settled.");
-  const missing = projectMissingTwd(projectId);
+  if (!p) throw new Error("Special Budget not found.");
+  if (projectSettlement(projectId)) throw new Error("Special Budget is already settled.");
+
+  const expenses = projectExpenses(projectId),
+    pendingDeposits = unresolvedDeposits(expenses),
+    missing = projectMissingTwd(projectId);
+  if (pendingDeposits.length)
+    throw new Error(`${pendingDeposits.length} refundable deposit${pendingDeposits.length === 1 ? " is" : "s are"} still unresolved.`);
   if (missing.length)
     throw new Error(
-      `${missing.length} project expense${missing.length === 1 ? " still needs" : "s still need"} an NTD amount.`,
+      `${missing.length} project expense${missing.length === 1 ? " still needs" : "s still need"} an exact NTD amount.`,
     );
+
   const total = Math.round(projectKnownTwd(projectId)),
     reimbursement = Math.round(Number(fd.get("reimbursementTwd")));
   if (!Number.isFinite(reimbursement) || reimbursement < 0) throw new Error("Enter a valid reimbursement amount.");
-  const diff = reimbursement - total,
+
+  const summary = projectBudgetSummary(p, expenses, today()),
+    expectedReimbursement = p.type === "business_trip" ? Math.round(summary.expectedReimbursement) : null,
+    diff = reimbursement - total,
     route = fd.get("surplusRoute") || "keep",
     stamp = new Date().toISOString(),
     date = fd.get("date") || today(),
     periodId = entryPeriodId(),
-    cardPaid = Math.round(projectPaymentTwd(projectId, "esun_card"));
+    cardPaid = Math.round(projectPaymentTwd(projectId, "esun_card")),
+    reimbursementAccountId = p.reimbursementAccountId || "ctbc";
   if (periodId) assertPeriodEditable(periodId);
+
   const settlementId = uid("pset");
   let generatedIncomeId = null,
     generatedExpenseId = null,
     generatedTransferId = null;
+
   if (diff > 0.5) {
     generatedIncomeId = uid("inc");
     await put("incomes", {
@@ -4719,7 +4731,7 @@ async function saveProjectSettlement(form) {
       budgetPeriodId: periodId,
       amount: diff,
       incomeType: "project_surplus",
-      accountId: "ctbc",
+      accountId: reimbursementAccountId,
       description: `${p.title} settlement surplus`,
       titheEligible: false,
       includedInRegularIncomeMetrics: false,
@@ -4731,15 +4743,19 @@ async function saveProjectSettlement(form) {
     const target = projectRouteTarget(route);
     if (target) {
       generatedTransferId = uid("tr");
+      const sameAccount = reimbursementAccountId === target.accountId;
       await put("transfers", {
         id: generatedTransferId,
-        fromAccountId: "ctbc",
+        fromAccountId: reimbursementAccountId,
         toAccountId: target.accountId,
         amount: diff,
         budgetPeriodId: periodId,
-        status: "planned",
+        status: sameAccount ? "completed" : "planned",
         plannedDate: date,
-        transferType: "project_surplus_routing",
+        completedDate: sameAccount ? date : null,
+        completedAt: sameAccount ? stamp : null,
+        transferType: sameAccount ? "purpose_reallocation" : "project_surplus_routing",
+        affectsPhysicalBalance: !sameAccount,
         sourceProjectId: projectId,
         systemGenerated: true,
         createdAt: stamp,
@@ -4763,7 +4779,7 @@ async function saveProjectSettlement(form) {
       budgetPeriodId: periodId,
       amount: Math.abs(diff),
       categoryId: "project-shortfall",
-      accountId: "ctbc",
+      accountId: reimbursementAccountId,
       fundingBucketId: null,
       description: `${p.title} personal shortfall`,
       sourceProjectId: projectId,
@@ -4773,12 +4789,18 @@ async function saveProjectSettlement(form) {
       updatedAt: stamp,
     });
   }
+
   await put("projectSettlements", {
     id: settlementId,
     projectId,
     reimbursementTwd: reimbursement,
+    expectedReimbursementTwd: expectedReimbursement,
     reimbursementDate: date,
+    reimbursementAccountId,
     totalProjectCostTwd: total,
+    exactReimbursableTwd: p.type === "business_trip" ? Math.round(summary.exact) : null,
+    flexibleAllowanceTwd: p.type === "business_trip" ? Math.round(summary.allowance) : null,
+    flexibleSpentTwd: p.type === "business_trip" ? Math.round(summary.flexible) : null,
     differenceTwd: diff,
     cardPaidTwd: cardPaid,
     cashOtherTwd: Math.max(0, total - cardPaid),
@@ -4793,6 +4815,7 @@ async function saveProjectSettlement(form) {
   await put("projects", { ...p, status: "settled", settledAt: stamp, updatedAt: stamp });
   modal = { type: "project-detail", id: projectId };
   await load();
+  toast("Special Budget settled", "good");
 }
 async function confirmProjectCardClearing(projectId) {
   const st = projectSettlement(projectId);

@@ -5713,6 +5713,12 @@ function bind() {
       e.preventDefault();
       saveProjectExpense(pef).catch(showError);
     };
+  const pdf = document.querySelector("#project-deposit-form");
+  if (pdf)
+    pdf.onsubmit = (e) => {
+      e.preventDefault();
+      saveProjectDeposit(pdf).catch(showError);
+    };
   const psf = document.querySelector("#project-settlement-form");
   if (psf) {
     psf.onsubmit = (e) => {

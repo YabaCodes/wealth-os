@@ -62,6 +62,7 @@ import {
   parseCustomCategoryRules,
   projectBudgetSummary,
   projectCategoryBreakdown,
+  preferredProjectEntryCategoryId,
   projectCompositionBreakdown,
   mapLegacyBusinessExpense,
   unresolvedDeposits,
@@ -84,7 +85,7 @@ let modalDirty = false;
 let homeWeekStart = null,
   homeDay = null;
 let reachedGoals = null; // goals at target after the last load (null until the first load)
-const APP_VERSION = "1.19.2";
+const APP_VERSION = "1.19.3";
 const THEME_KEY = "wealthOSTheme";
 // Theme: 'system' follows the phone's light/dark setting. A copy is kept in localStorage so
 // index.html can apply it before the first paint (IndexedDB is too slow for that).
@@ -2580,7 +2581,7 @@ function projectExpenseFormView(projectId, x = null) {
     return '<div class="notice"><strong>Special Budget settled.</strong><br>Undo the settlement before adding or editing entries.</div>';
   const cur = x?.currency || p.defaultCurrency || "EUR";
   const rules = projectCategoryRules(p);
-  const selectedCategoryId = x?.categoryId || rules.find((r) => r.name === x?.category)?.id || rules[0]?.id || "other";
+  const selectedCategoryId = preferredProjectEntryCategoryId(rules, x);
   const recordType = x?.recordType || "expense";
   return `<form id="project-expense-form" data-project="${p.id}">
     <input type="hidden" name="id" value="${x?.id || ""}">

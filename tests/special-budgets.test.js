@@ -2,10 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   allowanceDays,
+  businessTripCategoryRules,
   totalFlexibleAllowance,
   elapsedAllowanceDays,
   projectBudgetSummary,
   projectCategoryBreakdown,
+  preferredProjectEntryCategoryId,
   projectCompositionBreakdown,
   mapLegacyBusinessExpense,
   parseCustomCategoryRules,
@@ -267,4 +269,34 @@ test("zero claim and zero spending allowance composition have safe empty states"
   assert.equal(noCap.over, 400);
   assert.equal(noCap.segments[0].barPct, 100);
   assert.equal(noCap.segments[0].allowancePct, null);
+});
+
+
+test("new Business Trip entries default to Food even when exact categories appear first", () => {
+  const rules = businessTripCategoryRules();
+  const snapshot = JSON.stringify(rules);
+  assert.equal(preferredProjectEntryCategoryId(rules), "food");
+  assert.equal(JSON.stringify(rules), snapshot, "default selection must not reorder category rules");
+});
+
+test("new custom and legacy Special Budget entries prefer configured Food, else first category", () => {
+  assert.equal(preferredProjectEntryCategoryId([
+    { id: "accommodation", name: "Accommodation" },
+    { id: "daily_food", name: "Food" },
+    { id: "transport", name: "Transport" },
+  ]), "daily_food");
+  assert.equal(preferredProjectEntryCategoryId([
+    { id: "train", name: "Train" },
+    { id: "hotel", name: "Hotel" },
+  ]), "train");
+  assert.equal(preferredProjectEntryCategoryId([]), "other");
+  assert.equal(preferredProjectEntryCategoryId(null), "other");
+});
+
+test("editing Special Budget entries retains the saved category instead of resetting to Food", () => {
+  const rules = businessTripCategoryRules();
+  assert.equal(preferredProjectEntryCategoryId(rules, { categoryId: "car_rental", category: "Car Rental" }), "car_rental");
+  assert.equal(preferredProjectEntryCategoryId(rules, { category: "Shopping" }), "shopping");
+  assert.equal(preferredProjectEntryCategoryId(rules, { categoryId: "obsolete_custom_category" }), "obsolete_custom_category");
+  assert.equal(preferredProjectEntryCategoryId(rules, { category: "Not Found" }), rules[0].id);
 });

@@ -1,4 +1,14 @@
-# Wealth OS — v1.19.2
+# Wealth OS — v1.19.3
+
+## v1.19.3 — Food as the default Special Budget category
+
+- Opening **Add Entry** for a Business Trip now preselects **Food**, the most frequently used category, instead of the first exact-reimbursement category.
+- Custom and legacy Special Budgets also preselect **Food** if a Food category is configured; if not, they retain the prior first-category fallback.
+- Editing an existing entry keeps its recorded category selection, including exact reimbursement categories. All categories remain available for manual selection.
+- Only the form's initial selection changes. No stored records, accounting totals, reimbursement treatment, deposits, settlements, IndexedDB schema or financial data are migrated.
+- Data model stays at **190**. Reliability CI and installed iPhone PWA acceptance are required.
+
+
 
 ## v1.19.2 — clearer Business Trip composition trackers
 

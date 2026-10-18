@@ -160,3 +160,64 @@ test("Export Backup downloads valid JSON and a restore preview can be safely can
   await page.locator("#ask-cancel").click();
   expect(await readBrowserStore(page, "periods")).toEqual(before);
 });
+
+test("Goals what-if preview responds to inputs and never writes financial records", async ({ page }) => {
+  await seedSyntheticBrowser(page);
+  await page.locator('nav [data-tab="goals"]').click();
+  await expect(page.locator("#goal-scenario-planner")).toBeVisible();
+  await expect(page.locator("#goal-scenario-select")).toHaveValue("goal-emergency");
+  await expect(page.locator("#goal-scenario-result")).toContainText("No recorded monthly contributions");
+
+  const before = await page.evaluate(async () => (await import("/js/db.js")).exportData());
+  await page.locator("#goal-scenario-extra").fill("10000");
+  await expect(page.locator(".goal-scenario-highlight")).not.toContainText("No estimate");
+  await expect(page.locator("#goal-scenario-result")).toContainText("No recorded funding pace yet");
+
+  await page.locator("#goal-scenario-select").selectOption("goal-home-trip");
+  await expect(page.locator("#goal-scenario-result")).toContainText("waiting for Emergency Fund");
+  await expect(page.locator(".goal-scenario-highlight")).toContainText("No estimate");
+
+  await page.locator("#goal-scenario-select").selectOption("goal-equipment");
+  await expect(page.locator("#goal-scenario-result")).toContainText("paused");
+  await expect(page.locator(".goal-scenario-highlight")).toContainText("No estimate");
+
+  const after = await page.evaluate(async () => (await import("/js/db.js")).exportData());
+  // Export timestamps differ; the financial stores and settings are identical.
+  expect(after.data).toEqual(before.data);
+
+  await page.reload();
+  await page.locator('nav [data-tab="goals"]').click();
+  await expect(page.locator("#goal-scenario-extra")).toHaveValue("0");
+});
+
+test("Goals what-if uses completed allocations and restores private-money masking", async ({ page }) => {
+  await seedSyntheticBrowser(page);
+  await page.evaluate(async () => {
+    const db = await import("/js/db.js");
+    await db.put("periods", {
+      id: "2026-09", state: "funded",
+      planSnapshot: { salary: 0, fixed: 0, caps: 0, sinking: 0, buffer: 0, immediateWealth: 0, lines: [] },
+    });
+    await db.put("transfers", {
+      id: "completed-emergency", status: "completed", transferType: "purpose_reallocation",
+      affectsPhysicalBalance: false, fromAccountId: "esun", toAccountId: "esun",
+      budgetPeriodId: "2026-10", amount: 12000, completedDate: "2026-10-18",
+    });
+    await db.put("transferAllocations", {
+      id: "actual-emergency", transferId: "completed-emergency",
+      bucketId: "emergency", goalId: "goal-emergency", amount: 12000,
+    });
+  });
+  await page.reload();
+  await page.locator('nav [data-tab="goals"]').click();
+  await expect(page.locator("#goal-scenario-result")).toContainText("NT$6,000");
+  await page.locator("#goal-scenario-extra").fill("10000");
+  await expect(page.locator("#goal-scenario-result")).toContainText("NT$16,000");
+
+  await page.locator('[data-action="privacy-toggle"]').click();
+  await expect(page.locator("#goal-scenario-result")).not.toContainText("NT$16,000");
+  await expect(page.locator("#goal-scenario-result")).toContainText("••••");
+  await page.locator("#goal-scenario-extra").fill("20000");
+  await expect(page.locator("#goal-scenario-result")).not.toContainText("NT$26,000");
+  await expect(page.locator("#goal-scenario-result")).toContainText("••••");
+});

@@ -2,7 +2,7 @@
 // integration coverage. Keep these idempotent and never rewrite completed ledgers.
 import { getAll, getOne, put } from "./db.js";
 
-async function migrateV182() {
+export async function migrateV182() {
   const settings = await getOne("settings", "app");
   if (Number(settings?.dataModelVersion || 0) >= 182) return;
   // v1.12 adds a Household flexible cap (laundry, toiletries, cleaning) with no amount: set it in
@@ -36,7 +36,7 @@ async function migrateV182() {
   await put("settings", { ...settings, dataModelVersion: 182, appVersion: "1.12.0", updatedAt: stamp });
 }
 
-async function migrateV190() {
+export async function migrateV190() {
   const settings = await getOne("settings", "app");
   if (Number(settings?.dataModelVersion || 0) >= 190) return;
   // v1.19 extends the existing Special Project records in-place with optional Special Budget fields.

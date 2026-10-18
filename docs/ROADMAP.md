@@ -52,13 +52,21 @@ Completed, merged and physically accepted:
 - Keep model 190 and IndexedDB schema 3 unchanged.
 
 ### v1.20.2 — Special Budget settlement and undo safety
-Implementation under review; physical iPhone acceptance pending:
+Completed, merged and physically accepted:
 - Commit and undo related project, personal-ledger, transfer and allocation rows in a single atomic IndexedDB transaction.
 - Reject duplicate submissions, unresolved deposits, missing NTD amounts, stale amounts, closed funding periods and accidental partial writes.
 - Keep full Business Trip reimbursement and allowance calculation semantics unchanged.
 - Add integration tests with synthetic projects and no live data modification.
 
+### v1.20.3 — Wealth and Goals read-side modularization
+Implementation in review; iPhone acceptance pending:
+- Extract goal progress, status, prerequisite and contribution pace display models from app.js to a pure module.
+- Extract Wealth Overview account-health tags and virtual operating-cash availability to the same module.
+- Add deterministic tests without changing views, account balances, postings, IndexedDB storage or migrations.
+- Keep all new module imports available in the offline PWA service-worker cache.
+
 ### Follow-on priorities
-1. v1.20.3 — controlled modularization of Wealth/goal presentation and read-only helpers, protected by established tests.
+1. Continue targeted coverage and incremental module extraction only where it measurably lowers risk.
+2. Retain physical iPhone acceptance and external backup requirements for every release.
 
 Persistence, migrations and restore code must not be aggressively refactored without a passing integration safety net.

@@ -1,4 +1,15 @@
-# Wealth OS — v1.20.2
+# Wealth OS — v1.20.3
+
+## v1.20.3 — Wealth and Goals view-model modularization
+
+- Extracts read-only **Wealth Overview** and **Goals** presentation calculations from the large `js/app.js` controller into `js/wealth-view-model.js`.
+- Shared view models compute: goal balance/progress/status and prerequisites, recent contribution history, average core/goal funding pace, forecast month label/goal pace text, available CTBC operating cash after virtual Trip Wallet reserves, bank reconciliation tags, Cash Wallet status, and E.SUN bank/purpose allocation labels.
+- Keeps the existing HTML templates, numbers, labels, color classes, goal forecasts, tabs and underlying financial calculations unchanged. Only their data sources are modularized.
+- Adds targeted `tests/wealth-view-model.test.js` covering completion/paused/waiting goals, capped progress, recent-history averaging, forecasts, missing contribution history, reconciled versus mismatched accounts, virtual reserve availability, and E.SUN unassigned/over-allocated status.
+- No IndexedDB writes or migrations. **Data model remains 190; IndexedDB schema remains 3.** No actual bank balances or personal finance records are included in the test fixtures.
+- New module included in the offline service-worker precache and syntax checks. Installed iPhone PWA acceptance remains required.
+
+
 
 ## v1.20.2 — Atomic Special Budget Settlement & Undo
 

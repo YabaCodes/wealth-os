@@ -78,7 +78,7 @@ test("pending deposit disables Business Trip settlement and new entry defaults t
   await seedSyntheticBrowser(page, { trip: testTrip(), expenses: [trainExpense(), pendingDeposit()] });
   await page.locator('nav [data-tab="transactions"]').click();
   await page.locator('[data-action="open-projects"]').first().click();
-  await page.locator('[data-action="open-project"][data-id="synthetic-trip"]').click();
+  await page.locator('[role="dialog"] [data-action="open-project"][data-id="synthetic-trip"]').click();
   await expect(page.locator('[role="dialog"]')).toContainText("Synthetic Browser Test Trip");
   await expect(page.locator('[role="dialog"]')).toContainText("refund status");
   await expect(page.locator('[data-action="settle-project"]')).toBeDisabled();
@@ -94,7 +94,7 @@ test("actual Business Trip settlement saves once and Undo removes generated surp
   await seedSyntheticBrowser(page, { trip: testTrip(), expenses: [trainExpense()] });
   await page.locator('nav [data-tab="transactions"]').click();
   await page.locator('[data-action="open-projects"]').first().click();
-  await page.locator('[data-action="open-project"][data-id="synthetic-trip"]').click();
+  await page.locator('[role="dialog"] [data-action="open-project"][data-id="synthetic-trip"]').click();
   await page.locator('[data-action="settle-project"]').click();
   await expect(page.locator("#project-settlement-form")).toBeVisible();
   await expect(page.locator("#project-settlement-form")).toContainText("Fixed allowance");

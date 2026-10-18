@@ -1,4 +1,15 @@
-# Wealth OS — v1.21.1
+# Wealth OS — v1.21.2
+
+## v1.21.2 — Automated browser acceptance safety net
+
+- Introduces real **Playwright Chromium** tests of the installed PWA's ordinary HTML controls and browser IndexedDB, running on a **localhost-only server in GitHub Actions**. Uses desktop and mobile Chromium viewports; mobile emulation is **not** physical iPhone Safari acceptance.
+- Isolated scenarios cover Settings release identification, navigation, expense entry/persistence, closed-month edit restrictions, actual synthetic month-close and reopen, Business Trip pending deposits and Food default, settlement/undo, and safe rejection of invalid backup upload.
+- Synthetic fixture data is generated using the existing public default records plus dedicated test records in each test's private browser context. No connection to a deployed site, no real financial data, no test-only production hooks.
+- New CI browser job is separate from the existing syntax/accounting/IndexedDB check job; it installs Playwright Chromium in CI and uploads traces/screenshots if a scenario fails.
+- **No app functionality or styling changes**, no persistence migrations; **data model remains 190 and IndexedDB schema remains 3**. Release metadata and service-worker cache identity advance to 1.21.2; browser test scripts are never included in the production PWA precache.
+- Maintain the usual review/merge and physical iPhone acceptance gate.
+
+
 
 ## v1.21.1 — Reconciliation roll-forward and net-worth regression protection
 

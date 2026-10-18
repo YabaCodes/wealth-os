@@ -93,7 +93,7 @@ For v1.20.3, checks covered version/data model, Wealth balances/reconciliation, 
 
 ## v1.21.1 — Reconciliation Roll-Forward Protection
 
-**Status: implementation in review; physical iPhone acceptance pending.**
+**Status: completed, PR #22 merged and physically accepted (2026-10-18).**
 
 - Consolidate duplicate bank-reconciliation read logic used by Wealth Overview and Wealth Metrics into one pure module, without modifying current calculation semantics.
 - Regression-test bank-check baseline selection, same-day record timestamps, older adjustments, later income/expenses, Cash Wallet, completed physical transfers and pending/virtual transfers.
@@ -101,9 +101,19 @@ For v1.20.3, checks covered version/data model, Wealth balances/reconciliation, 
 - Preserve personal financial records, account balances, the current UI, data model 190 and IndexedDB schema 3.
 - Continue to require passing CI, external backup and installed iPhone acceptance.
 
+## v1.21.2 — Browser-Level UI Acceptance
+
+**Status: implementation in review; physical iPhone acceptance pending.**
+
+- Add Playwright Chromium browser tests for real app controls across desktop/mobile viewports.
+- Test synthetic month-close/reopen and historical immutability, expense capture, Business Trip deposit gating and actual settlement/undo, and invalid backup restore.
+- Run browser tests against a localhost static server using isolated IndexedDB and browser contexts; never touch a real user profile or GitHub Pages deployment.
+- Keep all existing finance calculations, UI layout, data model 190 and IndexedDB schema 3 unchanged.
+- After passing CI and manual merge, require iPhone physical smoke acceptance. The browser tests are an additional safeguard, **not** a substitute for Safari acceptance.
+
 ### Later candidates (not committed)
 
-- Browser-level UI acceptance tests for destructive flows, using isolated test data.
+- Extended browser scenarios and failure/retry coverage, with synthetic data.
 - Goal-planning and Insights usability improvements based on observed user workflows.
 - Additional modularization where tests show it reduces change risk.
 

@@ -11,6 +11,13 @@ This release hardens the existing app without changing financial calculations or
 - Dedicated tests protect project filtering, NTD valuation, missing-conversion detection, payment-method subtotals and original-currency totals.
 - `app.js` keeps only thin adapters to current state, so project UI and settlement behavior remain unchanged.
 
+### Hardening phase 3 — budget pacing extraction
+
+- Flexible-budget pace, per-category pace status, irregular-cap handling and spending projections now live in `js/pacing.js`.
+- The module receives expense rows as input instead of reading IndexedDB or app state directly.
+- Deterministic tests pin month-day calculations, current/past/future month handling, pacing thresholds and expense cutoffs.
+- Home, Budget and Insights keep their existing UI while using the extracted calculations.
+
 - **Automated accounting tests.** Core budget-plan, month-end sweep, goal-routing, forecasting and expense-aggregation rules are covered with deterministic Node tests.
 - **Release consistency tests.** CI verifies that the app version, public defaults, README release heading and service-worker cache version agree, and that every service-worker cached asset exists.
 - **Syntax checks.** Every JavaScript source file and the service worker are syntax-checked before tests run.

@@ -6,6 +6,7 @@ import {
   elapsedAllowanceDays,
   projectBudgetSummary,
   projectCategoryBreakdown,
+  projectCompositionBreakdown,
   mapLegacyBusinessExpense,
   parseCustomCategoryRules,
   effectiveTwd,
@@ -199,4 +200,71 @@ test("Special Budget category breakdown groups exact and flexible spending witho
     ["food", 1200, 2],
     ["shopping", 0, 0],
   ]);
+});
+
+
+test("exact reimbursement composition totals 100% of confirmed claims with no remaining category", () => {
+  const project = { type: "business_trip" };
+  const expenses = [
+    { categoryId: "car_rental", reimbursementType: "exact", twdAmount: 37230 },
+    { categoryId: "hotel_rental", reimbursementType: "exact", twdAmount: 6492 },
+    { categoryId: "train_ticket", reimbursementType: "exact", twdAmount: 2942 },
+    { categoryId: "sim_card", reimbursementType: "exact", twdAmount: 950 },
+    { categoryId: "parking_ticket", reimbursementType: "exact", twdAmount: 439 },
+    { categoryId: "car_rental", reimbursementType: "exact", recordType: "refundable_deposit",
+      depositStatus: "pending", twdAmount: 10936 },
+  ];
+  const rows = projectCategoryBreakdown(project, expenses, "exact");
+  const result = projectCompositionBreakdown(rows);
+  assert.equal(result.spent, 48053);
+  assert.equal(result.cap, null);
+  assert.equal(result.remaining, 0);
+  assert.equal(result.segments.some((segment) => segment.isRemaining), false);
+  assert.equal(result.segments.filter((segment) => !segment.isRemaining).length, 5);
+  assert.ok(Math.abs(result.segments.reduce((sum, s) => sum + s.barPct, 0) - 100) < 0.00001);
+  assert.ok(result.segments.every((s) => s.barPct >= 0 && s.barPct <= 100));
+  assert.equal(result.segments.find((s) => s.id === "car_rental").amount, 37230);
+});
+
+test("flexible composition uses category spend plus unspent allowance as one 100% bar", () => {
+  const rows = [
+    { id: "food", name: "Food", amount: 1065, count: 2 },
+    { id: "shopping", name: "Shopping", amount: 1829, count: 1 },
+    { id: "personal_expenses", name: "Personal Expenses", amount: 2562, count: 2 },
+    { id: "others", name: "Others", amount: 0, count: 0 },
+  ];
+  const result = projectCompositionBreakdown(rows, 42000);
+  assert.equal(result.spent, 5456);
+  assert.equal(result.remaining, 36544);
+  assert.equal(result.over, 0);
+  assert.equal(result.segments.at(-1).id, "__remaining");
+  assert.equal(result.segments.at(-1).amount, 36544);
+  assert.ok(Math.abs(result.segments.reduce((sum, s) => sum + s.barPct, 0) - 100) < 0.00001);
+  assert.ok(Math.abs(result.segments.find((s) => s.id === "food").allowancePct - (1065 / 42000 * 100)) < 0.00001);
+  assert.equal(rows[0].amount, 1065, "composition must not mutate input records");
+});
+
+test("flexible composition makes over-allowance spending explicit without a fake remaining segment", () => {
+  const result = projectCompositionBreakdown([{ id: "food", amount: 1200 }, { id: "shopping", amount: 1800 }], 2000);
+  assert.equal(result.spent, 3000);
+  assert.equal(result.over, 1000);
+  assert.equal(result.remaining, 0);
+  assert.equal(result.visualTotal, 3000);
+  assert.equal(result.segments.some((s) => s.isRemaining), false);
+  assert.equal(result.segments[0].allowancePct, 60);
+  assert.equal(result.segments[1].allowancePct, 90);
+  assert.equal(result.segments.reduce((sum, s) => sum + s.barPct, 0), 100);
+});
+
+test("zero claim and zero spending allowance composition have safe empty states", () => {
+  const empty = projectCompositionBreakdown([], null);
+  assert.equal(empty.visualTotal, 0);
+  assert.deepEqual(empty.segments, []);
+  const unused = projectCompositionBreakdown([], 42000);
+  assert.equal(unused.segments.length, 1);
+  assert.equal(unused.segments[0].barPct, 100);
+  const noCap = projectCompositionBreakdown([{ id: "food", amount: 400 }], 0);
+  assert.equal(noCap.over, 400);
+  assert.equal(noCap.segments[0].barPct, 100);
+  assert.equal(noCap.segments[0].allowancePct, null);
 });

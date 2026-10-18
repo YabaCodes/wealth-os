@@ -59,14 +59,41 @@ Completed, merged and physically accepted:
 - Add integration tests with synthetic projects and no live data modification.
 
 ### v1.20.3 — Wealth and Goals read-side modularization
-Implementation in review; iPhone acceptance pending:
+**Completed, PR #19 merged and physically accepted on iPhone (2026-10-18; six of six checks PASS):**
 - Extract goal progress, status, prerequisite and contribution pace display models from app.js to a pure module.
 - Extract Wealth Overview account-health tags and virtual operating-cash availability to the same module.
 - Add deterministic tests without changing views, account balances, postings, IndexedDB storage or migrations.
 - Keep all new module imports available in the offline PWA service-worker cache.
 
-### Follow-on priorities
-1. Continue targeted coverage and incremental module extraction only where it measurably lowers risk.
-2. Retain physical iPhone acceptance and external backup requirements for every release.
+### v1.20 reliability series — acceptance record (2026-10-18)
+
+All planned v1.20.0–v1.20.3 revisions are merged and physically accepted:
+
+| Revision | Milestone | Acceptance |
+| --- | --- | --- |
+| v1.20.0 | IndexedDB integration and restore atomicity | Six iPhone checks PASS |
+| v1.20.1 | Migration, closed-month and budget-sync regression safety | User-confirmed PASS |
+| v1.20.2 | Atomic Special Budget settlement and undo | User-confirmed PASS |
+| v1.20.3 | Wealth/Goals read-only view-model modularization | Six iPhone checks PASS; see [PR #19 acceptance record](https://github.com/YabaCodes/wealth-os/pull/19#issuecomment-6252912555) |
+
+For v1.20.3, checks covered version/data model, Wealth balances/reconciliation, Goals status/pace, Insights projections, Business Trip trackers/Food default, and data persistence/backup export after reopening. No acceptance defects were reported. The **financial data model remains 190** and the **IndexedDB database schema remains 3**.
+
+## Proposed next milestone — v1.21.0 Month-Close & Reconciliation Assurance
+
+**Status: recommendation; not approved, developed or released.** Prioritize end-to-end confidence in the month-close/reopen path before expanding accounting features.
+
+1. Build integration-level tests around actual month-close validation and persisted snapshot creation: funded-period eligibility, bank checks, completed payday allocations, pending transfers, tithe and sweep reconciliation, and unpaid fixed obligations.
+2. Test closed-month immutability across reopening, intentional corrections and re-closing. Verify original close snapshots are not silently rewritten by later budget edits or changes to unrelated months.
+3. Validate CTBC/E.SUN reconciliation roll-forward, virtual versus physical purpose allocations, Cash Wallet withdrawals, and month-end sweep against real saved ledger data in isolated IndexedDB fixtures.
+4. Test interruption/retry handling for close and reopen operations, including preventing duplicate snapshots or partial financial state changes. Favor narrow atomic persistence fixes only when tests expose concrete risks.
+5. Add targeted UI acceptance scenarios for a real installed iPhone PWA; use non-destructive checks on the live ledger and synthetic fixtures for destructive scenarios.
+6. Keep financial data model 190, IndexedDB schema 3, and existing UI unchanged unless a specific demonstrated bug requires an isolated fix.
+
+**Release gate:** automated CI green, no existing-ledger mutation/migration, reproducible closed-month snapshot assertions, and manual iPhone acceptance following an external backup.
+
+### Later candidates (not committed)
+
+- Goal-planning and Insights usability improvements based on observed user workflows.
+- Additional modularization where tests show it reduces change risk.
 
 Persistence, migrations and restore code must not be aggressively refactored without a passing integration safety net.

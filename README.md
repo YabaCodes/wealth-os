@@ -1,4 +1,16 @@
-# Wealth OS — v1.19.3
+# Wealth OS — v1.20.0
+
+## v1.20.0 — IndexedDB persistence and restore safety test foundation
+
+- Adds automated **IndexedDB integration tests** that execute the actual `js/db.js` persistence and restore functions against an isolated in-memory IndexedDB implementation (test-only `fake-indexeddb@6.2.5`).
+- Tests store creation/seeding, committed CRUD operations and reopening a fresh database module connection, complete export/import round trips, rejection of damaged backups, Undo Restore, and virtual versus physical transfer balance classification.
+- Tests a structurally valid backup with an **uncloneable record**: the restore must abort the IndexedDB transaction, including any queued store clears, so existing financial records remain unchanged.
+- Fixes that edge case by explicitly aborting the restore transaction if `IDBObjectStore.put()` fails synchronously; successful backup restore behavior remains unchanged.
+- CI installs the pinned **development-only** test dependency and executes `npm run check`, combining existing calculation checks with new storage integration tests.
+- All sample transactions in tests are synthetic. No personal data, real financial amounts, existing IndexedDB stores or migrations were added or modified. No UI redesign.
+- **Data model stays 190**, underlying IndexedDB schema version stays 3; iPhone physical acceptance still required.
+
+
 
 ## v1.19.3 — Food as the default Special Budget category
 

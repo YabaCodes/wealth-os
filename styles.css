@@ -1640,6 +1640,15 @@ button {
   margin: 0;
   font-size: 18px;
 }
+.choice-card {
+  text-align: left;
+  color: var(--text);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-height: 104px;
+  justify-content: center;
+}
 .project-summary-grid .metric {
   font-size: 22px;
 }

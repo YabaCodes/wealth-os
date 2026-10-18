@@ -1,4 +1,37 @@
-# Wealth OS — v1.18.0
+# Wealth OS — v1.19.0
+
+## v1.19.0 — Special Budgets and Business Trips
+
+This release expands the former Special Projects feature into a planning, pacing and reimbursement system while keeping those records isolated from the normal monthly budget.
+
+### Special Budget creation
+- Choose **Business Trip** or **Custom Budget**.
+- Business Trips capture destination, business purpose, departure/return dates, daily allowance, default currency, main payment method and reimbursement account.
+- Business Trips automatically create exact-reimbursement categories (VISA, visa delivery, car rental, hotel, SIM, FX fee, train, Uber, city tax, parking and gas) and flexible categories (Personal Expenses, Food, Shopping and Others).
+- Custom Budgets can define exact-reimbursement, flexible/capped and tracking-only categories.
+
+### Business Trip allowance and pacing
+- Departure day + return day together count as one allowance day.
+- The full daily allowance is treated as a fixed entitlement regardless of actual flexible spending.
+- Flexible categories share one pooled allowance across the trip.
+- Trip detail shows flexible spending vs allowance, remaining allowance, elapsed allowance time, projected flexible spend, safe remaining daily pace and expected final trip result.
+
+### Refundable deposits
+- A refundable deposit/card hold is recorded separately from expenses.
+- Pending or fully refunded holds do not count as trip spending or expected reimbursement.
+- Settlement is blocked while a deposit is unresolved.
+- A partially or fully retained deposit becomes a real expense only after the retained amount and category are confirmed.
+
+### Trip Wallet
+- A Special Budget can optionally reserve part of CTBC operating cash in a virtual Trip Wallet.
+- The reserve does not create a fake bank transfer or change the physical CTBC balance.
+- Wealth view shows the active Special Budget reserve and available operating cash after those reserves.
+
+### Reimbursement and legacy conversion
+- Business Trip expected reimbursement = exact reimbursable expenses + full fixed allowance.
+- Settlement still records only the final personal surplus or shortfall in the normal ledger.
+- Existing legacy Special Projects can be deliberately converted to Business Trips without duplicating expense rows; original amounts, exact NTD amounts, dates and payment methods are preserved while categories are mapped into the new model.
+- CSV export now includes reimbursement treatment, entry type and refundable-deposit status.
 
 ## v1.18.0 — reliability foundation
 

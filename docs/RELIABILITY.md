@@ -10,7 +10,7 @@ This document records the invariants that future releases must preserve. A featu
 4. **Closed months are read-only until deliberately reopened.**
 5. **Tithe is excluded from Core Wealth and Financial Net Worth.**
 6. **Cash withdrawal is CTBC → Cash Wallet.** It becomes spending only when a cash expense is recorded.
-7. **Reimbursable project spending stays outside personal budget statistics.** Only a final unreimbursed shortfall becomes a personal expense; a surplus is routed explicitly.
+7. **Reimbursable Special Budget spending stays outside personal budget statistics.** Exact reimbursements, fixed Business Trip allowances and refundable holds are tracked separately; only a final personal shortfall becomes a personal expense and any surplus is routed explicitly.
 8. **Month-end sweep uses recorded reality.** Unused caps/buffer and paid fixed-bill differences may feed the sweep; unpaid fixed bills are never assumed to be savings.
 9. **Goal routing obeys prerequisites and targets.** Planned-spending monthly targets are funded only when unlocked; remaining wealth capacity continues to core-wealth goals, then investments.
 10. **Restore is atomic.** A failed or invalid restore must not partially replace device data.
@@ -29,4 +29,4 @@ Before a release is merged:
 
 ## Current automated coverage
 
-The Node test suite covers pure accounting calculations, special-project accounting, budget pacing, Activity normalization/grouping and release integrity. IndexedDB workflows, migrations, restore atomicity and full UI flows still require targeted integration tests or physical acceptance. Those are the next hardening frontier.
+The Node test suite covers pure accounting calculations, special-project/Special Budget accounting, Business Trip allowance and deposit rules, budget pacing, Activity normalization/grouping and release integrity. IndexedDB workflows, migrations, restore atomicity and full UI flows still require targeted integration tests or physical acceptance. Those are the next hardening frontier.

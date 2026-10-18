@@ -1,3 +1,5 @@
+import { effectiveTwd, missingTwd, isRefundableDeposit } from "./special-budgets.js";
+
 // Pure special-project accounting helpers.
 // No IndexedDB or DOM dependency: keep project arithmetic directly testable.
 
@@ -15,29 +17,28 @@ export function projectExpensesFor(projectExpenses, projectId) {
 }
 
 export function projectKnownTwd(projectExpenses, projectId) {
-  return projectExpensesFor(projectExpenses, projectId).reduce(
-    (sum, x) => sum + (Number.isFinite(Number(x.twdAmount)) ? Number(x.twdAmount || 0) : 0),
-    0,
-  );
+  return projectExpensesFor(projectExpenses, projectId).reduce((sum, x) => sum + effectiveTwd(x), 0);
 }
 
 export function projectMissingTwd(projectExpenses, projectId) {
-  return projectExpensesFor(projectExpenses, projectId).filter(
-    (x) => !Number.isFinite(Number(x.twdAmount)) || Number(x.twdAmount) <= 0,
-  );
+  return projectExpensesFor(projectExpenses, projectId).filter((x) => missingTwd(x));
 }
 
 export function projectPaymentTwd(projectExpenses, projectId, method) {
   return projectExpensesFor(projectExpenses, projectId)
-    .filter((x) => x.paymentMethod === method && Number(x.twdAmount) > 0)
-    .reduce((sum, x) => sum + Number(x.twdAmount || 0), 0);
+    .filter((x) => x.paymentMethod === method)
+    .reduce((sum, x) => sum + effectiveTwd(x), 0);
 }
 
 export function projectOriginalTotals(projectExpenses, projectId) {
   const out = {};
   for (const x of projectExpensesFor(projectExpenses, projectId)) {
+    if (isRefundableDeposit(x) && effectiveTwd(x) <= 0) continue;
     const currency = x.currency || "TWD";
-    out[currency] = (out[currency] || 0) + Number(x.originalAmount || 0);
+    const amount = isRefundableDeposit(x) && x.depositStatus !== "refunded"
+      ? Number(x.retainedOriginalAmount || 0)
+      : Number(x.originalAmount || 0);
+    out[currency] = (out[currency] || 0) + amount;
   }
   return out;
 }

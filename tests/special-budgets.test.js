@@ -1,0 +1,163 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import {
+  allowanceDays,
+  totalFlexibleAllowance,
+  elapsedAllowanceDays,
+  projectBudgetSummary,
+  mapLegacyBusinessExpense,
+  parseCustomCategoryRules,
+  effectiveTwd,
+  unresolvedDeposits,
+} from "../js/special-budgets.js";
+
+test("business trip allowance merges departure and return into one allowance day", () => {
+  const project = {
+    type: "business_trip",
+    startDate: "2026-10-15",
+    endDate: "2026-11-03",
+    dailyAllowanceTwd: 3000,
+  };
+  assert.equal(allowanceDays(project.startDate, project.endDate), 19);
+  assert.equal(totalFlexibleAllowance(project), 57000);
+  assert.equal(elapsedAllowanceDays(project, "2026-10-15"), 0.5);
+  assert.equal(elapsedAllowanceDays(project, "2026-10-18"), 3.5);
+  assert.equal(elapsedAllowanceDays(project, "2026-11-03"), 19);
+});
+
+test("business trip summary separates exact reimbursement from flexible allowance spending", () => {
+  const project = {
+    type: "business_trip",
+    startDate: "2026-10-15",
+    endDate: "2026-11-03",
+    dailyAllowanceTwd: 3000,
+    tripWalletAllocatedTwd: 0,
+  };
+  const expenses = [
+    { categoryId: "hotel_rental", category: "Hotel Rental", reimbursementType: "exact", twdAmount: 6492 },
+    { categoryId: "train_ticket", category: "Train Ticket", reimbursementType: "exact", twdAmount: 2942 },
+    { categoryId: "food", category: "Food", reimbursementType: "flexible", twdAmount: 531 },
+    { categoryId: "shopping", category: "Shopping", reimbursementType: "flexible", twdAmount: 1829 },
+  ];
+  const s = projectBudgetSummary(project, expenses, "2026-10-18");
+  assert.equal(s.exact, 9434);
+  assert.equal(s.flexible, 2360);
+  assert.equal(s.allowance, 57000);
+  assert.equal(s.expectedReimbursement, 66434);
+  assert.equal(s.expectedResult, 54640);
+  assert.equal(s.totalAllowanceDays, 19);
+  assert.equal(s.elapsedAllowanceDays, 3.5);
+});
+
+test("pending refundable deposits are excluded from spend and settlement totals", () => {
+  const project = {
+    type: "business_trip",
+    startDate: "2026-10-15",
+    endDate: "2026-11-03",
+    dailyAllowanceTwd: 3000,
+  };
+  const deposit = {
+    categoryId: "car_rental",
+    category: "Car Rental",
+    reimbursementType: "exact",
+    recordType: "refundable_deposit",
+    depositStatus: "pending",
+    twdAmount: 10936,
+  };
+  const s = projectBudgetSummary(project, [deposit], "2026-10-18");
+  assert.equal(effectiveTwd(deposit), 0);
+  assert.equal(s.exact, 0);
+  assert.equal(s.totalSpend, 0);
+  assert.equal(s.depositsPending, 1);
+  assert.equal(s.depositsPendingTwd, 10936);
+  assert.equal(unresolvedDeposits([deposit]).length, 1);
+});
+
+test("retained deposit amount becomes a real expense only after resolution", () => {
+  const partial = {
+    categoryId: "car_rental",
+    category: "Car Rental",
+    reimbursementType: "exact",
+    recordType: "refundable_deposit",
+    depositStatus: "partial",
+    twdAmount: 10936,
+    retainedTwd: 2000,
+  };
+  const refunded = { ...partial, depositStatus: "refunded", retainedTwd: null };
+  assert.equal(effectiveTwd(partial), 2000);
+  assert.equal(effectiveTwd(refunded), 0);
+});
+
+test("legacy business-trip rows map into the new template without changing amounts", () => {
+  assert.deepEqual(
+    mapLegacyBusinessExpense({ category: "Hotel", description: "Frankfurt Hotel" }),
+    { categoryId: "hotel_rental", category: "Hotel Rental", reimbursementType: "exact", recordType: "expense" },
+  );
+  assert.deepEqual(
+    mapLegacyBusinessExpense({ category: "Other", description: "Power bank" }),
+    { categoryId: "shopping", category: "Shopping", reimbursementType: "flexible", recordType: "expense" },
+  );
+  const deposit = mapLegacyBusinessExpense({ category: "Car Rental", description: "Car rental deposit" });
+  assert.equal(deposit.recordType, "refundable_deposit");
+  assert.equal(deposit.depositStatus, "pending");
+  assert.equal(deposit.categoryId, "car_rental");
+});
+
+test("custom Special Budget category rules are built from user-entered lines", () => {
+  const rules = parseCustomCategoryRules({
+    exact: "Hotel\nTrain",
+    flexible: "Food\nShopping",
+    tracking: "Notes",
+  });
+  assert.deepEqual(rules.map((x) => [x.name, x.treatment]), [
+    ["Hotel", "exact"],
+    ["Train", "exact"],
+    ["Food", "flexible"],
+    ["Shopping", "flexible"],
+    ["Notes", "tracking"],
+  ]);
+});
+
+
+test("legacy Business Trip mapping covers the standard travel categories", () => {
+  const cases = [
+    [{ category: "Car Rental", description: "Parking" }, "parking_ticket", "exact"],
+    [{ category: "Transport", description: "Train" }, "train_ticket", "exact"],
+    [{ category: "Other", description: "SIM card" }, "sim_card", "exact"],
+    [{ category: "Car Rental", description: "Car Rental" }, "car_rental", "exact"],
+    [{ category: "Other", description: "Haircut" }, "personal_expenses", "flexible"],
+    [{ category: "Other", description: "2wks Gym" }, "personal_expenses", "flexible"],
+    [{ category: "Food", description: "Lunch" }, "food", "flexible"],
+  ];
+  for (const [input, categoryId, treatment] of cases) {
+    const mapped = mapLegacyBusinessExpense(input);
+    assert.equal(mapped.categoryId, categoryId);
+    assert.equal(mapped.reimbursementType, treatment);
+  }
+});
+
+test("Trip Wallet summary deducts counted spend while refundable holds stay outside it", () => {
+  const project = {
+    type: "business_trip",
+    startDate: "2026-10-15",
+    endDate: "2026-11-03",
+    dailyAllowanceTwd: 3000,
+    tripWalletAllocatedTwd: 20000,
+  };
+  const expenses = [
+    { categoryId: "food", reimbursementType: "flexible", twdAmount: 3000 },
+    { categoryId: "hotel_rental", reimbursementType: "exact", twdAmount: 5000 },
+    {
+      categoryId: "car_rental",
+      reimbursementType: "exact",
+      recordType: "refundable_deposit",
+      depositStatus: "pending",
+      twdAmount: 10000,
+    },
+  ];
+  const summary = projectBudgetSummary(project, expenses, "2026-10-18");
+  assert.equal(summary.totalSpend, 8000);
+  assert.equal(summary.walletAllocated, 20000);
+  assert.equal(summary.walletRemaining, 12000);
+  assert.equal(summary.depositsPendingTwd, 10000);
+});

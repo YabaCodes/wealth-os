@@ -117,3 +117,47 @@ test("custom Special Budget category rules are built from user-entered lines", (
     ["Notes", "tracking"],
   ]);
 });
+
+
+test("legacy Business Trip mapping covers the standard travel categories", () => {
+  const cases = [
+    [{ category: "Car Rental", description: "Parking" }, "parking_ticket", "exact"],
+    [{ category: "Transport", description: "Train" }, "train_ticket", "exact"],
+    [{ category: "Other", description: "SIM card" }, "sim_card", "exact"],
+    [{ category: "Car Rental", description: "Car Rental" }, "car_rental", "exact"],
+    [{ category: "Other", description: "Haircut" }, "personal_expenses", "flexible"],
+    [{ category: "Other", description: "2wks Gym" }, "personal_expenses", "flexible"],
+    [{ category: "Food", description: "Lunch" }, "food", "flexible"],
+  ];
+  for (const [input, categoryId, treatment] of cases) {
+    const mapped = mapLegacyBusinessExpense(input);
+    assert.equal(mapped.categoryId, categoryId);
+    assert.equal(mapped.reimbursementType, treatment);
+  }
+});
+
+test("Trip Wallet summary deducts counted spend while refundable holds stay outside it", () => {
+  const project = {
+    type: "business_trip",
+    startDate: "2026-10-15",
+    endDate: "2026-11-03",
+    dailyAllowanceTwd: 3000,
+    tripWalletAllocatedTwd: 20000,
+  };
+  const expenses = [
+    { categoryId: "food", reimbursementType: "flexible", twdAmount: 3000 },
+    { categoryId: "hotel_rental", reimbursementType: "exact", twdAmount: 5000 },
+    {
+      categoryId: "car_rental",
+      reimbursementType: "exact",
+      recordType: "refundable_deposit",
+      depositStatus: "pending",
+      twdAmount: 10000,
+    },
+  ];
+  const summary = projectBudgetSummary(project, expenses, "2026-10-18");
+  assert.equal(summary.totalSpend, 8000);
+  assert.equal(summary.walletAllocated, 20000);
+  assert.equal(summary.walletRemaining, 12000);
+  assert.equal(summary.depositsPendingTwd, 10000);
+});

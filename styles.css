@@ -1695,6 +1695,89 @@ button {
 .special-budget-tracker-head .metric {
   font-size: 24px;
 }
+
+/* v1.19.2: one segmented composition bar per reimbursement/allowance tracker. */
+.special-budget-composition-visual {
+  position: relative;
+  min-width: 0;
+  margin: 4px 0 14px;
+}
+.special-budget-composition-track {
+  display: flex;
+  width: 100%;
+  height: 18px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--soft);
+}
+.special-budget-composition-segment {
+  display: block;
+  flex: 0 0 auto;
+  min-width: 0;
+  background: var(--segment-color);
+}
+.special-budget-composition-segment.is-remaining {
+  background: #cbd5e1;
+}
+html[data-theme="dark"] .special-budget-composition-segment.is-remaining {
+  background: #4b586d;
+}
+.special-budget-composition-visual .special-budget-time-mark {
+  z-index: 1;
+  top: -3px;
+  bottom: -3px;
+  width: 3px;
+}
+.special-budget-legend {
+  border-top: 1px solid var(--line);
+}
+.special-budget-legend-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 125px);
+  gap: 12px;
+  align-items: start;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--line);
+}
+.special-budget-legend-row:last-child {
+  border-bottom: 0;
+}
+.special-budget-legend-name {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.special-budget-legend-name strong,
+.special-budget-legend-values strong {
+  font-size: 13px;
+  font-weight: 700;
+}
+.special-budget-legend-dot {
+  flex: 0 0 10px;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  margin-top: 4px;
+}
+.special-budget-legend-values {
+  min-width: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.special-budget-legend-values .sub {
+  display: block;
+  line-height: 1.4;
+}
+@media (max-width: 390px) {
+  .special-budget-legend-row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 107px);
+    gap: 8px;
+  }
+}
+
 .special-budget-category-list {
   border-top: 1px solid var(--line);
 }

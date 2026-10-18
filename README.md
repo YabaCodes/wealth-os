@@ -1,4 +1,15 @@
-# Wealth OS — v1.19.1
+# Wealth OS — v1.19.2
+
+## v1.19.2 — clearer Business Trip composition trackers
+
+- **Add Entry now appears directly below the Business Trip header**, before trackers and reimbursement details, so travel spending can be recorded without scrolling to the bottom.
+- **Exact reimbursement shows a single 100% horizontal composition bar** of confirmed claim amounts by category, plus a corresponding amounts-and-percentages legend. There is no remaining-budget segment and no per-category progress bar: these categories are claims, not spending limits.
+- **Flexible allowance shows one stacked category-spending bar against the shared trip allowance.** Colored segments show spending per category; gray indicates remaining allowance. The amber marker still shows elapsed trip allowance time. When spending exceeds the allowance, the bar explicitly normalizes to spent total, shows the overage, and retains each category's true percentage of the allowance in the legend.
+- Pending refundable holds remain excluded from the claim/spending bars until resolved.
+- Retains the existing trip allowance, reimbursement, settlement, privacy, offline behavior, IndexedDB model **190** and financial record history. This is a presentation release with pure composition-math tests.
+- Physical iPhone PWA acceptance is required after deployment.
+
+
 
 ## v1.19.1 — Special Budget tracker polish
 

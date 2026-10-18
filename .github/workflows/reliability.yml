@@ -17,5 +17,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Run syntax and accounting checks
+      - name: Install test dependencies (no install scripts)
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Run syntax, accounting, and IndexedDB integration checks
         run: npm run check

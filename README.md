@@ -1,4 +1,15 @@
-# Wealth OS — v1.21.0
+# Wealth OS — v1.21.1
+
+## v1.21.1 — Reconciliation roll-forward and net-worth regression protection
+
+- Deduplicates existing read-only **bank-check roll-forward logic** previously duplicated in `js/app.js` and `js/db.js` into shared `js/reconciliation.js`. Both the Wealth Overview account snapshots and `wealthMetrics()` now calculate from the same rules.
+- Preserves the original bank baseline behavior: transactions dated before a reconciliation are never counted twice, same-day entries count only if recorded after that check, completed physical transfers move actual account balances, and virtual/purpose-only or pending transfers do not.
+- E.SUN still shows **physical balance versus purpose-bucket allocation**, including unassigned/overallocated statuses. Tithe bucket remains excluded from Core Wealth and Financial Net Worth.
+- Adds integration tests against actual IndexedDB reads for cross-account CTBC/E.SUN/Cash Wallet transfers, later income and expenses, historical adjustments, newer bank-check resets, deleted records, time/date boundaries, E.SUN virtual allocation, and consistency with net worth.
+- Does not change account balances, posted transactions, reconciliation records or historical months. No write-side changes, new UI elements or schema migrations. **Data model remains 190; IndexedDB schema remains 3.**
+- Shared module is included in service-worker precache and syntax checks. iPhone physical acceptance required.
+
+
 
 ## v1.21.0 — Month-Close & Reconciliation Assurance
 

@@ -103,3 +103,42 @@ export function wealthAccountLabels({ ct, cash, es, specialBudgetReserve }) {
     allocationText,
   };
 }
+
+/**
+ * A read-only illustration of extra monthly funding directed to ONE goal.
+ *
+ * The baseline includes only completed contributions actually recorded against
+ * the goal's bucket over the latest available three funding periods. It does
+ * not promise that ordinary Wealth OS routing will send the hypothetical extra
+ * amount there; no transaction, budget rule or goal state is ever changed.
+ */
+export function goalWhatIfFor({
+  goal, goals = [], bucketBalances = {}, recentHistory = [],
+  completedAllocation = () => 0, extraMonthly = 0, referenceDate = new Date(),
+}) {
+  if (!goal) return null;
+  const { balance, target, remaining } = goalProgressFor(goal, bucketBalances);
+  const status = goalStatusFor(goal, goals, bucketBalances);
+  const recorded = averageGoalContributionFor(recentHistory, goal.bucketId, completedAllocation);
+  const baseMonthly = Math.max(0, Number.isFinite(recorded) ? recorded : 0);
+  const entered = Number(extraMonthly);
+  const extra = Number.isFinite(entered) ? Math.min(1_000_000, Math.max(0, entered)) : 0;
+  const scenarioMonthly = baseMonthly + extra;
+  const canProject = status.key === "active" && target > 0;
+  const baseMonths = canProject && baseMonthly > 0 ? Math.ceil(remaining / baseMonthly) : null;
+  const scenarioMonths = canProject && scenarioMonthly > 0 ? Math.ceil(remaining / scenarioMonthly) : null;
+  return {
+    status: status.key,
+    balance,
+    target,
+    remaining,
+    baseMonthly,
+    extraMonthly: extra,
+    scenarioMonthly,
+    baseMonths,
+    scenarioMonths,
+    baseDate: baseMonths === null ? null : dateAfterMonthsFor(baseMonths, referenceDate),
+    scenarioDate: scenarioMonths === null ? null : dateAfterMonthsFor(scenarioMonths, referenceDate),
+    monthsSaved: baseMonths === null || scenarioMonths === null ? null : Math.max(0, baseMonths - scenarioMonths),
+  };
+}

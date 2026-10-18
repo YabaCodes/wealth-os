@@ -29,4 +29,8 @@ Before a release is merged:
 
 ## Current automated coverage
 
-The Node test suite covers pure accounting calculations, special-project/Special Budget accounting, Business Trip allowance and deposit rules, budget pacing, Activity normalization/grouping and release integrity. IndexedDB workflows, migrations, restore atomicity and full UI flows still require targeted integration tests or physical acceptance. Those are the next hardening frontier.
+The Node test suite covers pure accounting calculations, Special Budget / Business Trip accounting and deposit rules, pacing, Activity normalization/grouping, and release integrity.
+
+**v1.20.0 adds actual js/db.js integration tests** using test-only `fake-indexeddb` (in-memory API simulation): database creation, seed preservation, committed CRUD, opening a second connection, full export/restore round trip, invalid backup rejection, atomic rollback on an uncloneable record, undo snapshot recovery, and physical-vs-purpose transfer balance classification. The CI workflow installs only the test dependency and runs all checks before merging.
+
+**Remaining gaps:** broader end-to-end app migration and month-close tests, open-month budget synchronization, UI and iPhone Safari flows, and Special Budget settlement/undo integration. Simulated IndexedDB tests do not prove real-device storage durability or replace iPhone physical acceptance.

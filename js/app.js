@@ -5254,14 +5254,19 @@ function bind() {
           if (a === "cash-withdraw") modal = { type: "cash-transfer", mode: "withdrawal" };
           if (a === "cash-deposit") modal = { type: "cash-transfer", mode: "deposit" };
           if (a === "open-projects") modal = { type: "projects-list" };
-          if (a === "new-project") modal = { type: "project-form" };
+          if (a === "new-project") modal = { type: "project-type" };
+          if (a === "new-business-trip") modal = { type: "project-form", budgetType: "business_trip" };
+          if (a === "new-custom-budget") modal = { type: "project-form", budgetType: "custom" };
           if (a === "edit-project") modal = { type: "project-form", id: b.dataset.id };
+          if (a === "convert-project-business") modal = { type: "project-convert-business", id: b.dataset.id };
           if (a === "open-project") modal = { type: "project-detail", id: b.dataset.id };
           if (a === "add-project-expense") modal = { type: "project-expense", projectId: b.dataset.project };
           if (a === "edit-project-expense")
             modal = { type: "project-expense", projectId: b.dataset.project, expenseId: b.dataset.id };
+          if (a === "resolve-project-deposit")
+            modal = { type: "project-deposit", projectId: b.dataset.project, expenseId: b.dataset.id };
           if (a === "delete-project-expense") {
-            if (await askConfirm("Delete this project expense?", "", { ok: "Delete", danger: true }))
+            if (await askConfirm("Delete this Special Budget entry?", "", { ok: "Delete", danger: true }))
               return deleteProjectExpense(b.dataset.project, b.dataset.id);
             return;
           }

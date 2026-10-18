@@ -73,6 +73,17 @@ import {
   categoryRuleFor,
 } from "./special-budgets.js";
 import { commitSpecialBudgetSettlementAtomic, undoSpecialBudgetSettlementAtomic } from "./settlement-storage.js";
+import {
+  goalBalanceFor,
+  goalStatusFor,
+  goalProgressFor,
+  recentHistoryFor,
+  averageCoreContributionFor,
+  averageGoalContributionFor,
+  dateAfterMonthsFor,
+  goalPaceTextFor,
+  wealthAccountLabels,
+} from "./wealth-view-model.js";
 import { migrateV182, migrateV190 } from "./migrations.js";
 import { isClosedPeriod as periodIsClosed, assertPeriodEditable as guardPeriodEditable, syncOpenMonthPlanPersisted } from "./period-safety.js";
 
@@ -88,7 +99,7 @@ let modalDirty = false;
 let homeWeekStart = null,
   homeDay = null;
 let reachedGoals = null; // goals at target after the last load (null until the first load)
-const APP_VERSION = "1.20.2";
+const APP_VERSION = "1.20.3";
 const THEME_KEY = "wealthOSTheme";
 // Theme: 'system' follows the phone's light/dark setting. A copy is kept in localStorage so
 // index.html can apply it before the first paint (IndexedDB is too slow for that).
@@ -899,19 +910,10 @@ function latestInvestmentTwd() {
   return usd * Number(state.settings.usdTwdRate || 1);
 }
 function goalBal(g) {
-  return Number(state.bucketBalances[g.bucketId] || 0);
+  return goalBalanceFor(g, state.bucketBalances);
 }
 function goalStatus(g) {
-  const bal = goalBal(g),
-    target = Number(g.targetAmount || 0);
-  if (target > 0 && bal >= target) return { key: "complete", label: "Complete", className: "good-tag" };
-  if (g.status === "paused") return { key: "paused", label: "Paused", className: "" };
-  if (g.prerequisiteGoalId) {
-    const pg = goal(g.prerequisiteGoalId);
-    if (pg && goalBal(pg) < Number(g.prerequisiteAmount || 0))
-      return { key: "waiting", label: "Waiting", className: "warn-tag" };
-  }
-  return { key: "active", label: "Active", className: "good-tag" };
+  return goalStatusFor(g, state.goals, state.bucketBalances);
 }
 function periodAllIncome(periodId) {
   return state.incomes
@@ -962,23 +964,16 @@ function historyRecords() {
     .filter(Boolean);
 }
 function recentHistory(n = 3) {
-  return historyRecords().slice(-n);
+  return recentHistoryFor(historyRecords(), n);
 }
 function averageCoreContribution(n = 3) {
-  const xs = recentHistory(n).filter((x) => x.regularIncome > 0);
-  return xs.length ? xs.reduce((s, x) => s + x.wealthContribution, 0) / xs.length : 0;
+  return averageCoreContributionFor(recentHistory(n));
 }
 function averageGoalContribution(bucketId, n = 3) {
-  const xs = recentHistory(n);
-  if (!xs.length) return 0;
-  return xs.reduce((sum, x) => sum + completedAllocationToBucket(x.id, bucketId), 0) / xs.length;
+  return averageGoalContributionFor(recentHistory(n), bucketId, completedAllocationToBucket);
 }
 function dateAfterMonths(months) {
-  if (months === null || months === undefined || !isFinite(months)) return "—";
-  const d = new Date();
-  d.setDate(1);
-  d.setMonth(d.getMonth() + Math.max(0, Math.ceil(months)));
-  return new Intl.DateTimeFormat("en-US", { month: "short", year: "numeric" }).format(d);
+  return dateAfterMonthsFor(months);
 }
 function titheContributedInYear(year) {
   const completed = state.transfers.filter((t) => !t.deletedAt && t.status === "completed");
@@ -1093,14 +1088,13 @@ function forecastBaselineSalary() {
   return latestRegularTakeHome() || Number(state.settings.forecastSalary || 0);
 }
 function goalPaceText(g) {
-  const bal = goalBal(g),
-    remaining = Math.max(0, Number(g.targetAmount || 0) - bal);
-  if (remaining <= 0) return "Complete";
-  let pace = averageGoalContribution(g.bucketId, 3);
-  if (g.id === "goal-emergency" && pace <= 0) pace = currentPaceMonthly();
-  if (pace <= 0) return "Need contribution history";
-  const months = Math.ceil(remaining / pace);
-  return `At current pace: ${dateAfterMonths(months)} · ~${money(pace)}/mo`;
+  return goalPaceTextFor({
+    goal: g,
+    bucketBalances: state.bucketBalances,
+    recentHistory: recentHistory(3),
+    completedAllocation: completedAllocationToBucket,
+    fallbackPace: currentPaceMonthly,
+  });
 }
 function scenarioFor(returnPct, growthPct, extra = 0, salaryOverride = null) {
   const salary = Number((salaryOverride ?? forecastBaselineSalary()) || 0);
@@ -2774,10 +2768,7 @@ function goalsView() {
     .filter((g) => g.status !== "archived")
     .sort((a, b) => a.priority - b.priority)
     .map((g) => {
-      const b = goalBal(g),
-        target = Number(g.targetAmount || 0),
-        p = target ? Math.min(1, b / target) : 0,
-        remaining = Math.max(0, target - b),
+      const { balance: b, target, progress: p, remaining } = goalProgressFor(g, state.bucketBalances),
         status = goalStatus(g);
       let rule = "Manual goal";
       if (g.id === "goal-emergency") rule = "Primary core-wealth goal";
@@ -2798,36 +2789,16 @@ function goalsView() {
 function wealthView() {
   const fx = state.settings.usdTwdRate;
   const ct = accountSnapshot("ctbc"),
-    specialBudgetReserve = activeSpecialBudgetReserve(),
-    operatingAvailable = Number(ct.actual || 0) - specialBudgetReserve;
+    specialBudgetReserve = activeSpecialBudgetReserve();
   const es = esunSnapshot();
   const cash = accountSnapshot("cash");
-  const ctStatus = !ct.verified ? "Not checked" : Math.abs(ct.difference) < 0.5 ? "Reconciled" : "Ledger mismatch";
-  const ctStatusClass = !ct.verified ? "" : Math.abs(ct.difference) < 0.5 ? " good-tag" : " warn-tag";
-  const cashStatus = cash.actual < -0.5 ? "Negative balance" : cash.verified ? "Counted" : "Tracked";
-  const cashStatusClass = cash.actual < -0.5 ? " warn-tag" : cash.verified ? " good-tag" : "";
-  let esStatus = "Not checked";
-  let esStatusClass = "";
-  if (es.verified) {
-    if (es.bankOk && es.allocationOk) {
-      esStatus = "Fully reconciled";
-      esStatusClass = " good-tag";
-    } else if (!es.bankOk && !es.allocationOk) {
-      esStatus = "2 items to resolve";
-      esStatusClass = " warn-tag";
-    } else if (!es.bankOk) {
-      esStatus = "Ledger mismatch";
-      esStatusClass = " warn-tag";
-    } else {
-      esStatus = "Allocation needed";
-      esStatusClass = " warn-tag";
-    }
-  }
-  const allocationText = es.allocationOk
-    ? "Complete"
-    : es.unassigned > 0
-      ? `${money(es.unassigned)} unassigned`
-      : `${money(Math.abs(es.unassigned))} over-allocated`;
+  const {
+    operatingAvailable,
+    ctStatus, ctStatusClass,
+    cashStatus, cashStatusClass,
+    esStatus, esStatusClass,
+    allocationText,
+  } = wealthAccountLabels({ ct, cash, es, specialBudgetReserve });
   return `<div class="privacy-all-money"><div class="sub page-sub">Physical accounts and virtual purpose ledgers</div>
   <div class="grid g2" style="margin-top:14px"><section class="card"><div class="metric-label">Core Wealth</div><div class="metric">${money(state.wealth.coreWealth)}</div><div class="sub">Long-term capital only</div></section><section class="card"><div class="metric-label">Financial Net Worth</div><div class="metric">${money(state.wealth.financialNetWorth)}</div><div class="sub">Tithe excluded · includes cash on hand</div></section></div>
 

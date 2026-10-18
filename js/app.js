@@ -72,6 +72,8 @@ import {
   depositResolved,
   categoryRuleFor,
 } from "./special-budgets.js";
+import { migrateV182, migrateV190 } from "./migrations.js";
+import { isClosedPeriod as periodIsClosed, assertPeriodEditable as guardPeriodEditable, syncOpenMonthPlanPersisted } from "./period-safety.js";
 
 const root = document.querySelector("#app");
 let tab = "home";
@@ -85,7 +87,7 @@ let modalDirty = false;
 let homeWeekStart = null,
   homeDay = null;
 let reachedGoals = null; // goals at target after the last load (null until the first load)
-const APP_VERSION = "1.20.0";
+const APP_VERSION = "1.20.1";
 const THEME_KEY = "wealthOSTheme";
 // Theme: 'system' follows the phone's light/dark setting. A copy is kept in localStorage so
 // index.html can apply it before the first paint (IndexedDB is too slow for that).
@@ -584,54 +586,6 @@ async function migrateV181() {
   });
 }
 
-async function migrateV182() {
-  const settings = await getOne("settings", "app");
-  if (Number(settings?.dataModelVersion || 0) >= 182) return;
-  // v1.12 adds a Household flexible cap (laundry, toiletries, cleaning) with no amount: set it in
-  // Settings → Budget rules. Skipped if a category with that name already exists. It is also added,
-  // at zero, to any open month's plan so Household expenses count there; zero changes no totals.
-  const categories = await getAll("categories");
-  const stamp = new Date().toISOString();
-  if (!categories.some((c) => c.id === "household" || String(c.name || "").trim().toLowerCase() === "household")) {
-    const water = categories.find((c) => c.id === "water"),
-      misc = categories.find((c) => c.id === "misc");
-    const sort = water && misc ? (Number(water.sort) + Number(misc.sort)) / 2 : Number(water?.sort ?? 34) + 0.5;
-    const household = {
-      id: "household",
-      name: "Household",
-      group: "Flexible",
-      ruleType: "cap",
-      defaultAmount: 0,
-      active: true,
-      sort,
-      createdAt: stamp,
-      updatedAt: stamp,
-    };
-    await put("categories", household);
-    for (const period of await getAll("periods")) {
-      const snap = period.planSnapshot;
-      if (period.state === "closed" || !snap || !Array.isArray(snap.lines)) continue;
-      if (snap.lines.some((l) => l.id === "household")) continue;
-      await put("periods", { ...period, planSnapshot: { ...snap, lines: [...snap.lines, { ...household, budgetAmount: 0 }] } });
-    }
-  }
-  await put("settings", { ...settings, dataModelVersion: 182, appVersion: "1.12.0", updatedAt: stamp });
-}
-
-async function migrateV190() {
-  const settings = await getOne("settings", "app");
-  if (Number(settings?.dataModelVersion || 0) >= 190) return;
-  // v1.19 extends the existing Special Project records in-place with optional Special Budget fields.
-  // No historical project or expense record is rewritten automatically; legacy projects remain readable
-  // and can be deliberately converted from their own detail screen.
-  await put("settings", {
-    ...settings,
-    dataModelVersion: 190,
-    appVersion: "1.19.0",
-    updatedAt: new Date().toISOString(),
-  });
-}
-
 async function syncReleaseMetadata() {
   const settings = await getOne("settings", "app");
   if (!settings) return;
@@ -710,11 +664,10 @@ function currentPeriod() {
   return state.periods.find((p) => p.id === selectedPeriodId) || null;
 }
 function isClosedPeriod(periodId) {
-  return state.periods.find((p) => p.id === periodId)?.state === "closed";
+  return periodIsClosed(state.periods, periodId);
 }
 function assertPeriodEditable(periodId) {
-  if (periodId && isClosedPeriod(periodId))
-    throw new Error(`${monthLabel(periodId)} is closed. Reopen the month before changing period-linked records.`);
+  guardPeriodEditable(state.periods, periodId, monthLabel);
 }
 function formatMonths(m) {
   if (m === null || m === undefined || !isFinite(m)) return "—";
@@ -5355,23 +5308,16 @@ async function saveSettings(form) {
 // Refresh an open month's budget plan after budget rules change. Never edits transactions,
 // completed transfers, allocations or any closed-month snapshot.
 async function syncOpenMonthPlan(selected, categories, settings, stamp, goals = state.goals) {
-  const salary = periodRegularIncome(selected.id),
-    newPlan = buildBudgetPlan({ income: salary, categories, settings });
-  const preBalances = { ...state.bucketBalances };
-  for (const b of state.buckets)
-    preBalances[b.id] = Number(preBalances[b.id] || 0) - completedAllocationToBucket(selected.id, b.id);
-  const goalAllocs = allocateGoalSurplus({
-    amount: Math.max(0, Math.round(newPlan.immediateWealth)),
+  return syncOpenMonthPlanPersisted({
+    selected,
+    categories,
+    settings,
+    stamp,
+    salary: periodRegularIncome(selected.id),
     goals,
-    bucketBalances: preBalances,
-  });
-  await put("periods", {
-    ...selected,
-    planSnapshot: newPlan,
-    paydayRoutingSnapshot: { goalAllocs: goalAllocs.map((a) => ({ ...a })), createdAt: stamp, reason: "budget_sync" },
-    budgetRulesUpdatedAt: stamp,
-    budgetRevision: Number(selected.budgetRevision || 0) + 1,
-    updatedAt: stamp,
+    buckets: state.buckets,
+    bucketBalances: state.bucketBalances,
+    completedAllocationToBucket: (bucketId) => completedAllocationToBucket(selected.id, bucketId),
   });
 }
 async function backup() {

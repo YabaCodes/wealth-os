@@ -1,4 +1,16 @@
-# Wealth OS — v1.20.1
+# Wealth OS — v1.20.2
+
+## v1.20.2 — Atomic Special Budget Settlement & Undo
+
+- Settlement now persists its project status, company reimbursement summary and generated personal income/shortfall/transfer/allocations in **one IndexedDB transaction**. If any write fails, all writes roll back together rather than leaving a partially settled project.
+- The same atomic protection applies when undoing a settlement. A completed surplus transfer still **blocks Undo** until the user handles the real bank movement, as before.
+- The transaction re-checks current saved data to reject **duplicate submissions**, changed expenses, incomplete NTD amounts, pending refundable deposits, mismatched reimbursement totals and funding months that closed after opening the form.
+- Reimbursement calculations remain unchanged: Business Trip full fixed allowance is independent of flexible spending; exact expenses are reimbursed at recorded amounts; pending deposits are excluded; only final surplus/shortfall flows into the personal ledger.
+- New isolated IndexedDB integration tests exercise successful settlement and undo, concurrent submissions, pending deposits, shortfalls, exact break-even, stale data, completed transfers and fail-atomic rollback on malformed generated records.
+- No UI redesign or migration. **Data model 190 / IndexedDB schema 3** remain unchanged. Existing financial records are not rewritten by this upgrade.
+- New settlement module is included in the service-worker precache and syntax checks. Physical iPhone acceptance remains required.
+
+
 
 ## v1.20.1 — Financial history, migration and month-close regression protection
 

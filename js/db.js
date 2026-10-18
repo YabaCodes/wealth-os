@@ -200,6 +200,43 @@ export const saveUndoSnapshot = (payload) => undoStore("readwrite", (os) => os.p
 export const getUndoSnapshot = () => undoStore("readonly", (os) => os.get("pre-restore"));
 export const clearUndoSnapshot = () => undoStore("readwrite", (os) => os.delete("pre-restore"));
 
+/**
+ * Read and modify multiple stores in ONE IndexedDB readwrite transaction.
+ *
+ * The mutator is deliberately synchronous: it is called while the final IDB
+ * request callback is active. Never await or queue application promises inside
+ * the callback, as that can let IndexedDB commit an incomplete transaction.
+ * A thrown error aborts all queued writes and leaves every store unchanged.
+ */
+export async function atomicStoreUpdate(storeNames, mutate) {
+  const db = await openDb();
+  const names = [...new Set(storeNames)];
+  if (!names.length) throw new Error("Atomic update requires at least one store.");
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(names, "readwrite");
+    const before = {};
+    let pending = names.length;
+    let mutationError = null;
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(mutationError || tx.error || new Error("Atomic update failed."));
+    tx.onabort = () => reject(mutationError || tx.error || new Error("Atomic update was cancelled."));
+    for (const name of names) {
+      const req = tx.objectStore(name).getAll();
+      req.onsuccess = () => {
+        before[name] = req.result || [];
+        if (--pending !== 0) return;
+        try {
+          mutate(before, (store) => tx.objectStore(store));
+        } catch (err) {
+          mutationError = err;
+          try { tx.abort(); } catch {}
+          reject(err);
+        }
+      };
+    }
+  });
+}
+
 export async function bucketBalances() {
   const [buckets, allocs, expenses] = await Promise.all([
     getAll("buckets"),

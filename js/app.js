@@ -33,6 +33,16 @@ import {
   simulateWealthStrategyWithGrowth,
 } from "./calc.js";
 import { askConfirm, notify, showError, toast, snapshotBars, animateBars, motionAllowed, watchKeyboard } from "./ui.js";
+import {
+  PROJECT_CATEGORIES,
+  PROJECT_CURRENCIES,
+  projectExpensesFor,
+  projectKnownTwd as projectKnownTwdFromRows,
+  projectMissingTwd as projectMissingTwdFromRows,
+  projectPaymentTwd as projectPaymentTwdFromRows,
+  projectOriginalTotals as projectOriginalTotalsFromRows,
+  formatOriginal,
+} from "./projects.js";
 
 const root = document.querySelector("#app");
 let tab = "home";
@@ -73,8 +83,6 @@ if (window.matchMedia) {
   mq.addEventListener ? mq.addEventListener("change", onChange) : mq.addListener?.(onChange);
 }
 const DATA_MODEL_VERSION = 182;
-const PROJECT_CATEGORIES = ["Hotel", "Car Rental", "Food", "Gas", "Transport", "Business", "Other"];
-const PROJECT_CURRENCIES = ["EUR", "TWD", "USD", "GBP", "CHF", "JPY"];
 
 const today = (d = new Date()) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -736,42 +744,22 @@ function project(id) {
   return state.projects.find((x) => x.id === id && !x.deletedAt) || null;
 }
 function projectExpenses(projectId) {
-  return state.projectExpenses
-    .filter((x) => x.projectId === projectId && !x.deletedAt)
-    .sort(
-      (a, b) =>
-        String(b.date || "").localeCompare(String(a.date || "")) ||
-        String(b.createdAt || "").localeCompare(String(a.createdAt || "")),
-    );
+  return projectExpensesFor(state.projectExpenses, projectId);
 }
 function projectSettlement(projectId) {
   return state.projectSettlements.find((x) => x.projectId === projectId && !x.deletedAt) || null;
 }
 function projectKnownTwd(projectId) {
-  return projectExpenses(projectId).reduce(
-    (sum, x) => sum + (Number.isFinite(Number(x.twdAmount)) ? Number(x.twdAmount || 0) : 0),
-    0,
-  );
+  return projectKnownTwdFromRows(state.projectExpenses, projectId);
 }
 function projectMissingTwd(projectId) {
-  return projectExpenses(projectId).filter((x) => !Number.isFinite(Number(x.twdAmount)) || Number(x.twdAmount) <= 0);
+  return projectMissingTwdFromRows(state.projectExpenses, projectId);
 }
 function projectPaymentTwd(projectId, method) {
-  return projectExpenses(projectId)
-    .filter((x) => x.paymentMethod === method && Number(x.twdAmount) > 0)
-    .reduce((sum, x) => sum + Number(x.twdAmount || 0), 0);
+  return projectPaymentTwdFromRows(state.projectExpenses, projectId, method);
 }
 function projectOriginalTotals(projectId) {
-  const out = {};
-  for (const x of projectExpenses(projectId)) {
-    const c = x.currency || "TWD";
-    out[c] = (out[c] || 0) + Number(x.originalAmount || 0);
-  }
-  return out;
-}
-function formatOriginal(amount, currency) {
-  const n = Number(amount || 0);
-  return `${currency || "TWD"} ${n.toLocaleString(undefined, { minimumFractionDigits: n % 1 ? 2 : 0, maximumFractionDigits: 2 })}`;
+  return projectOriginalTotalsFromRows(state.projectExpenses, projectId);
 }
 function projectStatusTag(p) {
   const settled = projectSettlement(p.id);

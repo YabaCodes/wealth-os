@@ -29,4 +29,4 @@ Before a release is merged:
 
 ## Current automated coverage
 
-The Node test suite covers pure accounting calculations and release integrity. IndexedDB workflows, migrations, restore atomicity and full UI flows still require targeted integration tests or physical acceptance. Those are the next hardening frontier.
+The Node test suite covers pure accounting calculations, special-project accounting and release integrity. IndexedDB workflows, migrations, restore atomicity and full UI flows still require targeted integration tests or physical acceptance. Those are the next hardening frontier.

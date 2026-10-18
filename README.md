@@ -4,6 +4,13 @@
 
 This release hardens the existing app without changing financial calculations or redesigning the UI.
 
+### Hardening phase 2 — controlled modularization
+
+- Special-project accounting helpers now live in `js/projects.js` instead of the main app controller.
+- The extracted module contains no DOM or IndexedDB access, so its calculations can be regression-tested directly.
+- Dedicated tests protect project filtering, NTD valuation, missing-conversion detection, payment-method subtotals and original-currency totals.
+- `app.js` keeps only thin adapters to current state, so project UI and settlement behavior remain unchanged.
+
 - **Automated accounting tests.** Core budget-plan, month-end sweep, goal-routing, forecasting and expense-aggregation rules are covered with deterministic Node tests.
 - **Release consistency tests.** CI verifies that the app version, public defaults, README release heading and service-worker cache version agree, and that every service-worker cached asset exists.
 - **Syntax checks.** Every JavaScript source file and the service worker are syntax-checked before tests run.

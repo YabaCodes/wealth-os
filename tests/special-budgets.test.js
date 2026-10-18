@@ -5,6 +5,7 @@ import {
   totalFlexibleAllowance,
   elapsedAllowanceDays,
   projectBudgetSummary,
+  projectCategoryBreakdown,
   mapLegacyBusinessExpense,
   parseCustomCategoryRules,
   effectiveTwd,
@@ -160,4 +161,42 @@ test("Trip Wallet summary deducts counted spend while refundable holds stay outs
   assert.equal(summary.walletAllocated, 20000);
   assert.equal(summary.walletRemaining, 12000);
   assert.equal(summary.depositsPendingTwd, 10000);
+});
+
+
+test("Special Budget category breakdown groups exact and flexible spending without counting pending deposits", () => {
+  const project = {
+    type: "business_trip",
+    categoryRules: [
+      { id: "hotel_rental", name: "Hotel Rental", treatment: "exact" },
+      { id: "train_ticket", name: "Train Ticket", treatment: "exact" },
+      { id: "food", name: "Food", treatment: "flexible" },
+      { id: "shopping", name: "Shopping", treatment: "flexible" },
+    ],
+  };
+  const expenses = [
+    { categoryId: "hotel_rental", category: "Hotel Rental", reimbursementType: "exact", twdAmount: 6000 },
+    { categoryId: "train_ticket", category: "Train Ticket", reimbursementType: "exact", twdAmount: 3000 },
+    { categoryId: "food", category: "Food", reimbursementType: "flexible", twdAmount: 500 },
+    { categoryId: "food", category: "Food", reimbursementType: "flexible", twdAmount: 700 },
+    {
+      categoryId: "hotel_rental",
+      category: "Hotel Rental",
+      reimbursementType: "exact",
+      recordType: "refundable_deposit",
+      depositStatus: "pending",
+      twdAmount: 10000,
+    },
+  ];
+
+  const exact = projectCategoryBreakdown(project, expenses, "exact");
+  const flexible = projectCategoryBreakdown(project, expenses, "flexible");
+  assert.deepEqual(exact.map((x) => [x.id, x.amount, x.count]), [
+    ["hotel_rental", 6000, 1],
+    ["train_ticket", 3000, 1],
+  ]);
+  assert.deepEqual(flexible.map((x) => [x.id, x.amount, x.count]), [
+    ["food", 1200, 2],
+    ["shopping", 0, 0],
+  ]);
 });

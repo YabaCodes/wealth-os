@@ -1,4 +1,16 @@
-# Wealth OS — v1.22.1
+# Wealth OS — v1.22.2
+
+## v1.22.2 — Goal Target-Date Planner
+
+- In **Wealth → Goals → Goal funding scenario**, switch between the previous **Extra monthly** illustration and new **Reach by date** mode. The goal selector is shared. Date and mode inputs are temporary, not saved.
+- Choose a desired completion date to estimate **minimum monthly funding required** (rounded up to a whole NT dollar), additional funding versus average completed allocations, and an illustrative ETA based on the currently planned monthly wealth-funding amount.
+- **Explicit timing:** the calculation counts complete future month-end contributions starting next calendar month. A deadline before the end of a month does **not** count that month's deposit. Does not compound investment returns.
+- **Feasibility comparison, not an affordability guarantee:** reads an existing open funding month's `planSnapshot.immediateWealth` as a *shared wealth-funding reference*. Displays a warning when the requirement exceeds it, a qualified within-plan message when it fits, or **capacity unknown** when no usable funding plan exists. Other goals and investments compete for this amount; the feature never treats gross salary as disposable funds.
+- Missing/invalid dates, already-complete, paused and prerequisite-locked goals show no actionable monthly requirement or estimated achievement date. Reuses the existing Goals read-only model without changing its original Extra Monthly behavior.
+- Adds pure deterministic unit tests for date boundaries, round-up, waiting/paused states, no history, missing/zero capacity and absence of data mutations; desktop/mobile real-browser UI acceptance covers switching modes, warning states, privacy masking, Dark mode and unchanged exported IndexedDB data.
+- **Data model remains 190 and IndexedDB schema 3.** No migrations, transactions, transfers, goal edits, automatic allocation, routing, or persistent planner settings are introduced. App and service-worker cache advance to **v1.22.2**.
+
+
 
 ## v1.22.1 — Goals scenario planner dark-mode contrast hotfix
 

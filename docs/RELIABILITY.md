@@ -53,4 +53,6 @@ The Node test suite covers pure accounting calculations, Special Budget / Busine
 
 **v1.22.3 adds a read-only Goals portfolio**, using saved priorities, completed allocation pace, target-date model and one shared monthly wealth-funding reference. Unit tests prevent double-counting planned capacity across active goals, including missing/locked/paused deadline states. Desktop/mobile browser tests check navigation to the existing planner, full financial-record immutability, dark mode and privacy masking.
 
+**v1.23.0 adds a read-only Monthly Financial Review**, deriving spending and wealth totals from existing period views and period-close snapshots, never reclassifying transfers as expenses. It reuses the month-close readiness matrix for open months only, omits current bank checks for historically closed periods, and displays actual previous recorded periods without manufacturing percentage baselines. Node and Chromium browser regressions verify read-only navigation and IndexedDB immutability.
+
 **Remaining gaps:** exhaustive UI/controller flows, older historical migrations, and real iPhone Safari/WebKit behavior. Neither simulated IndexedDB nor Chromium mobile emulation proves device storage durability; physical iPhone acceptance remains required.

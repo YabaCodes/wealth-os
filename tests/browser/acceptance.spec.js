@@ -8,7 +8,7 @@ import {
 test("navigation, Settings release identity and actual expense form persist through reload", async ({ page }) => {
   await seedSyntheticBrowser(page);
   await page.locator('[data-action="settings"]').first().click();
-  await expect(page.locator('[role="dialog"]')).toContainText("Wealth OS v1.22.0");
+  await expect(page.locator('[role="dialog"]')).toContainText("Wealth OS v1.22.1");
   await expect(page.locator('[role="dialog"]')).toContainText("Data model 190");
   await page.locator('[data-action="close-modal"]').click();
 
@@ -240,7 +240,7 @@ test("Goals planner ETA and labels pass contrast checks in explicit Light, Dark 
   };
   const check = async () => page.evaluate(() => {
     const rgb = (color) => {
-      const numbers = color.match(/[\\d.]+/g).slice(0, 3).map(Number);
+      const numbers = color.match(/[0-9.]+/g).slice(0, 3).map(Number);
       return numbers.map((v) => {
         const c = v / 255;
         return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;

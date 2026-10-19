@@ -8,7 +8,7 @@ import {
 test("navigation, Settings release identity and actual expense form persist through reload", async ({ page }) => {
   await seedSyntheticBrowser(page);
   await page.locator('[data-action="settings"]').first().click();
-  await expect(page.locator('[role="dialog"]')).toContainText("Wealth OS v1.22.0");
+  await expect(page.locator('[role="dialog"]')).toContainText("Wealth OS v1.22.1");
   await expect(page.locator('[role="dialog"]')).toContainText("Data model 190");
   await page.locator('[data-action="close-modal"]').click();
 
@@ -223,4 +223,74 @@ test("Goals what-if uses completed allocations and restores private-money maskin
   await page.locator("#goal-scenario-extra").fill("20000");
   await expect(page.locator("#goal-scenario-result")).not.toContainText("NT$26,000");
   await expect(page.locator("#goal-scenario-result")).toContainText("••••");
+});
+
+test("Goals planner ETA and labels pass contrast checks in explicit Light, Dark and system Dark", async ({ page }) => {
+  await seedSyntheticBrowser(page);
+  const goToPlanner = async () => {
+    await page.locator('nav [data-tab="wealth"]').click();
+    await page.locator('.wealth-switch [data-tab="goals"]').click();
+    await expect(page.locator(".goal-scenario-highlight strong")).toBeVisible();
+  };
+  const setTheme = async (theme) => {
+    await page.locator('[data-action="settings"]').first().click();
+    await page.locator(`[role="dialog"] [data-action="set-theme"][data-theme="${theme}"]`).click();
+    await page.locator('[role="dialog"] [data-action="close-modal"]').first().click();
+    await expect(page.locator("html")).toHaveAttribute("data-theme", theme === "system" ? "dark" : theme);
+  };
+  const check = async () => page.evaluate(() => {
+    const rgb = (color) => {
+      const numbers = color.match(/[0-9.]+/g).slice(0, 3).map(Number);
+      return numbers.map((v) => {
+        const c = v / 255;
+        return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+      });
+    };
+    const luminance = (color) => rgb(color).reduce((s, c, i) => s + c * [0.2126, 0.7152, 0.0722][i], 0);
+    const contrast = (a, b) => {
+      const values = [luminance(a), luminance(b)].sort((x, y) => y - x);
+      return (values[0] + 0.05) / (values[1] + 0.05);
+    };
+    const highlight = document.querySelector(".goal-scenario-highlight");
+    const label = highlight.querySelector(".metric-label");
+    const value = highlight.querySelector("strong");
+    const card = document.querySelector("#goal-scenario-planner");
+    const message = card.querySelector(".goal-scenario-message");
+    const disclaimer = card.querySelector(".goal-scenario-disclaimer");
+    const bg = getComputedStyle(highlight).backgroundColor;
+    const cardBg = getComputedStyle(card).backgroundColor;
+    return {
+      background: bg,
+      theme: document.documentElement.dataset.theme,
+      label: contrast(getComputedStyle(label).color, bg),
+      value: contrast(getComputedStyle(value).color, bg),
+      message: contrast(getComputedStyle(message).color, cardBg),
+      disclaimer: contrast(getComputedStyle(disclaimer).color, cardBg),
+    };
+  });
+  await goToPlanner();
+  await page.locator("#goal-scenario-extra").fill("10000");
+  const light = await check();
+  expect(light.theme).toBe("light");
+  for (const part of ["label", "value", "message", "disclaimer"])
+    expect(light[part], `light theme ${part}`).toBeGreaterThanOrEqual(4.5);
+
+  await setTheme("dark");
+  const dark = await check();
+  expect(dark.background).not.toBe(light.background);
+  for (const part of ["label", "value", "message", "disclaimer"])
+    expect(dark[part], `dark theme ${part}`).toBeGreaterThanOrEqual(4.5);
+  await page.locator("#goal-scenario-extra").fill("20000");
+  await expect(page.locator(".goal-scenario-highlight strong")).not.toContainText("No estimate");
+  const afterUpdate = await check();
+  expect(afterUpdate.value).toBeGreaterThanOrEqual(4.5);
+
+  await setTheme("light");
+  expect((await check()).background).toBe(light.background);
+  await page.emulateMedia({ colorScheme: "dark" });
+  await setTheme("system");
+  const systemDark = await check();
+  expect(systemDark.background).toBe(dark.background);
+  expect(systemDark.label).toBeGreaterThanOrEqual(4.5);
+  expect(systemDark.value).toBeGreaterThanOrEqual(4.5);
 });

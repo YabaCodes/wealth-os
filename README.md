@@ -1,4 +1,15 @@
-# Wealth OS — v1.22.0
+# Wealth OS — v1.22.1
+
+## v1.22.1 — Goals scenario planner dark-mode contrast hotfix
+
+- Fixes the **With Additional Contribution** ETA result tile being a pale mint background with unreadable light text on an iPhone in Dark mode.
+- Uses Wealth OS's existing `html[data-theme="dark"]` theme selector, honoring both explicit Dark and device-following System settings. In Dark mode, the highlighted tile uses a dark emerald background with high-contrast readable label and ETA.
+- Ensures matching contrast in Light mode for both the label and the projected date, and improves Dark-mode readability of supporting labels, scenario explanation, and disclaimer.
+- Adds actual Chromium desktop/mobile UI tests checking computed foreground/background color contrast (WCAG AA 4.5:1 threshold) for the ETA, small label and supporting explanation in Light, Dark, and System-Dark modes, including after interactive input.
+- **Styles and release identity only.** No changes to goals, preview calculations, transaction posting, stored records, migrations or service-worker precached assets.
+- Financial data model **190** and IndexedDB schema **3** unchanged. Installed iPhone Safari acceptance remains required.
+
+
 
 ## v1.22.0 — Read-only Goal Contribution Scenario Planner
 

@@ -113,13 +113,22 @@ For v1.20.3, checks covered version/data model, Wealth balances/reconciliation, 
 
 ## v1.22.0 — User-Facing Wealth & Goals Improvements
 
-**Status: implementation under review; automated and physical iPhone acceptance required.**
+**Status: PR #24 merged; user confirms the planner functions correctly, with a Dark-mode contrast defect requiring v1.22.1.**
 
 - Add a read-only **What if I save more?** planner to Goals for an extra hypothetical monthly contribution to one selected goal.
 - Compare actual recorded goal allocation pace (last three funding months) with the hypothetical pace; show current and illustrative completion dates and possible months saved.
 - Respect waiting prerequisite, paused, complete and no-target states. Do not imply the extra amount is automatically routed, or create a saved plan or transfer.
 - Cover input changes, privacy masking, no database writes and reload-reset behavior in desktop/mobile browser tests, plus deterministic calculation unit tests.
 - Keep financial data model 190, IndexedDB schema 3, existing goals, transaction history and all prior reporting unchanged.
+
+## v1.22.1 — Dark-mode Goals planner contrast
+
+**Status: hotfix in review; iPhone acceptance pending.**
+
+- Fix the light mint-highlight tile and its unreadable value/label when the Goals planner is viewed in Dark mode.
+- Support manually selected Dark and device-based System Dark through the app's actual theme selector.
+- Improve contrast of planner supporting copy while preserving Light-mode appearance, financial forecasts and stored records.
+- Cover foreground/background contrast in desktop/mobile real-browser tests. No app calculation or IndexedDB changes.
 
 ### Later candidates (not committed)
 

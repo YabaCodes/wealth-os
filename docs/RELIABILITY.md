@@ -47,4 +47,6 @@ The Node test suite covers pure accounting calculations, Special Budget / Busine
 
 **v1.22.0 adds the first user-facing Goals scenario planner**, deliberately limited to read-only calculations. A hypothetical extra monthly contribution never changes persisted goals, actual allocations, physical accounts, budgets or transfers. Pure unit tests and desktop/mobile Chromium acceptance cover forecast arithmetic, goal prerequisite/paused/completed constraints, no writes, ephemeral inputs and privacy-mode masking.
 
+**v1.22.1 adds computed style accessibility regression coverage** to the Goals what-if browser tests: small labels, highlighted ETA values and supporting copy must meet a minimum 4.5:1 foreground/background contrast in Light, explicit Dark and System-Dark themes. The fix is CSS-only apart from release identifiers.
+
 **Remaining gaps:** exhaustive UI/controller flows, older historical migrations, and real iPhone Safari/WebKit behavior. Neither simulated IndexedDB nor Chromium mobile emulation proves device storage durability; physical iPhone acceptance remains required.

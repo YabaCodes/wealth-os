@@ -85,6 +85,7 @@ import {
   wealthAccountLabels,
   goalWhatIfFor,
   goalTargetDateFor,
+  goalsPortfolioFor,
 } from "./wealth-view-model.js";
 import { assessMonthClose, closeMonthAtomic, reopenMonthAtomic } from "./month-close.js";
 import {
@@ -107,7 +108,7 @@ let modalDirty = false;
 let homeWeekStart = null,
   homeDay = null;
 let reachedGoals = null; // goals at target after the last load (null until the first load)
-const APP_VERSION = "1.22.2";
+const APP_VERSION = "1.22.3";
 const THEME_KEY = "wealthOSTheme";
 // Theme: 'system' follows the phone's light/dark setting. A copy is kept in localStorage so
 // index.html can apply it before the first paint (IndexedDB is too slow for that).
@@ -2648,6 +2649,67 @@ function projectSettlementFormView(projectId) {
   </form>`;
 }
 
+function goalPlannedFundingReference() {
+  const open = [...state.periods].filter((p) => p.state !== "closed")
+    .sort((a, b) => a.id.localeCompare(b.id)).at(-1);
+  const plan = open ? planFor(open.id) : null;
+  const planned = Number(plan?.immediateWealth);
+  const hasPlan = !!plan && (Number(plan.salary || 0) > 0 || Number(plan.immediateWealth || 0) > 0);
+  return hasPlan && Number.isFinite(planned) ? Math.max(0, planned) : null;
+}
+
+function goalsPortfolioView() {
+  const portfolio = goalsPortfolioFor({
+    goals: state.goals,
+    bucketBalances: state.bucketBalances,
+    recentHistory: recentHistory(3),
+    completedAllocation: completedAllocationToBucket,
+    monthlyCapacity: goalPlannedFundingReference(),
+  });
+  if (!portfolio.rows.length) return "";
+  const healthText = (r) => `<span class="goal-portfolio-health goal-health-${r.health}">${esc(r.healthLabel)}</span>`;
+  const actionButton = (r) => r.status === "complete" ? "" :
+    `<button class="btn secondary goal-portfolio-plan" type="button" data-portfolio-plan="${esc(r.id)}" aria-label="Explore ${esc(r.name)} in the planner">Open planner</button>`;
+  const focus = portfolio.focus;
+  const others = portfolio.rows.filter((r) => r.id !== focus?.id);
+  const shared = portfolio.shared;
+  let sharedMessage = "";
+  if (shared.state === "above-plan") {
+    sharedMessage = `Scheduled goals require ${privateMoney(shared.requiredTotal)} per month, exceeding the shared plan by ${privateMoney(shared.gap)}.`;
+  } else if (shared.state === "within-plan") {
+    sharedMessage = "Total deadline requirements fit within the shared planned amount, but this is not verified spare cash or a funding guarantee.";
+  } else if (shared.state === "partial") {
+    sharedMessage = `Known deadlines require ${privateMoney(shared.requiredTotal)}/mo within the planned amount, but ${shared.missingDeadline} active goal${shared.missingDeadline === 1 ? "" : "s"} lack a usable deadline. No portfolio-wide affordability claim is possible.`;
+  } else if (shared.state === "unknown") {
+    sharedMessage = "Shared planned wealth funding is unknown; no affordability conclusion is available.";
+  } else {
+    sharedMessage = "No active goals have usable deadlines yet. Choose dates to compare their combined monthly requirements.";
+  }
+  const row = (r) => `<div class="goal-portfolio-row" data-portfolio-goal="${esc(r.id)}">
+    <div class="goal-portfolio-info"><div class="goal-portfolio-name">${esc(r.name)}</div><div class="sub">${esc(r.action)}</div>
+      <div class="goal-portfolio-sub">Progress ${Math.round(r.progress * 100)}% · ${privateMoney(r.remaining)} remaining${r.deadline ? ` · ${esc(r.deadline)}` : ""}</div>
+    </div>
+    <div class="goal-portfolio-end">${healthText(r)}${actionButton(r)}</div>
+  </div>`;
+  return `<section class="card goal-portfolio-card" id="goals-portfolio">
+    <div class="split"><div><div class="metric-label">Your goals portfolio</div><h2>Priorities & next actions</h2></div><span class="tag">Read-only</span></div>
+    <div class="goal-portfolio-lead" data-portfolio-focus="${esc(focus.id)}">
+      <div class="goal-portfolio-lead-top"><div><div class="metric-label">Next priority</div><strong>${esc(focus.name)}</strong></div>${healthText(focus)}</div>
+      <div class="goal-portfolio-track" role="progressbar" aria-label="${esc(focus.name)} progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(focus.progress * 100)}"><span style="width:${Math.max(0,Math.min(100,focus.progress*100))}%"></span></div>
+      <div class="goal-portfolio-detail"><span>${privateMoney(focus.balance)} of ${privateMoney(focus.target)}</span><span>${Math.round(focus.progress*100)}%</span></div>
+      <div class="goal-portfolio-next"><span>${esc(focus.action)}</span>${actionButton(focus)}</div>
+    </div>
+    ${others.length ? `<div class="goal-portfolio-others"><div class="metric-label">Other goals</div>${others.map(row).join("")}</div>` : ""}
+    <div class="goal-portfolio-shared">
+      <strong>One shared funding plan</strong>
+      <div class="goal-portfolio-budget"><span>Known deadline requirements: ${privateMoney(shared.requiredTotal)}/mo</span>
+      <span>Planned wealth funding: ${shared.capacity === null ? "Unknown" : privateMoney(shared.capacity)+"/mo"}</span></div>
+      <p class="sub">${sharedMessage}</p>
+    </div>
+    <p class="sub goal-portfolio-note">Pace indicators use recorded completed allocations and saved goal deadlines. Waiting, paused and undated goals are not treated as funded. Other investments and goals compete for the same planned amount; no funds are moved.</p>
+  </section>`;
+}
+
 function goalWhatIfView() {
   const available = [...state.goals]
     .filter((g) => g.status !== "archived" && g.bucketId)
@@ -2682,11 +2744,7 @@ function updateGoalWhatIfPreview() {
   const isDateMode = document.querySelector('[data-goal-scenario-mode="date"]')?.getAttribute("aria-pressed") === "true";
   const disclaimer = document.querySelector("#goal-scenario-disclaimer");
   if (isDateMode) {
-    const open = [...state.periods].filter((p) => p.state !== "closed")
-      .sort((a, b) => a.id.localeCompare(b.id)).at(-1);
-    const plan = open ? planFor(open.id) : null;
-    const planned = Number(plan?.immediateWealth);
-    const hasPlan = !!plan && (Number(plan.salary || 0) > 0 || Number(plan.immediateWealth || 0) > 0);
+    const plannedWealth = goalPlannedFundingReference();
     const estimate = goalTargetDateFor({
       goal: chosen,
       goals: state.goals,
@@ -2694,7 +2752,7 @@ function updateGoalWhatIfPreview() {
       recentHistory: recentHistory(3),
       completedAllocation: completedAllocationToBucket,
       deadline: document.querySelector("#goal-scenario-deadline")?.value || "",
-      monthlyCapacity: hasPlan && Number.isFinite(planned) ? Math.max(0, planned) : null,
+      monthlyCapacity: plannedWealth,
     });
     const prerequisite = state.goals.find((g) => g.id === chosen.prerequisiteGoalId);
     const explanations = {
@@ -2800,6 +2858,7 @@ function goalsView() {
     .join("");
   return `<div class="sub page-sub">Your wealth priorities, pace and planned-use funds.</div>
   <section class="card strategy-card" style="margin-top:14px"><div class="split"><div><div class="metric-label">Current routing strategy</div><strong>${esc(active?.name || "Core cash goals complete")}</strong></div><div class="right"><strong>${privateMoney(pace)}</strong><div class="sub">recent monthly core-wealth pace</div></div></div><div class="strategy-steps"><span class="${emergencyBal < 200000 ? "active-step" : ""}">1. Emergency to ${money(200000)}</span><span class="${emergencyBal >= 200000 && travelBal < (travel?.targetAmount || 100000) ? "active-step" : ""}">2. Home Travel ${money(travel?.monthlyTarget || 10000)}/mo + continue Emergency</span><span class="${emergencyBal >= (emergency?.targetAmount || 300000) ? "active-step" : ""}">3. After Emergency target, remaining surplus becomes investable</span></div></section>
+  ${goalsPortfolioView()}
   ${goalWhatIfView()}
   <div class="grid g2 goals-grid" style="margin-top:14px">${cards}</div>`;
 }
@@ -5815,6 +5874,21 @@ function bind() {
       e.preventDefault();
       saveEsunReallocation(erl).catch(showError);
     };
+  document.querySelectorAll("[data-portfolio-plan]").forEach((button) => {
+    button.onclick = () => {
+      const select = document.querySelector("#goal-scenario-select");
+      const goal = state.goals.find((g) => g.id === button.dataset.portfolioPlan);
+      if (!select || !goal) return;
+      select.value = goal.id;
+      if (goal.targetDate) {
+        document.querySelector('[data-goal-scenario-mode="date"]')?.click();
+        const deadline = document.querySelector("#goal-scenario-deadline");
+        if (deadline) deadline.value = goal.targetDate;
+      }
+      updateGoalWhatIfPreview();
+      document.querySelector("#goal-scenario-planner")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    };
+  });
   const goalScenarioSelect = document.querySelector("#goal-scenario-select");
   const goalScenarioExtra = document.querySelector("#goal-scenario-extra");
   const goalScenarioDeadline = document.querySelector("#goal-scenario-deadline");

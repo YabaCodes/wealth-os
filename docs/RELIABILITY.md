@@ -51,4 +51,6 @@ The Node test suite covers pure accounting calculations, Special Budget / Busine
 
 **v1.22.2 extends the read-only Goals scenario planner with target-date funding math.** Unit tests assert explicit month-end timing, correct contribution counts and rounding, already-complete/paused/waiting safeguards, and a budget-reference warning rather than an affordability guarantee. Desktop/mobile browser acceptance verifies no IndexedDB changes from selecting dates or hypothetical planning modes, including in Dark/privacy modes.
 
+**v1.22.3 adds a read-only Goals portfolio**, using saved priorities, completed allocation pace, target-date model and one shared monthly wealth-funding reference. Unit tests prevent double-counting planned capacity across active goals, including missing/locked/paused deadline states. Desktop/mobile browser tests check navigation to the existing planner, full financial-record immutability, dark mode and privacy masking.
+
 **Remaining gaps:** exhaustive UI/controller flows, older historical migrations, and real iPhone Safari/WebKit behavior. Neither simulated IndexedDB nor Chromium mobile emulation proves device storage durability; physical iPhone acceptance remains required.

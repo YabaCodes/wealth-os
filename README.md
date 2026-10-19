@@ -1,4 +1,17 @@
-# Wealth OS — v1.22.2
+# Wealth OS — v1.22.3
+
+## v1.22.3 — Goals Portfolio & Next Actions
+
+- Adds a compact **Goals Portfolio** section above the existing savings what-if and target-date planners under Wealth → Goals.
+- Displays the next actionable goal according to saved priority and prerequisites, current saved progress, a plain-language next action, and other goals with **Complete / Paused / Waiting / No deadline / No recorded pace / Recorded pace meets target / Below target pace / Deadline needs review** health labels.
+- Deadline health uses **saved target dates** and the same completed-allocation history/month-end timing as the existing target-date planner; it is not an independent routing or guaranteed-return projection.
+- Adds a **single shared funding comparison**: sum of monthly funding needs for all eligible active goals with valid deadlines versus one existing open month's planned `immediateWealth` amount. Warn if required total exceeds that amount, or if some active goals lack usable deadlines. Never claim affordability when the plan is unknown or when unmodeled goals also compete for funds.
+- An **Open planner** shortcut selects the corresponding goal and switches to the saved target date, if present. No new automated transfers, allocations, goal edits or local persistence of UI selections.
+- Responsive iPhone layout and theme-aware accessible status colors in light/dark mode; existing Goals cards, planners, routing strategy and historical financial records remain intact.
+- Pure-model regression tests and real-browser desktop/mobile tests verify statuses, prioritization, shared funding, planner shortcuts, privacy masking, no financial data writes and layout.
+- Version **1.22.3**; financial data model **190** and IndexedDB schema **3** unchanged.
+
+
 
 ## v1.22.2 — Goal Target-Date Planner
 

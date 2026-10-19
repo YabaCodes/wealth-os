@@ -204,3 +204,93 @@ export function goalTargetDateFor({
     reason: null,
   };
 }
+
+/**
+ * A read-only portfolio overview of existing goals and their SAVED target dates.
+ * Funding is shared: requirements are summed for currently active goals with
+ * valid deadlines, and compared against one open-month wealth-funding reference.
+ * A "within-plan" result is not an affordability or routing guarantee.
+ */
+export function goalsPortfolioFor({
+  goals = [], bucketBalances = {}, recentHistory = [],
+  completedAllocation = () => 0, monthlyCapacity = null,
+  referenceDate = new Date(),
+}) {
+  const capacity = monthlyCapacity !== null && monthlyCapacity !== undefined &&
+    Number.isFinite(Number(monthlyCapacity)) && Number(monthlyCapacity) >= 0
+      ? Number(monthlyCapacity) : null;
+  const sorted = [...goals]
+    .filter((g) => g.status !== "archived")
+    .sort((a, b) => (Number.isFinite(Number(a.priority)) ? Number(a.priority) : 9999)
+      - (Number.isFinite(Number(b.priority)) ? Number(b.priority) : 9999)
+      || String(a.id).localeCompare(String(b.id)));
+  const rows = sorted.map((goal) => {
+    const status = goalStatusFor(goal, goals, bucketBalances);
+    const progress = goalProgressFor(goal, bucketBalances);
+    const recorded = averageGoalContributionFor(recentHistory, goal.bucketId, completedAllocation);
+    const monthly = Math.max(0, Number.isFinite(recorded) ? recorded : 0);
+    const deadline = String(goal.targetDate || "");
+    const projection = deadline
+      ? goalTargetDateFor({
+          goal, goals, bucketBalances, recentHistory,
+          completedAllocation, deadline, monthlyCapacity: null, referenceDate,
+        })
+      : null;
+    let health = "no-deadline";
+    let healthLabel = "No deadline";
+    let action = "Choose a target date";
+    if (status.key === "complete") {
+      health = "complete"; healthLabel = "Complete";
+      action = "Goal achieved";
+    } else if (status.key === "paused") {
+      health = "paused"; healthLabel = "Paused";
+      action = "Review before resuming";
+    } else if (status.key === "waiting") {
+      health = "waiting"; healthLabel = "Waiting";
+      const prerequisite = goals.find((g) => g.id === goal.prerequisiteGoalId);
+      action = prerequisite
+        ? `Unlock when ${prerequisite.name} reaches its prerequisite amount`
+        : "Review missing prerequisite";
+    } else if (projection?.reason) {
+      health = "needs-review"; healthLabel = "Deadline needs review";
+      action = "Choose a later valid deadline";
+    } else if (projection) {
+      if (monthly <= 0) {
+        health = "no-history"; healthLabel = "No recorded pace";
+        action = "Start tracking completed contributions";
+      } else if (monthly >= projection.requiredMonthly) {
+        health = "at-pace"; healthLabel = "Recorded pace meets target";
+        action = "Keep checking actual monthly contributions";
+      } else {
+        health = "behind"; healthLabel = "Below target pace";
+        action = "Review monthly funding or move the deadline";
+      }
+    }
+    return {
+      id: goal.id, name: goal.name, priority: goal.priority, status: status.key,
+      balance: progress.balance, target: progress.target,
+      remaining: progress.remaining, progress: progress.progress,
+      deadline: deadline || null, recordedMonthly: monthly,
+      requiredMonthly: projection?.reason === null ? projection.requiredMonthly : null,
+      health, healthLabel, action,
+    };
+  });
+  const active = rows.filter((r) => r.status === "active");
+  const withDeadline = active.filter((r) => r.requiredMonthly !== null);
+  const requiredTotal = withDeadline.reduce((s, r) => s + r.requiredMonthly, 0);
+  const missingDeadline = active.length - withDeadline.length;
+  const shared = {
+    capacity, requiredTotal, coveredGoals: withDeadline.length,
+    activeGoals: active.length, missingDeadline,
+    gap: capacity === null ? null : Math.max(0, requiredTotal - capacity),
+    state: withDeadline.length === 0 ? "no-deadlines"
+      : capacity === null ? "unknown"
+      : requiredTotal > capacity ? "above-plan"
+      : missingDeadline > 0 ? "partial" : "within-plan",
+  };
+  const focus = rows.find((r) => r.status === "active")
+    || rows.find((r) => r.status === "waiting")
+    || rows.find((r) => r.status === "paused")
+    || rows[0] || null;
+  return { focus, rows, shared };
+}

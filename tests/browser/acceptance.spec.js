@@ -8,7 +8,7 @@ import {
 test("navigation, Settings release identity and actual expense form persist through reload", async ({ page }) => {
   await seedSyntheticBrowser(page);
   await page.locator('[data-action="settings"]').first().click();
-  await expect(page.locator('[role="dialog"]')).toContainText("Wealth OS v1.22.2");
+  await expect(page.locator('[role="dialog"]')).toContainText("Wealth OS v1.22.3");
   await expect(page.locator('[role="dialog"]')).toContainText("Data model 190");
   await page.locator('[data-action="close-modal"]').click();
 
@@ -370,4 +370,62 @@ test("Target-date capacity unknown and privacy remain readable in dark mode", as
     return { bg: getComputedStyle(el).backgroundColor, text: getComputedStyle(el).color };
   });
   expect(styles.bg).not.toBe(styles.text);
+});
+
+test("Goals portfolio shows priorities, saved deadline health, shared capacity and opens planner without writes", async ({ page }) => {
+  await seedSyntheticBrowser(page);
+  await page.evaluate(async () => {
+    const db = await import("/js/db.js");
+    const goals = await db.getAll("goals");
+    const emergency = goals.find((g) => g.id === "goal-emergency");
+    await db.put("goals", { ...emergency, targetDate: "2027-03-31" });
+    const p = await db.getOne("periods", "2026-10");
+    await db.put("periods", { ...p, planSnapshot: {
+      ...p.planSnapshot, salary: 90000, immediateWealth: 5000,
+    } });
+  });
+  await page.reload();
+  await page.locator('nav [data-tab="wealth"]').click();
+  await page.locator('.wealth-switch [data-tab="goals"]').click();
+  await expect(page.locator("#goals-portfolio")).toBeVisible();
+  await expect(page.locator('[data-portfolio-focus="goal-emergency"]')).toContainText("Emergency Fund");
+  await expect(page.locator('[data-portfolio-focus="goal-emergency"]')).toContainText("No recorded pace");
+  await expect(page.locator("#goals-portfolio")).toContainText("Home Travel");
+  await expect(page.locator("#goals-portfolio")).toContainText("Waiting");
+  await expect(page.locator("#goals-portfolio")).toContainText("Equipment");
+  await expect(page.locator("#goals-portfolio")).toContainText("Paused");
+  await expect(page.locator(".goal-portfolio-shared")).toContainText("One shared funding plan");
+  await expect(page.locator(".goal-portfolio-shared")).toContainText("exceeding the shared plan");
+  const before = await page.evaluate(async () => (await import("/js/db.js")).exportData());
+  await page.locator('[data-portfolio-focus="goal-emergency"] [data-portfolio-plan]').click();
+  await expect(page.locator("#goal-scenario-select")).toHaveValue("goal-emergency");
+  await expect(page.locator('[data-goal-scenario-mode="date"]')).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator("#goal-scenario-deadline")).toHaveValue("2027-03-31");
+  await page.locator('[data-portfolio-goal="goal-home-trip"] [data-portfolio-plan]').click();
+  await expect(page.locator("#goal-scenario-select")).toHaveValue("goal-home-trip");
+  await expect(page.locator("#goal-scenario-result")).toContainText("waiting for Emergency Fund");
+  const after = await page.evaluate(async () => (await import("/js/db.js")).exportData());
+  expect(after.data).toEqual(before.data);
+});
+
+test("Goals portfolio uses dark-mode readable labels and masks saved money in privacy mode", async ({ page }) => {
+  await seedSyntheticBrowser(page);
+  await page.locator('nav [data-tab="wealth"]').click();
+  await page.locator('.wealth-switch [data-tab="goals"]').click();
+  await expect(page.locator("#goals-portfolio")).toBeVisible();
+  await expect(page.locator(".goal-portfolio-shared")).toContainText("No active goals have usable deadlines");
+  await page.locator('[data-action="settings"]').first().click();
+  await page.locator('[role="dialog"] [data-action="set-theme"][data-theme="dark"]').click();
+  await page.locator('[role="dialog"] [data-action="close-modal"]').first().click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme","dark");
+  await expect(page.locator(".goal-portfolio-health").first()).toBeVisible();
+  await page.locator('[data-action="privacy-toggle"]').click();
+  await expect(page.locator("#goals-portfolio")).toContainText("••••");
+  await expect(page.locator("#goals-portfolio")).not.toContainText("NT$300,000");
+  const sizes = await page.evaluate(() => {
+    const box = document.querySelector("#goals-portfolio").getBoundingClientRect();
+    const width = document.documentElement.clientWidth;
+    return { right: box.right, width };
+  });
+  expect(sizes.right).toBeLessThanOrEqual(sizes.width + 1);
 });

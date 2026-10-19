@@ -4392,3 +4392,83 @@ html[data-theme="dark"] .goal-target-feasibility.is-caution {
     flex: 1 1 50%;
   }
 }
+
+/* v1.22.3 — compact, accessible Goals portfolio and shared funding review */
+.goal-portfolio-card { margin-top: 14px; }
+.goal-portfolio-card h2 { font-size: 18px; margin: 3px 0 0; }
+.goal-portfolio-lead {
+  border: 1px solid var(--line); border-radius: 14px;
+  padding: 14px; margin-top: 14px; min-width: 0;
+}
+.goal-portfolio-lead-top, .goal-portfolio-detail, .goal-portfolio-next {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 9px; flex-wrap: wrap;
+}
+.goal-portfolio-lead-top strong { font-size: 17px; overflow-wrap: anywhere; }
+.goal-portfolio-health {
+  display: inline-block; width: max-content; max-width: 100%;
+  font-size: 12px; font-weight: 600; line-height: 1.35;
+  color: var(--text); background: var(--soft); border: 1px solid var(--line);
+  padding: 5px 8px; border-radius: 999px;
+}
+.goal-health-behind, .goal-health-needs-review {
+  color: #684111; background: #fff0cd; border-color: #c8a263;
+}
+.goal-health-at-pace, .goal-health-complete {
+  color: #155b43; background: #e3f7ee; border-color: #9ed8be;
+}
+html[data-theme="dark"] .goal-health-behind,
+html[data-theme="dark"] .goal-health-needs-review {
+  color: #ffe8bb; background: #3b2d19; border-color: #94703b;
+}
+html[data-theme="dark"] .goal-health-at-pace,
+html[data-theme="dark"] .goal-health-complete {
+  color: #b5efd2; background: #193d30; border-color: #458b6c;
+}
+.goal-portfolio-track {
+  background: var(--soft); height: 9px; border-radius: 999px;
+  overflow: hidden; margin-top: 13px;
+}
+.goal-portfolio-track span {
+  height: 100%; display: block; background: #0f766e;
+  border-radius: inherit;
+}
+html[data-theme="dark"] .goal-portfolio-track span { background: #4fd1a5; }
+.goal-portfolio-detail {
+  margin-top: 7px; font-size: 13px; color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.goal-portfolio-next { margin-top: 12px; }
+.goal-portfolio-next > span { flex: 1; font-size: 13px; min-width: 0; line-height: 1.5; }
+.goal-portfolio-others { margin-top: 17px; }
+.goal-portfolio-others > .metric-label { margin-bottom: 4px; }
+.goal-portfolio-row {
+  display: flex; justify-content: space-between; align-items: center;
+  gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line);
+}
+.goal-portfolio-row:last-child { border-bottom: 0; }
+.goal-portfolio-info { min-width: 0; flex: 1; }
+.goal-portfolio-name { font-size: 14px; font-weight: 650; overflow-wrap: anywhere; }
+.goal-portfolio-info .sub { margin-top: 3px; font-size: 12px; line-height: 1.45; }
+.goal-portfolio-sub { margin-top: 5px; color: var(--muted); font-size: 12px; }
+.goal-portfolio-end { display: flex; align-items: flex-end; flex-direction: column; gap: 8px; max-width: 46%; }
+.goal-portfolio-end .goal-portfolio-health { text-align: center; }
+.goal-portfolio-plan { white-space: nowrap; font-size: 12px; min-height: 36px; }
+.goal-portfolio-shared {
+  margin-top: 14px; padding: 13px;
+  background: var(--soft); border-radius: 12px;
+  border: 1px solid var(--line);
+}
+.goal-portfolio-shared > strong { display: block; font-size: 13px; }
+.goal-portfolio-budget {
+  display: grid; gap: 6px; margin-top: 9px;
+  font-size: 13px; font-variant-numeric: tabular-nums;
+}
+.goal-portfolio-shared .sub { margin-top: 9px; font-size: 12px; line-height: 1.5; }
+.goal-portfolio-note { margin: 12px 0 0; font-size: 12px; line-height: 1.5; }
+@media (max-width: 430px) {
+  .goal-portfolio-row { flex-direction: column; align-items: stretch; gap: 8px; }
+  .goal-portfolio-end { max-width: none; flex-direction: row; justify-content: space-between; align-items: center; flex-wrap: wrap; }
+  .goal-portfolio-lead-top { align-items: flex-start; }
+  .goal-portfolio-next { align-items: stretch; }
+}

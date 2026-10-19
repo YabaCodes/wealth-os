@@ -301,7 +301,7 @@ test("Target-date Goals planner computes month-end requirements, flags budget ga
     const db = await import("/js/db.js");
     const p = await db.getOne("periods", "2026-10");
     await db.put("periods", { ...p, planSnapshot: {
-      ...p.planSnapshot, salary: 90000, immediateWealth: 20000,
+      ...p.planSnapshot, salary: 90000, immediateWealth: 50000,
     } });
     await db.put("transferAllocations", {
       id: "funded-target-alloc", transferId: "funded-target-transfer",

@@ -4285,6 +4285,35 @@ html[data-theme="dark"] .ms-bar span {
 .goal-scenario-results .goal-scenario-highlight {
   border-color: #b3dcd1;
   background: #edf9f5;
+  color: #103c31;
+}
+/* The highlighted value and its small label must contrast with the mint card
+   independently of inherited theme text colors. */
+.goal-scenario-results .goal-scenario-highlight .metric-label {
+  color: #285c4d;
+}
+.goal-scenario-results .goal-scenario-highlight strong {
+  color: #103c31;
+}
+/* Wealth OS resolves System/Light/Dark to html[data-theme], not a media query.
+   Dark cards stay dark rather than inheriting the light-theme mint background. */
+html[data-theme="dark"] .goal-scenario-results .goal-scenario-highlight {
+  background: #14382f;
+  border-color: #3d8b72;
+  color: #f1fff9;
+}
+html[data-theme="dark"] .goal-scenario-results .goal-scenario-highlight .metric-label {
+  color: #b8e5d4;
+}
+html[data-theme="dark"] .goal-scenario-results .goal-scenario-highlight strong {
+  color: #f1fff9;
+}
+html[data-theme="dark"] .goal-scenario-results > div:not(.goal-scenario-highlight) .metric-label {
+  color: #b7c2d2;
+}
+html[data-theme="dark"] .goal-scenario-card .goal-scenario-message,
+html[data-theme="dark"] .goal-scenario-card .goal-scenario-disclaimer {
+  color: #c7d2df;
 }
 .goal-scenario-message {
   margin-top: 12px;

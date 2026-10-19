@@ -173,7 +173,7 @@ export function goalTargetDateFor({
   if (status === "paused") return { ...basic, reason: "paused" };
   if (status === "waiting") return { ...basic, reason: "waiting" };
   if (!(target > 0)) return { ...basic, reason: "no-target" };
-  const match = /^(\\d{4})-(\\d{2})-(\\d{2})$/.exec(String(deadline));
+  const match = /^([0-9]{4})-([0-9]{2})-([0-9]{2})$/.exec(String(deadline));
   if (!match) return { ...basic, reason: "invalid-date" };
   const [, ys, ms, ds] = match;
   const year = Number(ys), month = Number(ms), day = Number(ds);

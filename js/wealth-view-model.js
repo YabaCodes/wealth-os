@@ -221,17 +221,18 @@ export function goalsPortfolioFor({
       ? Number(monthlyCapacity) : null;
   const sorted = [...goals]
     .filter((g) => g.status !== "archived")
-    .sort((a, b) => (Number(a.priority) || 9999) - (Number(b.priority) || 9999)
+    .sort((a, b) => (Number.isFinite(Number(a.priority)) ? Number(a.priority) : 9999)
+      - (Number.isFinite(Number(b.priority)) ? Number(b.priority) : 9999)
       || String(a.id).localeCompare(String(b.id)));
   const rows = sorted.map((goal) => {
-    const status = goalStatusFor(goal, sorted, bucketBalances);
+    const status = goalStatusFor(goal, goals, bucketBalances);
     const progress = goalProgressFor(goal, bucketBalances);
     const recorded = averageGoalContributionFor(recentHistory, goal.bucketId, completedAllocation);
     const monthly = Math.max(0, Number.isFinite(recorded) ? recorded : 0);
     const deadline = String(goal.targetDate || "");
     const projection = deadline
       ? goalTargetDateFor({
-          goal, goals: sorted, bucketBalances, recentHistory,
+          goal, goals, bucketBalances, recentHistory,
           completedAllocation, deadline, monthlyCapacity: null, referenceDate,
         })
       : null;
@@ -246,7 +247,7 @@ export function goalsPortfolioFor({
       action = "Review before resuming";
     } else if (status.key === "waiting") {
       health = "waiting"; healthLabel = "Waiting";
-      const prerequisite = sorted.find((g) => g.id === goal.prerequisiteGoalId);
+      const prerequisite = goals.find((g) => g.id === goal.prerequisiteGoalId);
       action = prerequisite
         ? `Unlock when ${prerequisite.name} reaches its prerequisite amount`
         : "Review missing prerequisite";

@@ -8,7 +8,7 @@ import {
 test("navigation, Settings release identity and actual expense form persist through reload", async ({ page }) => {
   await seedSyntheticBrowser(page);
   await page.locator('[data-action="settings"]').first().click();
-  await expect(page.locator('[role="dialog"]')).toContainText("Wealth OS v1.22.1");
+  await expect(page.locator('[role="dialog"]')).toContainText("Wealth OS v1.22.2");
   await expect(page.locator('[role="dialog"]')).toContainText("Data model 190");
   await page.locator('[data-action="close-modal"]').click();
 
@@ -359,6 +359,9 @@ test("Target-date capacity unknown and privacy remain readable in dark mode", as
   await page.locator('[role="dialog"] [data-action="close-modal"]').first().click();
   await expect(page.locator(".goal-scenario-highlight strong")).toBeVisible();
   await page.locator('[data-action="privacy-toggle"]').click();
+  // Toggling privacy redraws the page and resets ephemeral planner mode.
+  await page.locator('[data-goal-scenario-mode="date"]').click();
+  await page.locator("#goal-scenario-deadline").fill("2027-03-31");
   await expect(page.locator(".goal-scenario-highlight strong")).toContainText("••••");
   await page.locator("#goal-scenario-deadline").fill("2027-05-31");
   await expect(page.locator(".goal-scenario-highlight strong")).toContainText("••••");

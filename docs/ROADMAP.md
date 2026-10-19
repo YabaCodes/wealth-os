@@ -123,17 +123,28 @@ For v1.20.3, checks covered version/data model, Wealth balances/reconciliation, 
 
 ## v1.22.1 — Dark-mode Goals planner contrast
 
-**Status: hotfix in review; iPhone acceptance pending.**
+**Status: PR #25 merged and user confirmed the iPhone dark-mode contrast fix (2026-10-19); accepted.**
 
 - Fix the light mint-highlight tile and its unreadable value/label when the Goals planner is viewed in Dark mode.
 - Support manually selected Dark and device-based System Dark through the app's actual theme selector.
 - Improve contrast of planner supporting copy while preserving Light-mode appearance, financial forecasts and stored records.
 - Cover foreground/background contrast in desktop/mobile real-browser tests. No app calculation or IndexedDB changes.
 
+## v1.22.2 — Goals target-date funding planner
+
+**Status: implementation under review; iPhone acceptance pending.**
+
+- Add a toggle to the existing Goals scenario planner for a **Reach by date** mode, alongside Extra Monthly.
+- Count future end-of-calendar-month contributions, starting next month, only if their due date is on or before the selected target date.
+- Report goal funding required per month, additional versus actual completed pace, baseline ETA and an all-to-one-goal budget-based illustration.
+- Compare required amount to the currently open month's planned **shared wealth-funding amount**, with a clear above-plan warning, conditional within-plan message, or capacity-unknown state. Never imply the amount is guaranteed free cash or override goal prerequisites.
+- Preserve no-write behavior for hypothetical inputs, show masked financial values in privacy mode, and maintain Dark-mode readability.
+- Protect with unit and actual desktop/mobile Chromium tests; require iPhone acceptance before marking complete.
+
 ### Later candidates (not committed)
 
 - Extended browser scenarios and failure/retry coverage, with synthetic data.
-- Optional richer goal target-date and recurring-contribution planning based on user feedback.
+- Optional recurring contribution planning/target-date goal dashboard based on user feedback.
 - Additional modularization where tests show it reduces change risk.
 
 Persistence, migrations and restore code must not be aggressively refactored without a passing integration safety net.

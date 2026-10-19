@@ -142,3 +142,65 @@ export function goalWhatIfFor({
     monthsSaved: baseMonths === null || scenarioMonths === null ? null : Math.max(0, baseMonths - scenarioMonths),
   };
 }
+
+/**
+ * Target-date funding illustration, with deposits assumed at the END of each
+ * calendar month, starting the month after the reference date.
+ * A date earlier than that month's final day cannot count that month's deposit.
+ * This planner never modifies an account or the user's routing rules.
+ */
+export function goalTargetDateFor({
+  goal, goals = [], bucketBalances = {}, recentHistory = [],
+  completedAllocation = () => 0, deadline = "",
+  monthlyCapacity = null, referenceDate = new Date(),
+}) {
+  if (!goal) return null;
+  const { balance, target, remaining } = goalProgressFor(goal, bucketBalances);
+  const status = goalStatusFor(goal, goals, bucketBalances).key;
+  const recorded = averageGoalContributionFor(recentHistory, goal.bucketId, completedAllocation);
+  const recordedMonthly = Math.max(0, Number.isFinite(recorded) ? recorded : 0);
+  const capacity = monthlyCapacity !== null && monthlyCapacity !== undefined &&
+    Number.isFinite(Number(monthlyCapacity)) && Number(monthlyCapacity) >= 0
+      ? Number(monthlyCapacity) : null;
+  const basic = {
+    status, balance, target, remaining, recordedMonthly,
+    capacity, deadline, months: 0, requiredMonthly: null,
+    additionalMonthly: null, capacityGap: null, feasibility: "unknown",
+    recordedDate: null, capacityDate: null, reason: null,
+  };
+  // Invalid date and locked goals must NEVER suggest a feasible funding date.
+  if (status === "complete") return { ...basic, reason: "complete" };
+  if (status === "paused") return { ...basic, reason: "paused" };
+  if (status === "waiting") return { ...basic, reason: "waiting" };
+  if (!(target > 0)) return { ...basic, reason: "no-target" };
+  const match = /^([0-9]{4})-([0-9]{2})-([0-9]{2})$/.exec(String(deadline));
+  if (!match) return { ...basic, reason: "invalid-date" };
+  const [, ys, ms, ds] = match;
+  const year = Number(ys), month = Number(ms), day = Number(ds);
+  if (year < 1900 || year > 9999 || month < 1 || month > 12 ||
+      day < 1 || day > new Date(year, month, 0).getDate())
+    return { ...basic, reason: "invalid-date" };
+  const ref = new Date(referenceDate);
+  if (!Number.isFinite(ref.getTime()))
+    return { ...basic, reason: "invalid-date" };
+  const finalDay = new Date(year, month, 0).getDate();
+  // If the deadline is mid-month, that month's end-of-month contribution
+  // would arrive too late. Only complete future month-ends are eligible.
+  const months = Math.max(0,
+    (year - ref.getFullYear()) * 12 + month - (ref.getMonth() + 1) -
+    (day < finalDay ? 1 : 0));
+  if (months < 1) return { ...basic, months, reason: "no-paydays" };
+  const requiredMonthly = Math.ceil(remaining / months);
+  const additionalMonthly = Math.max(0, requiredMonthly - recordedMonthly);
+  const capacityGap = capacity === null ? null : Math.max(0, requiredMonthly - capacity);
+  const feasibility = capacity === null ? "unknown" :
+    requiredMonthly > capacity ? "above-plan" : "within-plan";
+  return {
+    ...basic, months, requiredMonthly, additionalMonthly, capacityGap, feasibility,
+    recordedDate: recordedMonthly > 0
+      ? dateAfterMonthsFor(Math.ceil(remaining / recordedMonthly), ref) : null,
+    capacityDate: capacity > 0
+      ? dateAfterMonthsFor(Math.ceil(remaining / capacity), ref) : null,
+    reason: null,
+  };
+}

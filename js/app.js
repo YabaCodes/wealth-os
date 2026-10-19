@@ -84,6 +84,7 @@ import {
   goalPaceTextFor,
   wealthAccountLabels,
   goalWhatIfFor,
+  goalTargetDateFor,
 } from "./wealth-view-model.js";
 import { assessMonthClose, closeMonthAtomic, reopenMonthAtomic } from "./month-close.js";
 import {
@@ -106,7 +107,7 @@ let modalDirty = false;
 let homeWeekStart = null,
   homeDay = null;
 let reachedGoals = null; // goals at target after the last load (null until the first load)
-const APP_VERSION = "1.22.1";
+const APP_VERSION = "1.22.2";
 const THEME_KEY = "wealthOSTheme";
 // Theme: 'system' follows the phone's light/dark setting. A copy is kept in localStorage so
 // index.html can apply it before the first paint (IndexedDB is too slow for that).
@@ -2653,15 +2654,22 @@ function goalWhatIfView() {
     .sort((a, b) => a.priority - b.priority);
   if (!available.length) return "";
   const chosen = available.find((g) => goalStatus(g).key === "active") || available[0];
+  const now = new Date();
+  const defaultDeadline = today(new Date(now.getFullYear(), now.getMonth() + 7, 0));
   return `<section class="card goal-scenario-card" id="goal-scenario-planner">
     <div class="split"><div><div class="metric-label">Goal funding scenario</div><h2>What if I save more?</h2></div><span class="tag">Preview only</span></div>
-    <p class="sub">See how an additional monthly contribution <strong>to one goal</strong> could change its completion date.</p>
+    <p class="sub">Explore additional monthly funding or choose a deadline to estimate what a single goal would require.</p>
+    <div class="theme-switch goal-scenario-modes" role="group" aria-label="Goal planning scenario">
+      <button type="button" class="theme-option active" data-goal-scenario-mode="extra" aria-pressed="true">Extra monthly</button>
+      <button type="button" class="theme-option" data-goal-scenario-mode="date" aria-pressed="false">Reach by date</button>
+    </div>
     <div class="goal-scenario-inputs">
       <div class="field"><label for="goal-scenario-select">Choose a goal</label><select id="goal-scenario-select">${available.map((g) => `<option value="${esc(g.id)}" ${g.id === chosen.id ? "selected" : ""}>${esc(g.name)}</option>`).join("")}</select></div>
-      <div class="field"><label for="goal-scenario-extra">Extra monthly contribution (NT$)</label><input id="goal-scenario-extra" type="number" inputmode="numeric" min="0" max="1000000" step="1000" value="0"></div>
+      <div class="field goal-scenario-extra-field"><label for="goal-scenario-extra">Extra monthly contribution (NT$)</label><input id="goal-scenario-extra" type="number" inputmode="numeric" min="0" max="1000000" step="1000" value="0"></div>
+      <div class="field goal-scenario-date-field" hidden><label for="goal-scenario-deadline">Desired completion date</label><input id="goal-scenario-deadline" type="date" value="${defaultDeadline}"></div>
     </div>
     <div id="goal-scenario-result" aria-live="polite"></div>
-    <p class="sub goal-scenario-disclaimer">Illustrative only: uses recorded goal allocations from the last three funding months, assumes a fixed monthly amount and ignores investment returns. Actual routing rules and prerequisites still apply. No money is moved and nothing is saved.</p>
+    <p class="sub goal-scenario-disclaimer" id="goal-scenario-disclaimer">Illustrative only: uses recorded goal allocations from the last three funding months, assumes a fixed monthly amount and ignores investment returns. Actual routing rules and prerequisites still apply. No money is moved and nothing is saved.</p>
   </section>`;
 }
 
@@ -2671,6 +2679,58 @@ function updateGoalWhatIfPreview() {
   const input = document.querySelector("#goal-scenario-extra");
   const chosen = state.goals.find((g) => g.id === id);
   if (!panel || !input || !chosen) return;
+  const isDateMode = document.querySelector('[data-goal-scenario-mode="date"]')?.getAttribute("aria-pressed") === "true";
+  const disclaimer = document.querySelector("#goal-scenario-disclaimer");
+  if (isDateMode) {
+    const open = [...state.periods].filter((p) => p.state !== "closed")
+      .sort((a, b) => a.id.localeCompare(b.id)).at(-1);
+    const plan = open ? planFor(open.id) : null;
+    const planned = Number(plan?.immediateWealth);
+    const hasPlan = !!plan && (Number(plan.salary || 0) > 0 || Number(plan.immediateWealth || 0) > 0);
+    const estimate = goalTargetDateFor({
+      goal: chosen,
+      goals: state.goals,
+      bucketBalances: state.bucketBalances,
+      recentHistory: recentHistory(3),
+      completedAllocation: completedAllocationToBucket,
+      deadline: document.querySelector("#goal-scenario-deadline")?.value || "",
+      monthlyCapacity: hasPlan && Number.isFinite(planned) ? Math.max(0, planned) : null,
+    });
+    const prerequisite = state.goals.find((g) => g.id === chosen.prerequisiteGoalId);
+    const explanations = {
+      complete: "This goal has already reached its target.",
+      paused: "This goal is paused. Activate it before projecting its deadline.",
+      waiting: `This goal is waiting for ${esc(prerequisite?.name || "its prerequisite")}. No completion or affordability claim can be made before it unlocks.`,
+      "no-target": "Set a positive target on this goal first.",
+      "invalid-date": "Choose a valid future completion date.",
+      "no-paydays": "There are no full future month-end contributions before this date. Choose a later deadline.",
+    };
+    let feasibility = "";
+    if (estimate.reason) {
+      feasibility = `<div class="sub goal-scenario-message" role="status">${explanations[estimate.reason]}</div>`;
+    } else if (estimate.feasibility === "above-plan") {
+      feasibility = `<div class="goal-target-feasibility is-warning" role="status"><strong>Above current planned wealth funding</strong><span>Required monthly funding exceeds the open month's planned wealth contribution by ${privateMoney(estimate.capacityGap)}. Consider a later deadline or adjusting your budget; this is not currently supported by the plan.</span></div>`;
+    } else if (estimate.feasibility === "within-plan") {
+      feasibility = `<div class="goal-target-feasibility is-caution" role="status"><strong>Within planned wealth funding — not guaranteed</strong><span>This estimate assumes the required amount is directed to this one goal. Other goals, investments and real expenses compete for the same funds.</span></div>`;
+    } else {
+      feasibility = `<div class="goal-target-feasibility is-caution" role="status"><strong>Budget capacity unknown</strong><span>No usable open-month funding plan is available. Check your budget before deciding whether the deadline is affordable.</span></div>`;
+    }
+    const showMoney = (n) => n === null ? "No estimate" : privateMoney(n);
+    const showText = (t) => esc(t || "No estimate");
+    panel.innerHTML = `<div class="goal-scenario-results goal-target-results">
+      <div><div class="metric-label">Remaining to target</div><strong>${privateMoney(estimate.remaining)}</strong></div>
+      <div><div class="metric-label">Available funding months</div><strong>${estimate.reason ? "No estimate" : estimate.months}</strong></div>
+      <div class="goal-scenario-highlight"><div class="metric-label">Required each month</div><strong>${showMoney(estimate.requiredMonthly)}</strong></div>
+      <div><div class="metric-label">Extra versus recorded pace</div><strong>${showMoney(estimate.additionalMonthly)}</strong></div>
+      <div><div class="metric-label">Recorded pace ETA</div><strong>${showText(estimate.recordedDate)}</strong></div>
+      <div><div class="metric-label">If all planned wealth funding goes here</div><strong>${showText(estimate.capacityDate)}</strong></div>
+      <div><div class="metric-label">Open-month planned wealth funding</div><strong>${showMoney(estimate.capacity)}</strong></div>
+    </div>${feasibility}`;
+    if (disclaimer) disclaimer.textContent = "Illustrative only. Funding is assumed at each month-end starting next month. A mid-month deadline excludes that month's contribution. No investment returns or changes to routing are assumed. The budget reference is not verified spare cash. No money is moved and nothing is saved.";
+    applyPrivacyMask();
+    return;
+  }
+  if (disclaimer) disclaimer.textContent = "Illustrative only: uses recorded goal allocations from the last three funding months, assumes a fixed monthly amount and ignores investment returns. Actual routing rules and prerequisites still apply. No money is moved and nothing is saved.";
   const scenario = goalWhatIfFor({
     goal: chosen,
     goals: state.goals,
@@ -5757,9 +5817,24 @@ function bind() {
     };
   const goalScenarioSelect = document.querySelector("#goal-scenario-select");
   const goalScenarioExtra = document.querySelector("#goal-scenario-extra");
-  if (goalScenarioSelect && goalScenarioExtra) {
+  const goalScenarioDeadline = document.querySelector("#goal-scenario-deadline");
+  if (goalScenarioSelect && goalScenarioExtra && goalScenarioDeadline) {
     goalScenarioSelect.onchange = updateGoalWhatIfPreview;
     goalScenarioExtra.oninput = updateGoalWhatIfPreview;
+    goalScenarioDeadline.oninput = updateGoalWhatIfPreview;
+    document.querySelectorAll("[data-goal-scenario-mode]").forEach((button) => {
+      button.onclick = () => {
+        const dateMode = button.dataset.goalScenarioMode === "date";
+        document.querySelectorAll("[data-goal-scenario-mode]").forEach((control) => {
+          const selected = control === button;
+          control.classList.toggle("active", selected);
+          control.setAttribute("aria-pressed", String(selected));
+        });
+        document.querySelector(".goal-scenario-extra-field").hidden = dateMode;
+        document.querySelector(".goal-scenario-date-field").hidden = !dateMode;
+        updateGoalWhatIfPreview();
+      };
+    });
     updateGoalWhatIfPreview();
   }
   const gef = document.querySelector("#goal-edit-form");

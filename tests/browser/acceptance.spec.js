@@ -389,7 +389,7 @@ test("Goals portfolio shows priorities, saved deadline health, shared capacity a
   await page.locator('.wealth-switch [data-tab="goals"]').click();
   await expect(page.locator("#goals-portfolio")).toBeVisible();
   await expect(page.locator('[data-portfolio-focus="goal-emergency"]')).toContainText("Emergency Fund");
-  await expect(page.locator('[data-portfolio-focus="goal-emergency"]')).toContainText("Below target pace");
+  await expect(page.locator('[data-portfolio-focus="goal-emergency"]')).toContainText("No recorded pace");
   await expect(page.locator("#goals-portfolio")).toContainText("Home Travel");
   await expect(page.locator("#goals-portfolio")).toContainText("Waiting");
   await expect(page.locator("#goals-portfolio")).toContainText("Equipment");

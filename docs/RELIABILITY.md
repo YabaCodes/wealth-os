@@ -49,4 +49,6 @@ The Node test suite covers pure accounting calculations, Special Budget / Busine
 
 **v1.22.1 adds computed style accessibility regression coverage** to the Goals what-if browser tests: small labels, highlighted ETA values and supporting copy must meet a minimum 4.5:1 foreground/background contrast in Light, explicit Dark and System-Dark themes. The fix is CSS-only apart from release identifiers.
 
+**v1.22.2 extends the read-only Goals scenario planner with target-date funding math.** Unit tests assert explicit month-end timing, correct contribution counts and rounding, already-complete/paused/waiting safeguards, and a budget-reference warning rather than an affordability guarantee. Desktop/mobile browser acceptance verifies no IndexedDB changes from selecting dates or hypothetical planning modes, including in Dark/privacy modes.
+
 **Remaining gaps:** exhaustive UI/controller flows, older historical migrations, and real iPhone Safari/WebKit behavior. Neither simulated IndexedDB nor Chromium mobile emulation proves device storage durability; physical iPhone acceptance remains required.

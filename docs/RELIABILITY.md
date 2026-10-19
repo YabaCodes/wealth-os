@@ -45,4 +45,6 @@ The Node test suite covers pure accounting calculations, Special Budget / Busine
 
 **v1.21.2 adds full-browser Playwright acceptance** using synthetic, private-origin IndexedDB fixtures and the normal unmodified app controls. Desktop and mobile Chromium test navigation, expense entry, month close/reopen, pending Business Trip refundable holds, Food category default, settlement and undo, and backup rejection. The new CI browser job runs separately from Node integration tests and retains failure traces and screenshots.
 
+**v1.22.0 adds the first user-facing Goals scenario planner**, deliberately limited to read-only calculations. A hypothetical extra monthly contribution never changes persisted goals, actual allocations, physical accounts, budgets or transfers. Pure unit tests and desktop/mobile Chromium acceptance cover forecast arithmetic, goal prerequisite/paused/completed constraints, no writes, ephemeral inputs and privacy-mode masking.
+
 **Remaining gaps:** exhaustive UI/controller flows, older historical migrations, and real iPhone Safari/WebKit behavior. Neither simulated IndexedDB nor Chromium mobile emulation proves device storage durability; physical iPhone acceptance remains required.

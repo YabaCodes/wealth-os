@@ -103,7 +103,7 @@ For v1.20.3, checks covered version/data model, Wealth balances/reconciliation, 
 
 ## v1.21.2 — Browser-Level UI Acceptance
 
-**Status: implementation in review; physical iPhone acceptance pending.**
+**Status: PR #23 merged and physical iPhone acceptance confirmed (2026-10-18).**
 
 - Add Playwright Chromium browser tests for real app controls across desktop/mobile viewports.
 - Test synthetic month-close/reopen and historical immutability, expense capture, Business Trip deposit gating and actual settlement/undo, and invalid backup restore.
@@ -111,10 +111,20 @@ For v1.20.3, checks covered version/data model, Wealth balances/reconciliation, 
 - Keep all existing finance calculations, UI layout, data model 190 and IndexedDB schema 3 unchanged.
 - After passing CI and manual merge, require iPhone physical smoke acceptance. The browser tests are an additional safeguard, **not** a substitute for Safari acceptance.
 
+## v1.22.0 — User-Facing Wealth & Goals Improvements
+
+**Status: implementation under review; automated and physical iPhone acceptance required.**
+
+- Add a read-only **What if I save more?** planner to Goals for an extra hypothetical monthly contribution to one selected goal.
+- Compare actual recorded goal allocation pace (last three funding months) with the hypothetical pace; show current and illustrative completion dates and possible months saved.
+- Respect waiting prerequisite, paused, complete and no-target states. Do not imply the extra amount is automatically routed, or create a saved plan or transfer.
+- Cover input changes, privacy masking, no database writes and reload-reset behavior in desktop/mobile browser tests, plus deterministic calculation unit tests.
+- Keep financial data model 190, IndexedDB schema 3, existing goals, transaction history and all prior reporting unchanged.
+
 ### Later candidates (not committed)
 
 - Extended browser scenarios and failure/retry coverage, with synthetic data.
-- Goal-planning and Insights usability improvements based on observed user workflows.
+- Optional richer goal target-date and recurring-contribution planning based on user feedback.
 - Additional modularization where tests show it reduces change risk.
 
 Persistence, migrations and restore code must not be aggressively refactored without a passing integration safety net.

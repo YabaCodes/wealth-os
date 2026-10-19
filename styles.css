@@ -4331,3 +4331,64 @@ html[data-theme="dark"] .goal-scenario-card .goal-scenario-disclaimer {
     grid-template-columns: 1fr;
   }
 }
+
+/* v1.22.2 — date-target planning, reusing v1.22.1 contrast-safe result tiles. */
+.goal-scenario-modes {
+  display: inline-flex;
+  max-width: 100%;
+  margin-top: 14px;
+}
+.goal-scenario-modes .theme-option {
+  min-width: 0;
+  white-space: normal;
+  line-height: 1.3;
+}
+.goal-scenario-inputs .field[hidden] {
+  display: none !important;
+}
+.goal-target-results .metric-label {
+  line-height: 1.4;
+}
+.goal-target-feasibility {
+  margin-top: 12px;
+  padding: 13px 14px;
+  border: 1px solid #d7b66d;
+  border-radius: 12px;
+  background: #fff7e4;
+  color: #5c4013;
+}
+.goal-target-feasibility strong {
+  display: block;
+  color: inherit;
+}
+.goal-target-feasibility span {
+  display: block;
+  margin-top: 4px;
+  color: inherit;
+  line-height: 1.5;
+  font-size: 13px;
+}
+.goal-target-feasibility.is-caution {
+  border-color: #bccbd9;
+  background: #f1f5f9;
+  color: #334155;
+}
+html[data-theme="dark"] .goal-target-feasibility.is-warning {
+  border-color: #ab8138;
+  background: #332818;
+  color: #ffe5af;
+}
+html[data-theme="dark"] .goal-target-feasibility.is-caution {
+  border-color: #526478;
+  background: #222c3b;
+  color: #e1e9f2;
+}
+@media (max-width: 390px) {
+  .goal-scenario-modes {
+    display: flex;
+    width: 100%;
+  }
+  .goal-scenario-modes .theme-option {
+    flex: 1 1 50%;
+  }
+}

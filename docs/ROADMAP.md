@@ -132,7 +132,7 @@ For v1.20.3, checks covered version/data model, Wealth balances/reconciliation, 
 
 ## v1.22.2 — Goals target-date funding planner
 
-**Status: implementation under review; iPhone acceptance pending.**
+**Status: completed, PR #26 merged and six physical iPhone checks PASS (2026-10-19).**
 
 - Add a toggle to the existing Goals scenario planner for a **Reach by date** mode, alongside Extra Monthly.
 - Count future end-of-calendar-month contributions, starting next month, only if their due date is on or before the selected target date.
@@ -141,10 +141,20 @@ For v1.20.3, checks covered version/data model, Wealth balances/reconciliation, 
 - Preserve no-write behavior for hypothetical inputs, show masked financial values in privacy mode, and maintain Dark-mode readability.
 - Protect with unit and actual desktop/mobile Chromium tests; require iPhone acceptance before marking complete.
 
+## v1.22.3 — Goals Portfolio & Next Actions
+
+**Status: implementation under review; physical iPhone acceptance pending.**
+
+- Add a read-only Goals portfolio for saved priorities, progress, goal health and the next action, above existing individual goal cards and planning tools.
+- Interpret stored target-date health from actual completed goal allocations, including paused/waiting/complete states and no-history or missing-deadline cases.
+- Compute one **shared** planned wealth-funding comparison, summing current active dated-goal requirements without double-counting the same plan capacity. Incomplete/undated goals prevent an affordability conclusion.
+- Offer an **Open planner** shortcut that selects the goal and saved deadline, without transferring funds, changing goals or recording hypothetical numbers.
+- Protect existing privacy masking and dark-mode contrast with desktop/mobile browser tests; preserve financial data model 190 and IndexedDB schema 3.
+
 ### Later candidates (not committed)
 
 - Extended browser scenarios and failure/retry coverage, with synthetic data.
-- Optional recurring contribution planning/target-date goal dashboard based on user feedback.
+- Optional recurring contribution workflow only after explicit authorization and financial safety review.
 - Additional modularization where tests show it reduces change risk.
 
 Persistence, migrations and restore code must not be aggressively refactored without a passing integration safety net.

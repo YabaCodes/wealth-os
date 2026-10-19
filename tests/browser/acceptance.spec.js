@@ -294,3 +294,77 @@ test("Goals planner ETA and labels pass contrast checks in explicit Light, Dark 
   expect(systemDark.label).toBeGreaterThanOrEqual(4.5);
   expect(systemDark.value).toBeGreaterThanOrEqual(4.5);
 });
+
+test("Target-date Goals planner computes month-end requirements, flags budget gaps and writes no records", async ({ page }) => {
+  await seedSyntheticBrowser(page);
+  await page.evaluate(async () => {
+    const db = await import("/js/db.js");
+    const p = await db.getOne("periods", "2026-10");
+    await db.put("periods", { ...p, planSnapshot: {
+      ...p.planSnapshot, salary: 90000, immediateWealth: 20000,
+    } });
+    await db.put("transferAllocations", {
+      id: "funded-target-alloc", transferId: "funded-target-transfer",
+      bucketId: "emergency", amount: 12000,
+    });
+    await db.put("transfers", {
+      id: "funded-target-transfer", status: "completed",
+      affectsPhysicalBalance: false, transferType: "purpose_reallocation",
+      fromAccountId: "esun", toAccountId: "esun", amount: 12000,
+      budgetPeriodId: "2026-10", completedDate: "2026-10-19",
+    });
+  });
+  await page.reload();
+  await page.locator('nav [data-tab="wealth"]').click();
+  await page.locator('.wealth-switch [data-tab="goals"]').click();
+  const before = await page.evaluate(async () => (await import("/js/db.js")).exportData());
+  await page.locator('[data-goal-scenario-mode="date"]').click();
+  await expect(page.locator("#goal-scenario-deadline")).toBeVisible();
+  await expect(page.locator("#goal-scenario-extra")).toBeHidden();
+  await page.locator("#goal-scenario-deadline").fill("2027-03-31");
+  await expect(page.locator("#goal-scenario-result")).toContainText("Required each month");
+  await expect(page.locator(".goal-scenario-highlight")).toContainText("NT$");
+  await expect(page.locator(".goal-target-feasibility")).toContainText("Above current planned wealth funding");
+  await expect(page.locator("#goal-scenario-result")).toContainText("5");
+  await page.locator("#goal-scenario-deadline").fill("2027-04-30");
+  await expect(page.locator(".goal-target-feasibility")).toContainText("Within planned wealth funding");
+  await page.locator("#goal-scenario-deadline").fill("2026-11-01");
+  await expect(page.locator("#goal-scenario-result")).toContainText("There are no full future month-end contributions");
+  await page.locator("#goal-scenario-select").selectOption("goal-home-trip");
+  await expect(page.locator("#goal-scenario-result")).toContainText("waiting for Emergency Fund");
+  await expect(page.locator(".goal-scenario-highlight")).toContainText("No estimate");
+  await page.locator("#goal-scenario-select").selectOption("goal-equipment");
+  await expect(page.locator("#goal-scenario-result")).toContainText("paused");
+
+  await page.locator('[data-goal-scenario-mode="extra"]').click();
+  await expect(page.locator("#goal-scenario-deadline")).toBeHidden();
+  await expect(page.locator("#goal-scenario-extra")).toBeVisible();
+  const after = await page.evaluate(async () => (await import("/js/db.js")).exportData());
+  expect(after.data).toEqual(before.data);
+  await page.reload();
+  await page.locator('nav [data-tab="wealth"]').click();
+  await page.locator('.wealth-switch [data-tab="goals"]').click();
+  await expect(page.locator('[data-goal-scenario-mode="extra"]')).toHaveAttribute("aria-pressed", "true");
+});
+
+test("Target-date capacity unknown and privacy remain readable in dark mode", async ({ page }) => {
+  await seedSyntheticBrowser(page);
+  await page.locator('nav [data-tab="wealth"]').click();
+  await page.locator('.wealth-switch [data-tab="goals"]').click();
+  await page.locator('[data-goal-scenario-mode="date"]').click();
+  await page.locator("#goal-scenario-deadline").fill("2027-03-31");
+  await expect(page.locator(".goal-target-feasibility")).toContainText("Budget capacity unknown");
+  await page.locator('[data-action="settings"]').first().click();
+  await page.locator('[role="dialog"] [data-action="set-theme"][data-theme="dark"]').click();
+  await page.locator('[role="dialog"] [data-action="close-modal"]').first().click();
+  await expect(page.locator(".goal-scenario-highlight strong")).toBeVisible();
+  await page.locator('[data-action="privacy-toggle"]').click();
+  await expect(page.locator(".goal-scenario-highlight strong")).toContainText("••••");
+  await page.locator("#goal-scenario-deadline").fill("2027-05-31");
+  await expect(page.locator(".goal-scenario-highlight strong")).toContainText("••••");
+  const styles = await page.evaluate(() => {
+    const el = document.querySelector(".goal-target-feasibility");
+    return { bg: getComputedStyle(el).backgroundColor, text: getComputedStyle(el).color };
+  });
+  expect(styles.bg).not.toBe(styles.text);
+});

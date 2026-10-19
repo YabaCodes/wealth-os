@@ -8,7 +8,7 @@ import {
 test("navigation, Settings release identity and actual expense form persist through reload", async ({ page }) => {
   await seedSyntheticBrowser(page);
   await page.locator('[data-action="settings"]').first().click();
-  await expect(page.locator('[role="dialog"]')).toContainText("Wealth OS v1.22.3");
+  await expect(page.locator('[role="dialog"]')).toContainText("Wealth OS v1.23.0");
   await expect(page.locator('[role="dialog"]')).toContainText("Data model 190");
   await page.locator('[data-action="close-modal"]').click();
 
@@ -428,4 +428,81 @@ test("Goals portfolio uses dark-mode readable labels and masks saved money in pr
     return { right: box.right, width };
   });
   expect(sizes.right).toBeLessThanOrEqual(sizes.width + 1);
+});
+
+test("Monthly Financial Review reuses personal spending and comparison without writes", async ({ page }) => {
+  await seedSyntheticBrowser(page, { closedPrior: true, trip: testTrip(), expenses: [trainExpense()] });
+  await page.evaluate(async () => {
+    const db = await import("/js/db.js");
+    const p = await db.getOne("periods", "2026-10");
+    await db.put("periods", { ...p, planSnapshot: {
+      ...p.planSnapshot, salary: 82000, immediateWealth: 10000,
+      fixed: 23000, caps: 8500,
+      lines: [
+        { id: "rent", name: "Rent", ruleType: "fixed", budgetAmount: 23000 },
+        { id: "food", name: "Food", ruleType: "cap", budgetAmount: 8500 },
+      ],
+    }});
+    await db.put("expenses", {
+      id: "monthly-review-food", categoryId: "food", amount: 1500,
+      budgetPeriodId: "2026-10", accountId: "ctbc", date: "2026-10-19",
+      description: "Synthetic lunch",
+    });
+  });
+  await page.reload();
+  const before = await page.evaluate(async () => (await import("/js/db.js")).exportData());
+  await page.locator('[data-action="monthly-review"]').first().click();
+  const review = page.locator("#monthly-review");
+  await expect(review).toBeVisible();
+  await expect(review).toContainText("October 2026");
+  await expect(review).toContainText("Personal expenses");
+  await expect(review).toContainText("NT$1,500");
+  await expect(review).toContainText("Tracked fixed + flexible plan");
+  await expect(review).toContainText("NT$31,500");
+  await expect(review).toContainText("Compared with previous recorded month");
+  await expect(review).toContainText("September 2026");
+  await expect(review).toContainText("Core wealth funded");
+  await expect(review).toContainText("Close readiness and bank checks");
+  await expect(review).toContainText("Month-End Review");
+  // Synthetic business-trip expense is NOT personal spending.
+  await expect(review.locator(".mr-metrics").first()).not.toContainText("NT$3,500");
+  const after = await page.evaluate(async () => (await import("/js/db.js")).exportData());
+  expect(after.data).toEqual(before.data);
+  await review.locator('[data-action="review-nav"][data-tab="transactions"]').first().click();
+  await expect(page.locator(".topbar h1")).toHaveText("Activity");
+  await expect(page.locator("#monthly-review")).toHaveCount(0);
+  await page.locator('nav [data-tab="budget"]').click();
+  await page.locator('.mr-budget-entry [data-action="monthly-review"]').click();
+  await expect(page.locator("#monthly-review")).toBeVisible();
+  await page.locator('#monthly-review .mr-navigation [data-action="month-close"]').click();
+  await expect(page.locator('[role="dialog"]')).toContainText("Month-End Review");
+  // A review shortcut opens the existing close preview; it does not close the month.
+  expect((await readBrowserStore(page, "periods")).find((x) => x.id === "2026-10").state).toBe("funded");
+});
+
+test("Closed-month review reads snapshot instead of current bank health, and works in dark mode", async ({ page }) => {
+  await seedSyntheticBrowser(page, { closedPrior: true });
+  await page.locator('nav [data-tab="budget"]').click();
+  await page.locator("#period-select").selectOption("2026-09");
+  await page.locator('.mr-budget-entry [data-action="monthly-review"]').click();
+  await expect(page.locator("#monthly-review")).toContainText("Closed month");
+  await expect(page.locator("#monthly-review")).toContainText("NT$900");
+  await expect(page.locator("#monthly-review")).toContainText("Current bank checks are not applied retroactively");
+  await expect(page.locator("#monthly-review .mr-bank-row")).toHaveCount(0);
+  await page.locator('[data-action="close-modal"]').click();
+  await page.locator('[data-action="settings"]').first().click();
+  await page.locator('[role="dialog"] [data-action="set-theme"][data-theme="dark"]').click();
+  await page.locator('[role="dialog"] [data-action="close-modal"]').first().click();
+  await page.locator('.mr-budget-entry [data-action="monthly-review"]').click();
+  await expect(page.locator("#monthly-review")).toBeVisible();
+  const dimensions = await page.evaluate(() => {
+    const review = document.querySelector(".monthly-review").getBoundingClientRect();
+    return { right: review.right, viewport: document.documentElement.clientWidth };
+  });
+  expect(dimensions.right).toBeLessThanOrEqual(dimensions.viewport + 1);
+  await page.locator('[data-action="close-modal"]').click();
+  await page.locator('[data-action="privacy-toggle"]').click();
+  await page.locator('.mr-budget-entry [data-action="monthly-review"]').click();
+  await expect(page.locator("#monthly-review")).toContainText("••••");
+  await expect(page.locator("#monthly-review")).not.toContainText("NT$900");
 });

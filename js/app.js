@@ -3359,7 +3359,7 @@ function monthlyReviewView(periodId) {
     <p class="sub">Personal spending by category, ranked by recorded amount. Plan comparisons use this month's frozen fixed/flexible budget; only the previous recorded funding month is used for changes.</p>
     ${drivers.over.length ? `<p class="mr-driver-alert">${drivers.over.length} categor${drivers.over.length === 1 ? "y is" : "ies are"} above its individual plan. A combined budget total may hide these overruns.</p>` : ""}
     ${drivers.hasPrevious && moverRows ? `<div class="mr-movers"><div class="metric-label">Largest category changes</div>${moverRows}</div>` : ""}
-    ${!drivers.hasPrevious ? '<p class="sub">Category changes will appear once another funding month is recorded.</p>' : ""}
+    ${!drivers.hasPrevious ? `<p class="sub">${previous ? `The earlier recorded month (${esc(monthLabel(previous.id))}) does not have a complete category breakdown, so category-level changes cannot be calculated reliably.` : "Category changes will appear once another funding month is recorded."}</p>` : ""}
     <div class="mr-driver-rows">${driverRows || '<div class="empty compact-empty">No personal category expenses or spending plan yet.</div>'}</div>
     ${drivers.unassignedCurrent !== null && Math.abs(drivers.unassignedCurrent) > 0.5
       ? `<p class="sub">Note: ${driverAmount(Math.abs(drivers.unassignedCurrent))} of the saved personal spending total is not represented in the available category breakdown. The total above remains authoritative.</p>`
@@ -5750,6 +5750,8 @@ function bind() {
           }
           if (a === "clear-review-driver") {
             spendingDrilldown = null;
+            activityFilter = "all";
+            activitySearch = "";
             return render();
           }
           if (a === "review-nav") {

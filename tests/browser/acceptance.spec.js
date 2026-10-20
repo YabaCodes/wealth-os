@@ -564,7 +564,7 @@ test("Spending Drivers identifies food overspend, actual category movers and exa
   await expect(page.locator(".activity-list")).not.toContainText("Earlier recorded food");
   await page.locator('[data-action="clear-review-driver"]').click();
   await expect(page.locator("#mr-activity-filter")).toHaveCount(0);
-  await expect(page.locator(".activity-list")).toContainText("Synthetic Rent driver");
+  await expect(page.locator(".activity-list").filter({ hasText: "Synthetic Rent driver" })).toHaveCount(1);
   const after = await page.evaluate(async () => (await import("/js/db.js")).exportData());
   expect(after.data).toEqual(before.data);
 });

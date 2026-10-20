@@ -8,7 +8,7 @@ import {
 test("navigation, Settings release identity and actual expense form persist through reload", async ({ page }) => {
   await seedSyntheticBrowser(page);
   await page.locator('[data-action="settings"]').first().click();
-  await expect(page.locator('[role="dialog"]')).toContainText("Wealth OS v1.23.1");
+  await expect(page.locator('[role="dialog"]')).toContainText("Wealth OS v1.23.2");
   await expect(page.locator('[role="dialog"]')).toContainText("Data model 190");
   await page.locator('[data-action="close-modal"]').click();
 
@@ -590,4 +590,94 @@ test("Historical category detail gaps are disclosed, and drivers stay legible an
   await page.locator('[data-action="monthly-review"]').first().click();
   await expect(page.locator("#monthly-review")).toContainText("••••");
   await expect(page.locator("#mr-spending-drivers")).not.toContainText("NT$23,000");
+});
+
+test("Home quick insights ranks flexible categories and opens focused Spending Drivers without any writes", async ({ page }) => {
+  await seedSyntheticBrowser(page, { closedPrior:true, trip:testTrip(), expenses:[trainExpense()] });
+  await page.evaluate(async () => {
+    const db=await import("/js/db.js");
+    const p=await db.getOne("periods","2026-10");
+    await db.put("periods",{...p,planSnapshot:{
+      ...p.planSnapshot,salary:80000,immediateWealth:15000,
+      lines:[
+        {id:"rent",name:"Rent",ruleType:"fixed",budgetAmount:23000},
+        {id:"food",name:"Food",ruleType:"cap",budgetAmount:8500},
+        {id:"transport",name:"Transport",ruleType:"cap",budgetAmount:3000},
+      ],
+    }});
+    for(const item of [
+      {id:"quick-rent",categoryId:"rent",amount:23000,date:"2026-10-17"},
+      {id:"quick-food",categoryId:"food",amount:11000,date:"2026-10-18"},
+      {id:"quick-transport",categoryId:"transport",amount:2400,date:"2026-10-19"},
+    ]) await db.put("expenses",{
+      ...item,budgetPeriodId:"2026-10",accountId:"ctbc",
+      description:"Synthetic "+item.categoryId,
+    });
+  });
+  await page.reload();
+  const preview=page.locator("#home-spending-insights");
+  await expect(preview).toBeVisible();
+  await expect(preview).toHaveAttribute("data-insights-period","2026-10");
+  await expect(preview).toContainText("Spending drivers");
+  await expect(preview).toContainText("Food");
+  await expect(preview).toContainText("NT$11,000");
+  await expect(preview).toContainText("Transport");
+  await expect(preview).toContainText("NT$2,400");
+  await expect(preview).not.toContainText("NT$23,000");
+  await expect(preview).toContainText("1 flexible category is above");
+  const before=await page.evaluate(async () => (await import("/js/db.js")).exportData());
+  await preview.locator('[data-action="spending-drivers"]').click();
+  const sheet=page.locator(".modal");
+  await expect(page.locator("#monthly-review")).toBeVisible();
+  await expect(page.locator("#monthly-review")).toHaveAttribute("data-review-period","2026-10");
+  await expect(page.locator("#mr-spending-drivers")).toBeFocused();
+  const position=await page.evaluate(() => {
+    const modal=document.querySelector(".modal");
+    const section=document.querySelector("#mr-spending-drivers");
+    return {scroll:modal.scrollTop,top:section.getBoundingClientRect().top,
+      sheetTop:modal.getBoundingClientRect().top,sheetBottom:modal.getBoundingClientRect().bottom};
+  });
+  expect(position.scroll).toBeGreaterThan(0);
+  expect(position.top).toBeGreaterThanOrEqual(position.sheetTop-2);
+  expect(position.top).toBeLessThan(position.sheetBottom);
+  await expect(page.locator('#mr-spending-drivers .mr-driver-row[data-driver-category="food"]')).toContainText("Over plan by NT$2,500");
+  await page.locator('[data-action="close-modal"]').click();
+  const after=await page.evaluate(async () => (await import("/js/db.js")).exportData());
+  expect(after.data).toEqual(before.data);
+});
+
+test("Budget shortcut preserves selected CLOSED funding month and jumps straight to Spending Drivers", async ({ page }) => {
+  await seedSyntheticBrowser(page, {closedPrior:true});
+  await page.locator('nav [data-tab="budget"]').click();
+  await page.locator("#period-select").selectOption("2026-09");
+  await expect(page.locator("#budget-review-shortcuts")).toBeVisible();
+  await expect(page.locator("#budget-review-shortcuts")).toContainText("September 2026");
+  await page.locator('#budget-review-shortcuts [data-action="spending-drivers"]').click();
+  await expect(page.locator("#monthly-review")).toHaveAttribute("data-review-period","2026-09");
+  await expect(page.locator("#monthly-review")).toContainText("Closed month");
+  await expect(page.locator("#mr-spending-drivers")).toBeFocused();
+  await expect(page.locator("#mr-spending-drivers")).toContainText("does not have a complete category breakdown");
+  await page.locator('[data-action="close-modal"]').click();
+  await expect(page.locator("#period-select")).toHaveValue("2026-09");
+  await page.locator('#budget-review-shortcuts [data-action="monthly-review"]').click();
+  await expect(page.locator("#monthly-review")).toHaveAttribute("data-review-period","2026-09");
+  await expect(page.locator("#mr-spending-drivers")).not.toBeFocused();
+});
+
+test("Quick-insights empty state and dark/private iPhone layout keep shortcut usable", async ({ page }) => {
+  await seedSyntheticBrowser(page);
+  await expect(page.locator("#home-spending-insights")).toContainText("No flexible or unplanned personal category spending");
+  await page.locator('[data-action="settings"]').first().click();
+  await page.locator('[role="dialog"] [data-action="set-theme"][data-theme="dark"]').click();
+  await page.locator('[role="dialog"] [data-action="close-modal"]').first().click();
+  await page.locator('[data-action="privacy-toggle"]').click();
+  await expect(page.locator("#home-spending-insights")).toBeVisible();
+  const dimensions=await page.evaluate(()=>{
+    const card=document.querySelector("#home-spending-insights").getBoundingClientRect();
+    return {right:card.right,viewport:document.documentElement.clientWidth};
+  });
+  expect(dimensions.right).toBeLessThanOrEqual(dimensions.viewport+1);
+  await page.locator('#home-spending-insights [data-action="spending-drivers"]').click();
+  await expect(page.locator("#mr-spending-drivers")).toBeFocused();
+  await expect(page.locator("html")).toHaveAttribute("data-theme","dark");
 });

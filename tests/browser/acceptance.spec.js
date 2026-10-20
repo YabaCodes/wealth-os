@@ -656,7 +656,7 @@ test("Budget shortcut preserves selected CLOSED funding month and jumps straight
   await expect(page.locator("#monthly-review")).toHaveAttribute("data-review-period","2026-09");
   await expect(page.locator("#monthly-review")).toContainText("Closed month");
   await expect(page.locator("#mr-spending-drivers")).toBeFocused();
-  await expect(page.locator("#mr-spending-drivers")).toContainText("does not have a complete category breakdown");
+  await expect(page.locator("#mr-spending-drivers")).toContainText("Category breakdown unavailable for this funding month.");
   await page.locator('[data-action="close-modal"]').click();
   await expect(page.locator("#period-select")).toHaveValue("2026-09");
   await page.locator('#budget-review-shortcuts [data-action="monthly-review"]').click();

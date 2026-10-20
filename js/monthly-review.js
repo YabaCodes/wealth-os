@@ -104,9 +104,15 @@ export function spendingDriversFor({
   currentActuals = {}, previousActuals = null, planLines = [],
   categories = [], currentTotal = null, previousTotal = null,
 } = {}) {
-  const hasPrevious = previousActuals !== null && previousActuals !== undefined;
   const current = currentActuals && typeof currentActuals === "object" ? currentActuals : {};
-  const previous = hasPrevious && typeof previousActuals === "object" ? previousActuals : {};
+  const suppliedPrevious = previousActuals && typeof previousActuals === "object" ? previousActuals : null;
+  // Older close snapshots may store the personal spending total but have no
+  // per-category historical breakdown. Never manufacture category increases
+  // by treating that missing breakdown as NT$0 spent previously.
+  const previousCovered = suppliedPrevious && (previousTotal === null ||
+    Math.abs(Object.values(suppliedPrevious).reduce((n,v) => n + safe(v),0) - safe(previousTotal)) <= 0.5);
+  const hasPrevious = !!previousCovered;
+  const previous = hasPrevious ? suppliedPrevious : {};
   const names = new Map(categories.map((c) => [String(c.id), String(c.name || c.id)]));
   const planned = new Map();
   for (const line of planLines) {

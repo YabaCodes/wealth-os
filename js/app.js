@@ -88,7 +88,7 @@ import {
   goalsPortfolioFor,
 } from "./wealth-view-model.js";
 import { assessMonthClose, closeMonthAtomic, reopenMonthAtomic } from "./month-close.js";
-import { monthlyFinancialReviewFor, spendingDriversFor } from "./monthly-review.js";
+import { monthlyFinancialReviewFor, spendingDriversFor, spendingQuickInsightsFor } from "./monthly-review.js";
 import {
   latestReconciliationFor,
   accountSnapshotFor,
@@ -110,7 +110,7 @@ let modalDirty = false;
 let homeWeekStart = null,
   homeDay = null;
 let reachedGoals = null; // goals at target after the last load (null until the first load)
-const APP_VERSION = "1.23.1";
+const APP_VERSION = "1.23.2";
 const THEME_KEY = "wealthOSTheme";
 // Theme: 'system' follows the phone's light/dark setting. A copy is kept in localStorage so
 // index.html can apply it before the first paint (IndexedDB is too slow for that).
@@ -1695,6 +1695,17 @@ function shell(content) {
   root.querySelector(".modal")?.addEventListener("input", () => (modalDirty = true));
   lastShell = { tab, period: selectedPeriodId, modal: !!modal };
   if (modalOpening && motionAllowed()) root.querySelector(".modal-backdrop")?.classList.add("modal-enter");
+  if (modalOpening && modal?.type === "monthly-review" && modal.focus === "drivers") {
+    // Scroll the existing review SHEET, not the underlying Home/Budget page.
+    // Keep a real focus target for iPhone VoiceOver and keyboard navigation.
+    const sheet = root.querySelector(".modal");
+    const target = root.querySelector("#mr-spending-drivers");
+    if (sheet && target) {
+      sheet.scrollTop = Math.max(0, sheet.scrollTop + target.getBoundingClientRect().top -
+        sheet.getBoundingClientRect().top - 12);
+      target.focus({ preventScroll: true });
+    }
+  }
   animateBars(root, before, entering);
   if (pendingHighlight) {
     root.querySelector(`[data-entry="${pendingHighlight}"]`)?.classList.add("entry-just-saved");
@@ -1837,6 +1848,40 @@ function homeDayList(p, day) {
     )
     .join("")}${spent ? `<div class="home-day-total"><span>Spent this day</span><strong>${money(spent)}</strong></div>` : ""}`;
 }
+// v1.23.2 — compact preview of controllable flexible/unplanned personal spending.
+// Uses the selected month's frozen category actuals, including closed snapshots.
+function homeSpendingPreview(period, plan) {
+  const record = periodRecord(period.id);
+  const preview = spendingQuickInsightsFor({
+    actuals: record?.actuals ?? expenseTotals(period.id),
+    planLines: plan.lines || [],
+    categories: state.categories,
+    personalTotal: record?.expenses ?? totalExpenses(period.id),
+    maxItems: 2,
+  });
+  const rows = preview.top.map((r) => `<div class="home-driver-row">
+    <span><strong>${esc(r.name)}</strong>${r.overBudget ? '<small class="home-driver-over">Above category plan</small>' : ""}</span>
+    <strong class="home-driver-amount">${privateMoney(r.spent)}</strong>
+  </div>`).join("");
+  const empty = preview.status === "unavailable"
+    ? "The selected month's saved spending total has no category breakdown available."
+    : "No flexible or unplanned personal category spending recorded for this month.";
+  const qualifier = preview.overBudgetCount
+    ? `${preview.overBudgetCount} flexible categor${preview.overBudgetCount === 1 ? "y is" : "ies are"} above its budget`
+    : "Fixed bills are excluded from this quick preview";
+  return `<section class="card home-spending-insights" id="home-spending-insights" data-insights-period="${esc(period.id)}">
+    <div class="home-insights-title">
+      <div><div class="metric-label">Quick insights · ${esc(monthLabel(period.id))}</div><h2>Spending drivers</h2></div>
+      <span class="tag">Personal</span>
+    </div>
+    ${rows ? `<div class="home-drivers">${rows}</div>` : `<p class="sub home-insights-empty">${empty}</p>`}
+    <div class="home-insights-footer">
+      ${rows ? `<span class="sub">${qualifier}</span>` : '<span class="sub">Category view available in Monthly Review</span>'}
+      <button class="btn secondary small" type="button" data-action="spending-drivers" data-period="${esc(period.id)}">See spending drivers</button>
+    </div>
+  </section>`;
+}
+
 function homeView() {
   const p = currentPeriod();
   const active = activeGoal(state.goals, state.bucketBalances);
@@ -1948,6 +1993,7 @@ function homeView() {
     <div class="next-step-row"><span class="next-ic" aria-hidden="true">${icon(nextIcon)}</span><div class="next-copy"><span class="metric-label">Next step</span><strong>${actionText}</strong><span class="sub">${actionSub}</span></div>${actionMetric ? `<strong class="next-amount">${privateValue(actionMetric)}</strong>` : ""}</div>
     ${action ? `<div class="next-step-actions">${action}</div>` : ""}
   </section>
+  ${homeSpendingPreview(p, plan)}
   ${
     homeDay
       ? `<div class="section-title"><h2>${esc(dayHeading(homeDay))}</h2><button class="text-btn see-all" data-action="home-day" data-day="">Show latest</button></div>`
@@ -2110,7 +2156,7 @@ function budgetView() {
     : "";
 
   return `<div class="period-row with-menu">${periodSelector(true)}<button type="button" class="period-step period-menu" data-action="month-actions" data-id="${p.id}" aria-label="More for ${monthLabel(p.id)}">⋯</button></div>
-  <div class="mr-budget-entry"><button class="btn secondary small" type="button" data-action="monthly-review">Monthly Financial Review</button><span class="sub">Spending, wealth funding, close readiness and trends</span></div>
+  <div class="mr-budget-entry" id="budget-review-shortcuts"><button class="btn secondary small" type="button" data-action="monthly-review">Monthly Financial Review</button><button class="btn ghost small" type="button" data-action="spending-drivers" data-period="${esc(p.id)}">Spending Drivers</button><span class="sub">Quick access for ${esc(monthLabel(p.id))}</span></div>
   ${lock}
   <section class="card ring-card">
     <div class="ring-head"><h2>Flexible spending</h2><span class="tag">${dayPill}</span></div>
@@ -3354,13 +3400,15 @@ function monthlyReviewView(periodId) {
     <div><strong>${esc(r.name)}</strong><span class="${r.change > 0 ? "mr-danger" : "mr-positive"}">${r.change > 0 ? "+" : "−"}${driverAmount(Math.abs(r.change))} vs ${esc(monthLabel(previous.id))}</span></div>
     ${driverLink(r,"Inspect")}
   </div>`).join("");
-  const driverSection = `<div class="mr-section mr-drivers" id="mr-spending-drivers">
+  const driverSection = `<div class="mr-section mr-drivers" id="mr-spending-drivers" tabindex="-1">
     <div class="mr-driver-title"><h4>Spending drivers</h4><span class="tag">${drivers.categoriesCount} categories spent</span></div>
     <p class="sub">Personal spending by category, ranked by recorded amount. Plan comparisons use this month's frozen fixed/flexible budget; only the previous recorded funding month is used for changes.</p>
     ${drivers.over.length ? `<p class="mr-driver-alert">${drivers.over.length} categor${drivers.over.length === 1 ? "y is" : "ies are"} above its individual plan. A combined budget total may hide these overruns.</p>` : ""}
     ${drivers.hasPrevious && moverRows ? `<div class="mr-movers"><div class="metric-label">Largest category changes</div>${moverRows}</div>` : ""}
     ${!drivers.hasPrevious ? `<p class="sub">${previous ? `The earlier recorded month (${esc(monthLabel(previous.id))}) does not have a complete category breakdown, so category-level changes cannot be calculated reliably.` : "Category changes will appear once another funding month is recorded."}</p>` : ""}
-    <div class="mr-driver-rows">${driverRows || '<div class="empty compact-empty">No personal category expenses or spending plan yet.</div>'}</div>
+    <div class="mr-driver-rows">${driverRows || (drivers.unassignedCurrent !== null && drivers.unassignedCurrent > 0.5
+      ? '<div class="empty compact-empty">Category breakdown unavailable for this funding month.</div>'
+      : '<div class="empty compact-empty">No personal category expenses or spending plan yet.</div>')}</div>
     ${drivers.unassignedCurrent !== null && Math.abs(drivers.unassignedCurrent) > 0.5
       ? `<p class="sub">Note: ${driverAmount(Math.abs(drivers.unassignedCurrent))} of the saved personal spending total is not represented in the available category breakdown. The total above remains authoritative.</p>`
       : ""}
@@ -5737,6 +5785,11 @@ function bind() {
           if (a === "confirm-reconciliation") return confirmAccountReconciliation();
           if (a === "confirm-transfer") return completeTransfer(b.dataset.id);
           if (a === "monthly-review") modal = { type: "monthly-review", periodId: currentPeriod()?.id };
+          if (a === "spending-drivers") {
+            const requestedPeriod = b.dataset.period || currentPeriod()?.id;
+            if (!state.periods.some((p) => p.id === requestedPeriod)) return;
+            modal = { type: "monthly-review", periodId: requestedPeriod, focus: "drivers" };
+          }
           if (a === "review-driver") {
             const periodId = b.dataset.period;
             const categoryId = b.dataset.category;

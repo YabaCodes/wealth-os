@@ -4568,3 +4568,47 @@ html[data-theme="dark"] .mr-danger { color:#ffbc8a !important; }
   .mr-mover-row button { margin-left:auto; }
   .mr-driver-head { gap:6px; }
 }
+
+/* v1.23.2 — Home quick insights + one-tap Spending Drivers review shortcut */
+.home-spending-insights {
+  margin-top: 14px;
+  padding: 14px 16px;
+  min-width: 0;
+}
+.home-insights-title {
+  display: flex; justify-content: space-between; align-items: flex-start;
+  gap: 10px; flex-wrap: wrap;
+}
+.home-insights-title h2 { margin: 3px 0 0; font-size: 16px; }
+.home-drivers { margin: 11px 0; }
+.home-driver-row {
+  display: flex; justify-content: space-between; align-items: center;
+  gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--line);
+}
+.home-driver-row:last-child { border-bottom: 0; }
+.home-driver-row > span { min-width: 0; display: grid; gap: 3px; }
+.home-driver-row > span > strong { font-size: 14px; overflow-wrap: anywhere; }
+.home-driver-over {
+  font-size: 12px; line-height: 1.35; color: #9e3f15;
+}
+html[data-theme="dark"] .home-driver-over { color: #ffbc8a; }
+.home-driver-amount {
+  flex: 0 0 auto; text-align: right; font-size: 14px;
+  font-variant-numeric: tabular-nums; overflow-wrap: anywhere;
+}
+.home-insights-footer {
+  display: flex; align-items: center; justify-content: space-between;
+  flex-wrap: wrap; gap: 10px; margin-top: 11px;
+}
+.home-insights-footer .sub { flex: 1 1 140px; line-height: 1.45; }
+.home-insights-footer button { flex: 0 0 auto; }
+.home-insights-empty { margin: 12px 0; line-height: 1.5; }
+.mr-budget-entry { gap: 8px; }
+.mr-budget-entry .sub { flex-basis: 100%; }
+.mr-drivers:focus { outline: none; }
+@media (max-width: 390px) {
+  .home-insights-footer { align-items: stretch; }
+  .home-insights-footer button { width: 100%; min-height: 42px; }
+  .home-driver-amount { max-width: 47%; }
+  .mr-budget-entry button { flex: 1 1 135px; }
+}

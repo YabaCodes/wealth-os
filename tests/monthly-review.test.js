@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { monthlyChangeFor, monthlyFinancialReviewFor } from "../js/monthly-review.js";
+import { monthlyChangeFor, monthlyFinancialReviewFor, spendingDriversFor } from "../js/monthly-review.js";
 
 const plan = {
   salary: 80000, immediateWealth: 18000,
@@ -113,4 +113,96 @@ test("missing plan and financial data remain conservative and do not modify orig
   assert.equal(x.spending.outsideTracked, 3500);
   assert.deepEqual(fixture, frozen);
   assert.equal(monthlyFinancialReviewFor({ period: null }), null);
+});
+
+const driverFixture = (overrides={}) => ({
+  currentActuals: { rent: 23000, food: 11000, gas: 900, unplanned: 2700 },
+  previousActuals: { rent: 23000, food: 6800, gas: 1500, oldCategory: 2000 },
+  planLines: [
+    { id: "rent", name: "Rent", ruleType: "fixed", budgetAmount: 23000 },
+    { id: "food", name: "Food", ruleType: "cap", budgetAmount: 8500 },
+    { id: "gas", name: "Gas", ruleType: "cap", budgetAmount: 1200 },
+    { id: "electric-reserve", name: "Electricity Reserve", ruleType: "sinking_contribution", budgetAmount: 4000 },
+  ],
+  categories: [
+    { id: "rent", name: "Rent" }, { id: "food", name: "Food" },
+    { id: "gas", name: "Gas" }, { id: "unplanned", name: "Medical" },
+    { id: "oldCategory", name: "Old Category" },
+  ],
+  currentTotal: 37600, previousTotal: 33300,
+  ...overrides,
+});
+
+test("spending drivers rank personal categories by amount and compare individual plans", () => {
+  const d = spendingDriversFor(driverFixture());
+  assert.deepEqual(d.rows.map(x=>x.id), ["rent", "food", "unplanned", "gas", "oldCategory"]);
+  const food = d.rows.find(x=>x.id === "food");
+  assert.deepEqual({
+    spent: food.spent, previous: food.previous, change: food.change,
+    budget: food.budget, variance: food.variance, overBudget: food.overBudget,
+  }, {
+    spent:11000, previous:6800, change:4200,
+    budget:8500, variance:2500, overBudget:true,
+  });
+  const medical = d.rows.find(x=>x.id === "unplanned");
+  assert.equal(medical.name, "Medical");
+  assert.equal(medical.budget, null);
+  assert.equal(medical.noBudget, true);
+  assert.equal(medical.change, 2700);
+  assert.equal(d.over[0].id, "food");
+  assert.deepEqual(d.movers.map(x=>x.id), ["food", "unplanned", "oldCategory"]);
+  assert.equal(d.unassignedCurrent, 0);
+  assert.equal(d.unassignedPrevious, 0);
+});
+
+test("no prior recorded period means no fake movement or percentage change", () => {
+  const d = spendingDriversFor(driverFixture({ previousActuals:null, previousTotal:null }));
+  assert.equal(d.hasPrevious, false);
+  assert.deepEqual(d.movers, []);
+  assert.equal(d.rows.find(x=>x.id === "food").previous, null);
+  assert.equal(d.rows.find(x=>x.id === "food").change, null);
+  assert.equal(d.unassignedPrevious, null);
+});
+
+test("zero versus absent plan are not conflated, and transfers or reserves are not spending categories", () => {
+  const d = spendingDriversFor(driverFixture({
+    currentActuals: { food: 200, electricReserve: 1200, unplanned: 0 },
+    previousActuals: {},
+    planLines:[
+      { id:"food", name:"Food", ruleType:"cap", budgetAmount:0 },
+      { id:"electric-reserve", name:"Electricity Reserve", ruleType:"sinking_contribution", budgetAmount: 4000 },
+      { id:"wealth", name:"Wealth", ruleType:"investment_contribution", budgetAmount: 20000 },
+    ],
+    currentTotal:1400, previousTotal:0,
+  }));
+  const food = d.rows.find(x=>x.id==="food");
+  assert.equal(food.noBudget, false);
+  assert.equal(food.budget, 0);
+  assert.equal(food.overBudget, true);
+  assert.equal(d.rows.find(x=>x.id==="electricReserve").noBudget, true);
+  assert.equal(d.rows.some(x=>x.id==="wealth"), false);
+});
+
+test("missing category snapshots are disclosed, and inputs never mutated", () => {
+  const fixture = driverFixture({ currentTotal: 41000, previousTotal: 33300 });
+  const original = structuredClone(fixture);
+  const a = spendingDriversFor(fixture);
+  const b = spendingDriversFor(fixture);
+  assert.equal(a.unassignedCurrent, 3400);
+  assert.deepEqual(a,b);
+  assert.deepEqual(fixture,original);
+  assert.deepEqual(spendingDriversFor().rows, []);
+});
+
+test("closed-month historical actuals are preferred as passed; renamed and missing categories degrade safely", () => {
+  const d = spendingDriversFor(driverFixture({
+    categories:[{ id:"food", name:"Meals & dining" }],
+    currentActuals:{food:900, missingPastCategory:300},
+    previousActuals:{food:1000, missingPastCategory:500},
+    currentTotal:1200, previousTotal:1500,
+  }));
+  assert.equal(d.rows.find(x=>x.id==="food").name,"Meals & dining");
+  assert.equal(d.rows.find(x=>x.id==="missingPastCategory").name,"missingPastCategory");
+  assert.equal(d.rows.find(x=>x.id==="missingPastCategory").change,-200);
+  assert.equal(d.unassignedCurrent, 0);
 });

@@ -8,7 +8,7 @@ import {
 test("navigation, Settings release identity and actual expense form persist through reload", async ({ page }) => {
   await seedSyntheticBrowser(page);
   await page.locator('[data-action="settings"]').first().click();
-  await expect(page.locator('[role="dialog"]')).toContainText("Wealth OS v1.23.0");
+  await expect(page.locator('[role="dialog"]')).toContainText("Wealth OS v1.23.1");
   await expect(page.locator('[role="dialog"]')).toContainText("Data model 190");
   await page.locator('[data-action="close-modal"]').click();
 
@@ -505,4 +505,89 @@ test("Closed-month review reads snapshot instead of current bank health, and wor
   await page.locator('.mr-budget-entry [data-action="monthly-review"]').click();
   await expect(page.locator("#monthly-review")).toContainText("••••");
   await expect(page.locator("#monthly-review")).not.toContainText("NT$900");
+});
+
+test("Spending Drivers identifies food overspend, actual category movers and exact-month Activity drill-down without writes", async ({ page }) => {
+  await seedSyntheticBrowser(page, { closedPrior: true, trip: testTrip(), expenses: [trainExpense()] });
+  await page.evaluate(async () => {
+    const db = await import("/js/db.js");
+    const p = await db.getOne("periods", "2026-10");
+    await db.put("periods", { ...p, planSnapshot: {
+      ...p.planSnapshot, salary: 85000, immediateWealth: 14000,
+      lines: [
+        { id: "rent", name: "Rent", ruleType: "fixed", budgetAmount: 23000 },
+        { id: "food", name: "Food", ruleType: "cap", budgetAmount: 8500 },
+        { id: "electricity-reserve", name: "Electricity Reserve", ruleType: "sinking_contribution", budgetAmount: 5000 },
+      ],
+    }});
+    const previous = await db.getOne("monthlyCloses", "2026-09");
+    await db.put("monthlyCloses", { ...previous, categoryActuals: { food: 900 } });
+    await db.put("expenses", {
+      id: "oct-food-driver", categoryId: "food", amount: 11000,
+      budgetPeriodId: "2026-10", accountId: "ctbc", date: "2026-10-19",
+      description: "Synthetic Food driver",
+    });
+    await db.put("expenses", {
+      id: "oct-rent-driver", categoryId: "rent", amount: 23000,
+      budgetPeriodId: "2026-10", accountId: "ctbc", date: "2026-10-18",
+      description: "Synthetic Rent driver",
+    });
+    await db.put("expenses", {
+      id: "sept-food-driver", categoryId: "food", amount: 900,
+      budgetPeriodId: "2026-09", accountId: "ctbc", date: "2026-09-18",
+      description: "Earlier recorded food",
+    });
+  });
+  await page.reload();
+  const before = await page.evaluate(async () => (await import("/js/db.js")).exportData());
+  await page.locator('[data-action="monthly-review"]').first().click();
+  const review = page.locator("#monthly-review");
+  await expect(review.locator("#mr-spending-drivers")).toBeVisible();
+  await expect(review.locator('.mr-driver-row[data-driver-category="food"]')).toContainText("Food");
+  await expect(review.locator('.mr-driver-row[data-driver-category="food"]')).toContainText("NT$11,000");
+  await expect(review.locator('.mr-driver-row[data-driver-category="food"]')).toContainText("Over plan by NT$2,500");
+  await expect(review.locator('.mr-driver-row[data-driver-category="food"]')).toContainText("Up NT$10,100");
+  await expect(review.locator('.mr-driver-row[data-driver-category="rent"]')).toContainText("NT$23,000");
+  await expect(review.locator('.mr-driver-row[data-driver-category="rent"]')).toContainText("Within plan");
+  await expect(review.locator(".mr-driver-alert")).toContainText("1 category is above");
+  // Business Trip reimbursement expense is not part of personal spending.
+  await expect(review.locator(".mr-metrics")).toContainText("NT$34,000");
+  await expect(review.locator(".mr-metrics")).not.toContainText("NT$3,500");
+
+  await review.locator('.mr-driver-row[data-driver-category="food"] [data-action="review-driver"]').click();
+  await expect(page.locator(".topbar h1")).toHaveText("Activity");
+  await expect(page.locator("#mr-activity-filter")).toContainText("Food expenses");
+  await expect(page.locator("#mr-activity-filter")).toContainText("October 2026");
+  await expect(page.locator(".activity-list .tx")).toHaveCount(1);
+  await expect(page.locator(".activity-list")).toContainText("Synthetic Food driver");
+  await expect(page.locator(".activity-list")).not.toContainText("Synthetic Rent driver");
+  await expect(page.locator(".activity-list")).not.toContainText("Earlier recorded food");
+  await page.locator('[data-action="clear-review-driver"]').click();
+  await expect(page.locator("#mr-activity-filter")).toHaveCount(0);
+  await expect(page.locator(".activity-list").filter({ hasText: "Synthetic Rent driver" })).toHaveCount(1);
+  const after = await page.evaluate(async () => (await import("/js/db.js")).exportData());
+  expect(after.data).toEqual(before.data);
+});
+
+test("Historical category detail gaps are disclosed, and drivers stay legible and private in dark mode", async ({ page }) => {
+  await seedSyntheticBrowser(page, { closedPrior: true });
+  await page.locator('[data-action="monthly-review"]').first().click();
+  await expect(page.locator("#mr-spending-drivers")).toContainText("does not have a complete category breakdown");
+  await expect(page.locator("#mr-spending-drivers .mr-movers")).toHaveCount(0);
+  await page.locator('[data-action="close-modal"]').click();
+  await page.locator('[data-action="settings"]').first().click();
+  await page.locator('[role="dialog"] [data-action="set-theme"][data-theme="dark"]').click();
+  await page.locator('[role="dialog"] [data-action="close-modal"]').first().click();
+  await page.locator('[data-action="monthly-review"]').first().click();
+  await expect(page.locator("#mr-spending-drivers")).toBeVisible();
+  const width = await page.evaluate(() => {
+    const modal = document.querySelector("#mr-spending-drivers").getBoundingClientRect();
+    return { edge: modal.right, screen: document.documentElement.clientWidth };
+  });
+  expect(width.edge).toBeLessThanOrEqual(width.screen + 1);
+  await page.locator('[data-action="close-modal"]').click();
+  await page.locator('[data-action="privacy-toggle"]').click();
+  await page.locator('[data-action="monthly-review"]').first().click();
+  await expect(page.locator("#monthly-review")).toContainText("••••");
+  await expect(page.locator("#mr-spending-drivers")).not.toContainText("NT$23,000");
 });

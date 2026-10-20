@@ -153,13 +153,23 @@ For v1.20.3, checks covered version/data model, Wealth balances/reconciliation, 
 
 ## v1.23.0 — Monthly Financial Review
 
-**Status: implementation under review; iPhone acceptance pending.**
+**Status: completed, PR #28 merged and all six physical iPhone acceptance checks PASS (2026-10-20).**
 
 - Consolidate recorded personal spending, tracked fixed/flexible budget status, completed versus planned wealth funding, fixed-bill status, and prior-recorded-month comparisons in an accessible on-demand review from Home and Budget.
 - For open months, reuse the current shared month-close hard blocker and bank/purpose reconciliation gate; warn about missing fixed payments without inventing hard blockers.
 - For closed months, use existing persisted close snapshots when available and never project current bank checks onto historical close records.
 - Provide shortcuts to **existing** Budget, Activity, Wealth and Month-End Review controls; review is read-only and does not save, sweep, transfer, or close.
 - Cover mathematical and accounting classification, combined history, navigation, theme/privacy and IndexedDB immutability with Node and Playwright desktop/mobile tests. Data Model 190 and IndexedDB schema 3 unchanged.
+
+## v1.23.1 — Monthly Spending Drivers
+
+**Status: implementation under review; physical iPhone acceptance pending.**
+
+- Extend the accepted Monthly Financial Review with ranked **personal expense** drivers by category and exact category plan overages, plus largest category spending changes against the previous **recorded** funding month.
+- Use current and historical category actuals from existing period snapshot semantics. When old closed months contain a spending total but no complete category breakdown, explicitly suppress misleading per-category deltas.
+- Category drill-down leads to the existing Activity screen filtered to exact category and funding month, with clear/reset control; no new write paths.
+- Exclude physical transfers, purpose allocations and unsettled Business Trips from personal spending; respect existing privacy, dark mode and mobile layout.
+- Verify immutability, accurate amounts, prior-month snapshots, drill-down navigation and release version with Node and Chromium desktop/mobile tests. Keep model 190 / IndexedDB schema 3.
 
 ### Later candidates (not committed)
 

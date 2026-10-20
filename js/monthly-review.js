@@ -93,3 +93,63 @@ export function monthlyFinancialReviewFor({
     attention, previous,
   };
 }
+
+/**
+ * Read-only personal spending drivers by category, using periodRecord.actuals
+ * (historical close snapshot where available) and the CURRENT funding month's
+ * frozen planSnapshot lines. No transfers, special-budget ledger or bucket
+ * allocations are inputs to this function.
+ */
+export function spendingDriversFor({
+  currentActuals = {}, previousActuals = null, planLines = [],
+  categories = [], currentTotal = null, previousTotal = null,
+} = {}) {
+  const current = currentActuals && typeof currentActuals === "object" ? currentActuals : {};
+  const suppliedPrevious = previousActuals && typeof previousActuals === "object" ? previousActuals : null;
+  // Older close snapshots may store the personal spending total but have no
+  // per-category historical breakdown. Never manufacture category increases
+  // by treating that missing breakdown as NT$0 spent previously.
+  const previousCovered = suppliedPrevious && (previousTotal === null ||
+    Math.abs(Object.values(suppliedPrevious).reduce((n,v) => n + safe(v),0) - safe(previousTotal)) <= 0.5);
+  const hasPrevious = !!previousCovered;
+  const previous = hasPrevious ? suppliedPrevious : {};
+  const names = new Map(categories.map((c) => [String(c.id), String(c.name || c.id)]));
+  const planned = new Map();
+  for (const line of planLines) {
+    if (!line?.id || !["fixed", "cap"].includes(line.ruleType)) continue;
+    const id = String(line.id);
+    const amount = Math.max(0, safe(line.budgetAmount));
+    planned.set(id, (planned.get(id) || 0) + amount);
+    if (!names.has(id)) names.set(id, String(line.name || id));
+  }
+  const ids = new Set([...planned.keys(), ...Object.keys(current), ...Object.keys(previous)]);
+  const rows = [...ids].map((id) => {
+    const spent = safe(current[id]);
+    const earlier = hasPrevious ? safe(previous[id]) : null;
+    const change = hasPrevious ? spent - earlier : null;
+    const budget = planned.has(id) ? planned.get(id) : null;
+    const variance = budget === null ? null : spent - budget;
+    return {
+      id, name: names.get(id) || id, spent, previous: earlier, change,
+      budget, variance, overBudget: variance !== null && variance > 0.5,
+      noBudget: budget === null,
+    };
+  }).filter((r) => r.budget !== null || Math.abs(r.spent) > 0.5 ||
+    (hasPrevious && Math.abs(r.previous) > 0.5));
+  rows.sort((a,b) => b.spent - a.spent ||
+    Math.abs(b.change || 0) - Math.abs(a.change || 0) || a.name.localeCompare(b.name));
+  const movers = hasPrevious ? rows.filter((r) => Math.abs(r.change) > 0.5)
+    .sort((a,b) => Math.abs(b.change) - Math.abs(a.change) ||
+      a.name.localeCompare(b.name)).slice(0,3) : [];
+  const over = rows.filter((r) => r.overBudget).sort((a,b) => b.variance - a.variance);
+  const shownSpent = rows.reduce((sum,r) => sum + r.spent,0);
+  return {
+    rows, movers, over,
+    hasPrevious,
+    categoriesCount: rows.filter((r) => Math.abs(r.spent) > 0.5).length,
+    shownSpent,
+    unassignedCurrent: currentTotal === null ? null : safe(currentTotal) - shownSpent,
+    unassignedPrevious: !hasPrevious || previousTotal === null ? null :
+      safe(previousTotal) - rows.reduce((sum,r) => sum + safe(r.previous),0),
+  };
+}

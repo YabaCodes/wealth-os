@@ -1,4 +1,17 @@
-# Wealth OS — v1.23.0
+# Wealth OS — v1.23.1
+
+## v1.23.1 — Monthly Spending Drivers
+
+- Expands the existing **Monthly Financial Review** (Home → Monthly Review, or Budget → Monthly Financial Review) with a **Spending drivers** section: personal spending ranked by category, category-specific fixed/cap plan usage, over-budget amounts, and up to three largest month-over-month category changes.
+- Each category has a **View activity** shortcut, which opens the existing Activity screen filtered to **that exact category and funding month**. A visible **Clear filter** restores ordinary Activity; no new personal data is saved by opening the drill-down. Existing Activity edit permissions remain unchanged.
+- The pure `spendingDriversFor()` view-model uses actual, recorded **personal expense category totals** from `periodRecord().actuals` and the selected month's **snapshot budget lines**. Closed-month snapshots take precedence where available. Comparisons use the actual **previous recorded funding month**, not an assumed calendar month.
+- For old closed months with a total spending value but missing/incomplete category snapshots, the app explicitly states **historical category detail is unavailable** and suppresses invented category deltas. A missing category budget is displayed as **No category plan**, not zero budget. Spending outside the available breakdown is disclosed instead of silently hidden.
+- Own-account transfers, virtual allocations and unsettled reimbursable Business Trip ledger entries are **never classified as personal expense**. No changes to data entry, posting, settlement, month-close, restore, forecasting or goal funding.
+- Responsive bar-and-row layout, dark-mode contrast and privacy-masked currency figures; existing Monthly Review and bottom navigation unchanged.
+- New pure unit tests and real desktop/mobile Chromium scenarios verify sorting, overspending, empty/missing historical breakdown, exact category/month Activity filter, read-only IndexedDB state, dark mode and privacy.
+- **Financial data model 190 / IndexedDB schema 3 unchanged.** App and service worker cache advance to **v1.23.1**.
+
+
 
 ## v1.23.0 — Monthly Financial Review
 

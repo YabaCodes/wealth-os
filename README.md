@@ -1,4 +1,16 @@
-# Wealth OS — v1.22.3
+# Wealth OS — v1.23.0
+
+## v1.23.0 — Monthly Financial Review
+
+- Opens **Monthly Financial Review** from Home's current-month actions or the Budget page for a selected funding month, without adding clutter to the bottom navigation.
+- One read-only review consolidates **total recorded personal expenses**, fixed/flexible category-plan comparison (and personal expenses outside those planned categories), **completed versus planned core wealth funding**, fixed-bill payment recording, and absolute **previous-recorded-month comparisons** for spending, wealth funding and income.
+- For **open months**, reuses the exact production **month-close readiness gate** for hard blockers, bank checks and E.SUN purpose status; unpaid fixed bills are labelled manual-confirmation warnings, not invented hard blockers. Shortcuts lead to the existing Budget, Activity, Wealth and Month-End Review screens. No "close" or transfer action is performed from the review itself.
+- For **closed months**, displays persisted month-end snapshot amounts where available; does **not** apply present-day bank reconciliation status retroactively to closed history. Comparison month is labeled explicitly (not assumed to be the previous calendar month).
+- Personal spending excludes account-to-account physical transfers, virtual bucket reallocations and unsettled Business Trip reimbursement activity by reusing the app's existing `totalExpenses()` / `periodRecord()` calculations. A settled personal entry is counted only according to existing ledger behavior.
+- Pure read-only `js/monthly-review.js`, regression tests for classification, risk messages, snapshot states and comparisons, and real desktop/mobile Chromium UI tests for no writes, navigation, theme, privacy and small viewport.
+- No budget, account, close-readiness, transfer or restore logic is changed. Financial data model stays **190**, IndexedDB schema stays **3**. Version and service-worker cache advance to **v1.23.0**; new JS asset is included in offline precache.
+
+
 
 ## v1.22.3 — Goals Portfolio & Next Actions
 

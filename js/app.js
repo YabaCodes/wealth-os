@@ -88,6 +88,7 @@ import {
   goalsPortfolioFor,
 } from "./wealth-view-model.js";
 import { assessMonthClose, closeMonthAtomic, reopenMonthAtomic } from "./month-close.js";
+import { monthlyFinancialReviewFor } from "./monthly-review.js";
 import {
   latestReconciliationFor,
   accountSnapshotFor,
@@ -108,7 +109,7 @@ let modalDirty = false;
 let homeWeekStart = null,
   homeDay = null;
 let reachedGoals = null; // goals at target after the last load (null until the first load)
-const APP_VERSION = "1.22.3";
+const APP_VERSION = "1.23.0";
 const THEME_KEY = "wealthOSTheme";
 // Theme: 'system' follows the phone's light/dark setting. A copy is kept in localStorage so
 // index.html can apply it before the first paint (IndexedDB is too slow for that).
@@ -1940,7 +1941,7 @@ function homeView() {
     <div class="pace-bar" role="img" aria-label="Flexible spending ${money(capsSpent)} of ${money(capsBudget)}${ctx.isCurrent ? `; today's mark ${money(todaysMark)}` : ""}"><span class="pace-fill ${paceTone === "bad" ? "over" : ""}" data-bar="flex-pace" style="width:${fillPct.toFixed(1)}%"></span>${ctx.isCurrent && capsBudget > 0 ? `<span class="pace-mark" style="left:${markPct.toFixed(1)}%"></span>` : ""}</div>
     <div class="pace-status pace-${paceTone}">${paceTone === "good" ? icon("check") : ""}<span>${paceText}</span></div>
     ${weekStripHTML(p, fp)}
-    <div class="month-actions"><button class="btn ghost small" data-action="month-close">Month-End Review</button>${newPaycheckButton()}</div>
+    <div class="month-actions"><button class="btn secondary small" data-action="monthly-review">Monthly Review</button><button class="btn ghost small" data-action="month-close">Month-End Review</button>${newPaycheckButton()}</div>
   </section>
   <section class="card next-step next-${nextTone}">
     <div class="next-step-row"><span class="next-ic" aria-hidden="true">${icon(nextIcon)}</span><div class="next-copy"><span class="metric-label">Next step</span><strong>${actionText}</strong><span class="sub">${actionSub}</span></div>${actionMetric ? `<strong class="next-amount">${privateValue(actionMetric)}</strong>` : ""}</div>
@@ -2108,6 +2109,7 @@ function budgetView() {
     : "";
 
   return `<div class="period-row with-menu">${periodSelector(true)}<button type="button" class="period-step period-menu" data-action="month-actions" data-id="${p.id}" aria-label="More for ${monthLabel(p.id)}">⋯</button></div>
+  <div class="mr-budget-entry"><button class="btn secondary small" type="button" data-action="monthly-review">Monthly Financial Review</button><span class="sub">Spending, wealth funding, close readiness and trends</span></div>
   ${lock}
   <section class="card ring-card">
     <div class="ring-head"><h2>Flexible spending</h2><span class="tag">${dayPill}</span></div>
@@ -3171,6 +3173,7 @@ function renderModal() {
   if (modal.type === "transfer") return modalWrap("Confirm Transfer", transferConfirm(modal.id));
   if (modal.type === "payday-transfer")
     return modalWrap("Confirm Payday Transfer", paydayTransferConfirm(modal.periodId, modal.accountId));
+  if (modal.type === "monthly-review") return modalWrap("Monthly Financial Review", monthlyReviewView(modal.periodId));
   if (modal.type === "close") return modalWrap("Month-End Review", monthCloseView());
   if (modal.type === "settings") return modalWrap("Settings", settingsView());
   if (modal.type === "manage-categories") return modalWrap("Budget Categories", manageCategoriesView());
@@ -3280,6 +3283,93 @@ function monthActionsView(periodId) {
       : `<div class="action-sheet-danger"><button class="btn ghost danger-text" data-action="delete-period" data-id="${p.id}">Delete ${monthLabel(p.id)}…</button><div class="sub" style="margin-top:6px">For a test or mistaken funding month. You'll see what it removes first.</div></div>`
   }</div>`;
 }
+// Read-only on-demand month review; never writes data or changes budget state.
+function monthlyReviewView(periodId) {
+  const p = state.periods.find((x) => x.id === periodId);
+  if (!p) return '<div class="empty">No funding month selected.</div>';
+  const history = historyRecords();
+  const index = history.findIndex((r) => r.id === periodId);
+  const previous = index > 0 ? history[index - 1] : null;
+  const record = history[index] || periodRecord(periodId);
+  const closed = p.state === "closed";
+  const snapshot = state.monthlyCloses.find(
+    (x) => (x.budgetPeriodId === periodId || x.id === periodId) && x.status === "closed"
+  );
+  const plan = closed && snapshot?.planSnapshot ? snapshot.planSnapshot : planFor(periodId);
+  const actuals = closed && snapshot?.categoryActuals ? snapshot.categoryActuals : expenseTotals(periodId);
+  const closeReadiness = closed ? null : monthCloseStatus(periodId);
+  const review = monthlyFinancialReviewFor({
+    period: p, plan, actuals, periodRecord: record,
+    previousRecord: previous,
+    completedWealth: record?.wealthContribution ?? completedCoreWealth(periodId),
+    personalExpenses: record?.expenses ?? totalExpenses(periodId),
+    closeReadiness,
+    accountChecks: closed ? null : { ctbc: closeReadiness.ct, esun: closeReadiness.es },
+  });
+  const comparisonText = (change, label, lowerIsBetter = false) => {
+    if (!change) return `<div class="mr-comparison-row"><strong>${label}</strong><span>—</span></div>`;
+    const same = Math.abs(change.delta) <= 0.5;
+    const direction = same ? "unchanged" : change.delta > 0 ? "higher" : "lower";
+    const amount = same ? "No change" : `${privateMoney(Math.abs(change.delta))} ${direction}`;
+    const tone = same ? "" : (change.delta > 0) === lowerIsBetter ? " mr-caution" : " mr-positive";
+    return `<div class="mr-comparison-row"><strong>${label}</strong><span class="${tone}">${amount}</span></div>`;
+  };
+  const actions = review.attention.map((a) => {
+    const target = a.destination === "close" ? "month-close" : "review-nav";
+    const attr = a.destination === "close" ? "" : ` data-tab="${a.destination}"`;
+    const name = a.destination === "close" ? "Month-End Review" : a.destination === "wealth" ? "Wealth" : "Budget";
+    return `<div class="mr-action mr-${a.tone}"><span>${esc(a.text)}</span><button class="btn ghost small" type="button" data-action="${target}"${attr}>${name}</button></div>`;
+  }).join("");
+  const readiness = closed
+    ? `<div class="mr-inline-status mr-success">Closed month — historical totals come from the saved month-end snapshot when available. Current bank checks are not applied retroactively.</div>`
+    : `<div class="mr-inline-status">${review.ready ? "No hard close blockers currently detected" : `${review.blockers.length} hard close blocker${review.blockers.length === 1 ? "" : "s"} currently detected`}</div>`;
+  const account = review.account
+    ? `<div class="mr-bank-row"><span>CTBC</span><strong>${esc(review.account.ctbc)}</strong></div><div class="mr-bank-row"><span>E.SUN</span><strong>${esc(review.account.esun)}</strong></div>`
+    : "";
+  return `<div class="monthly-review" id="monthly-review" data-review-period="${esc(periodId)}">
+    <div class="mr-heading"><span class="tag">${closed ? "Closed month" : "Open month"}</span><strong>${esc(monthLabel(periodId))}</strong></div>
+    <p class="sub">A read-only review of your recorded personal spending, completed wealth funding and outstanding month-end items. Business Trip reimbursements remain outside personal expenses unless settled into the personal ledger.</p>
+    <div class="mr-metrics">
+      <div><div class="metric-label">Personal expenses</div><strong>${privateMoney(review.spending.total)}</strong><span class="sub">${esc(review.spending.status)}</span></div>
+      <div><div class="metric-label">Core wealth funded</div><strong>${privateMoney(review.savings.completed)}</strong><span class="sub">${esc(review.savings.status)}</span></div>
+    </div>
+    <div class="mr-section"><h4>Spending versus plan</h4>
+      <div class="mr-line"><span>Tracked fixed + flexible plan</span><strong>${privateMoney(review.spending.trackedBudget)}</strong></div>
+      <div class="mr-line"><span>Recorded in those categories</span><strong>${privateMoney(review.spending.trackedSpent)}</strong></div>
+      <div class="mr-line"><span>Other personal spending</span><strong>${privateMoney(review.spending.outsideTracked)}</strong></div>
+      <p class="sub">Personal expenses do not include physical transfers or virtual allocations. The category-plan comparison excludes spending outside the tracked fixed and flexible categories.</p>
+    </div>
+    <div class="mr-section"><h4>Wealth funding and fixed bills</h4>
+      <div class="mr-line"><span>Planned core wealth funding</span><strong>${privateMoney(review.savings.planned)}</strong></div>
+      <div class="mr-line"><span>Completed core wealth funding</span><strong>${privateMoney(review.savings.completed)}</strong></div>
+      <div class="mr-line"><span>Remaining against plan</span><strong>${privateMoney(review.savings.remaining)}</strong></div>
+      <div class="mr-line"><span>Fixed bills with recorded payment</span><strong>${review.fixed.paid} / ${review.fixed.total}</strong></div>
+    </div>
+    <div class="mr-section"><h4>Compared with previous recorded month</h4>
+      ${review.previous
+        ? `<p class="sub">${esc(monthLabel(review.previous.id))} · absolute changes, not forecasts. A prior zero is not treated as a percentage baseline.</p>
+          ${comparisonText(review.previous.spending, "Personal spending", true)}
+          ${comparisonText(review.previous.wealth, "Core wealth funded")}
+          ${comparisonText(review.previous.income, "Regular income")}`
+        : '<p class="sub">No earlier funding month recorded yet.</p>'}
+    </div>
+    <div class="mr-section"><h4>${closed ? "Historical closure" : "Close readiness and bank checks"}</h4>
+      ${readiness}
+      ${account}
+      ${!closed && review.blockers.length ? `<ul class="mr-blockers">${review.blockers.map((b) => `<li>${esc(b)}</li>`).join("")}</ul>` : ""}
+      ${!closed && review.fixed.unpaid ? `<p class="sub">${review.fixed.unpaid} fixed bill${review.fixed.unpaid === 1 ? "" : "s"} unrecorded. The existing Month-End Review treats unpaid fixed bills as a warning requiring manual confirmation, not automatically as a hard blocker.</p>` : ""}
+    </div>
+    ${actions ? `<div class="mr-section"><h4>Items needing attention</h4><div class="mr-actions">${actions}</div></div>` : ""}
+    <div class="mr-navigation">
+      <button class="btn secondary" type="button" data-action="review-nav" data-tab="budget">Budget</button>
+      <button class="btn secondary" type="button" data-action="review-nav" data-tab="transactions">Activity</button>
+      <button class="btn secondary" type="button" data-action="review-nav" data-tab="wealth">Wealth</button>
+      <button class="btn" type="button" data-action="month-close">Month-End Review</button>
+    </div>
+    <p class="sub mr-disclaimer">Read-only. No bank transfer, category, budget, or month-close action is performed from this screen. Review the full Month-End Review before closing a month.</p>
+  </div>`;
+}
+
 // Shown once, right after a month is closed: what the month added up to. Reads only; saves nothing.
 function monthSummaryView(periodId, emergencyFrom) {
   const close = state.monthlyCloses.find((x) => x.id === periodId || x.budgetPeriodId === periodId);
@@ -5593,6 +5683,14 @@ function bind() {
           }
           if (a === "confirm-reconciliation") return confirmAccountReconciliation();
           if (a === "confirm-transfer") return completeTransfer(b.dataset.id);
+          if (a === "monthly-review") modal = { type: "monthly-review", periodId: currentPeriod()?.id };
+          if (a === "review-nav") {
+            const destination = b.dataset.tab;
+            if (!["budget", "transactions", "wealth"].includes(destination)) return;
+            modal = null;
+            tab = destination;
+            return render();
+          }
           if (a === "month-close") modal = { type: "close" };
           if (a === "create-sweep") return createSweep();
           if (a === "close-period") return closePeriod();

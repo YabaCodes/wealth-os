@@ -143,13 +143,23 @@ For v1.20.3, checks covered version/data model, Wealth balances/reconciliation, 
 
 ## v1.22.3 — Goals Portfolio & Next Actions
 
-**Status: implementation under review; physical iPhone acceptance pending.**
+**Status: completed, PR #27 merged and all six physical iPhone acceptance checks PASS (2026-10-19).**
 
 - Add a read-only Goals portfolio for saved priorities, progress, goal health and the next action, above existing individual goal cards and planning tools.
 - Interpret stored target-date health from actual completed goal allocations, including paused/waiting/complete states and no-history or missing-deadline cases.
 - Compute one **shared** planned wealth-funding comparison, summing current active dated-goal requirements without double-counting the same plan capacity. Incomplete/undated goals prevent an affordability conclusion.
 - Offer an **Open planner** shortcut that selects the goal and saved deadline, without transferring funds, changing goals or recording hypothetical numbers.
 - Protect existing privacy masking and dark-mode contrast with desktop/mobile browser tests; preserve financial data model 190 and IndexedDB schema 3.
+
+## v1.23.0 — Monthly Financial Review
+
+**Status: implementation under review; iPhone acceptance pending.**
+
+- Consolidate recorded personal spending, tracked fixed/flexible budget status, completed versus planned wealth funding, fixed-bill status, and prior-recorded-month comparisons in an accessible on-demand review from Home and Budget.
+- For open months, reuse the current shared month-close hard blocker and bank/purpose reconciliation gate; warn about missing fixed payments without inventing hard blockers.
+- For closed months, use existing persisted close snapshots when available and never project current bank checks onto historical close records.
+- Provide shortcuts to **existing** Budget, Activity, Wealth and Month-End Review controls; review is read-only and does not save, sweep, transfer, or close.
+- Cover mathematical and accounting classification, combined history, navigation, theme/privacy and IndexedDB immutability with Node and Playwright desktop/mobile tests. Data Model 190 and IndexedDB schema 3 unchanged.
 
 ### Later candidates (not committed)
 

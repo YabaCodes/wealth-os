@@ -88,7 +88,7 @@ import {
   goalsPortfolioFor,
 } from "./wealth-view-model.js";
 import { assessMonthClose, closeMonthAtomic, reopenMonthAtomic } from "./month-close.js";
-import { monthlyFinancialReviewFor } from "./monthly-review.js";
+import { monthlyFinancialReviewFor, spendingDriversFor } from "./monthly-review.js";
 import {
   latestReconciliationFor,
   accountSnapshotFor,
@@ -104,12 +104,13 @@ let modal = null;
 let selectedPeriodId = null;
 let activityFilter = "all";
 let activitySearch = "";
+let spendingDrilldown = null; // transient { periodId, categoryId } from Monthly Review
 let modalDirty = false;
 // Home week strip (v1.17): which week is shown and which day is picked. Not saved; resets with the month.
 let homeWeekStart = null,
   homeDay = null;
 let reachedGoals = null; // goals at target after the last load (null until the first load)
-const APP_VERSION = "1.23.0";
+const APP_VERSION = "1.23.1";
 const THEME_KEY = "wealthOSTheme";
 // Theme: 'system' follows the phone's light/dark setting. A copy is kept in localStorage so
 // index.html can apply it before the first paint (IndexedDB is too slow for that).
@@ -2221,16 +2222,21 @@ function budgetCategoryRow(x, periodId) {
 
 function transactionsView() {
   const all = activityRecords();
-  const list = filterActivityRecords(all, {
+  const filtered = filterActivityRecords(all, {
     kind: activityFilter,
     query: activitySearch,
     categories: state.categories,
   });
+  const list = spendingDrilldown ? filtered.filter((x) =>
+    x._kind === "expense" &&
+    x.budgetPeriodId === spendingDrilldown.periodId &&
+    x.categoryId === spendingDrilldown.categoryId) : filtered;
   const active = state.projects.filter((p) => !p.deletedAt && !projectSettlement(p.id)).length;
   // v1.16: the list comes first, grouped by day with each day's totals. Cash and projects sit in one
   // compact row; the project list only shows here while a project is active.
   return `<div class="activity-quick"><button class="btn secondary small" data-action="cash-withdraw">${icon("cash")}<span>Withdraw cash</span></button><button class="btn secondary small" data-action="open-projects">${icon("project")}<span>Special budgets</span></button></div>
   ${active ? projectOverviewStrip() : ""}
+  ${spendingDrilldown ? `<div class="mr-drilldown-banner" id="mr-activity-filter"><span>Viewing ${esc(category(spendingDrilldown.categoryId)?.name || spendingDrilldown.categoryId)} expenses · ${esc(monthLabel(spendingDrilldown.periodId))}</span><button type="button" class="btn ghost small" data-action="clear-review-driver">Clear filter</button></div>` : ""}
   <div class="section-title"><h2>Recent activity</h2><span class="sub">${list.length} shown</span></div>
   <form id="activity-search-form" class="activity-search"><input id="activity-search-input" type="search" value="${esc(activitySearch)}" placeholder="Search description, category or account"><button class="btn ghost small" type="submit">Search</button>${activitySearch ? '<button class="btn ghost small" type="button" data-action="clear-activity-search">Clear</button>' : ""}</form>
   <div class="filter-chips">${[
@@ -3298,6 +3304,14 @@ function monthlyReviewView(periodId) {
   const plan = closed && snapshot?.planSnapshot ? snapshot.planSnapshot : planFor(periodId);
   const actuals = closed && snapshot?.categoryActuals ? snapshot.categoryActuals : expenseTotals(periodId);
   const closeReadiness = closed ? null : monthCloseStatus(periodId);
+  const drivers = spendingDriversFor({
+    currentActuals: actuals,
+    previousActuals: previous?.actuals ?? null,
+    planLines: plan.lines || [],
+    categories: state.categories,
+    currentTotal: record?.expenses ?? totalExpenses(periodId),
+    previousTotal: previous?.expenses ?? null,
+  });
   const review = monthlyFinancialReviewFor({
     period: p, plan, actuals, periodRecord: record,
     previousRecord: previous,
@@ -3314,6 +3328,44 @@ function monthlyReviewView(periodId) {
     const tone = same ? "" : (change.delta > 0) === lowerIsBetter ? " mr-caution" : " mr-positive";
     return `<div class="mr-comparison-row"><strong>${label}</strong><span class="${tone}">${amount}</span></div>`;
   };
+  const driverAmount = (n) => privateMoney(n);
+  const driverLink = (r, caption = "View activity") => `<button class="btn ghost small" type="button" data-action="review-driver" data-category="${esc(r.id)}" data-period="${esc(periodId)}" aria-label="View ${esc(r.name)} activity for ${esc(monthLabel(periodId))}">${caption}</button>`;
+  const driverChange = (r) => !drivers.hasPrevious
+    ? "No prior month" : Math.abs(r.change) <= 0.5
+      ? "No change"
+      : `${r.change > 0 ? "Up" : "Down"} ${driverAmount(Math.abs(r.change))} vs ${esc(monthLabel(previous.id))}`;
+  const driverRows = drivers.rows.map((r) => {
+    const budgetStatus = r.noBudget ? "No category plan"
+      : r.overBudget ? `Over plan by ${driverAmount(r.variance)}`
+      : `Within plan · ${driverAmount(Math.max(0, -r.variance))} remaining`;
+    const fill = r.budget === null ? 0
+      : r.budget <= 0 ? (r.spent > 0.5 ? 100 : 0)
+      : Math.min(100, Math.max(0, (r.spent / r.budget) * 100));
+    const pct = Math.round(fill);
+    return `<div class="mr-driver-row" data-driver-category="${esc(r.id)}">
+      <div class="mr-driver-head"><strong>${esc(r.name)}</strong><strong>${driverAmount(r.spent)}</strong></div>
+      <div class="mr-driver-meta"><span>${r.noBudget ? "Unplanned category" : `Plan ${driverAmount(r.budget)}`}</span>
+        <span class="${r.overBudget ? "mr-danger" : ""}">${budgetStatus}</span></div>
+      ${r.budget !== null ? `<div class="mr-driver-track" role="progressbar" aria-label="${esc(r.name)} planned spending used" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}"><span class="${r.overBudget ? "over" : ""}" style="width:${fill.toFixed(1)}%"></span></div>` : ""}
+      <div class="mr-driver-bottom"><span class="${r.change > 0.5 ? "mr-danger" : r.change < -0.5 ? "mr-positive" : ""}">${driverChange(r)}</span>${driverLink(r)}</div>
+    </div>`;
+  }).join("");
+  const moverRows = drivers.movers.map((r) => `<div class="mr-mover-row">
+    <div><strong>${esc(r.name)}</strong><span class="${r.change > 0 ? "mr-danger" : "mr-positive"}">${r.change > 0 ? "+" : "−"}${driverAmount(Math.abs(r.change))} vs ${esc(monthLabel(previous.id))}</span></div>
+    ${driverLink(r,"Inspect")}
+  </div>`).join("");
+  const driverSection = `<div class="mr-section mr-drivers" id="mr-spending-drivers">
+    <div class="mr-driver-title"><h4>Spending drivers</h4><span class="tag">${drivers.categoriesCount} categories spent</span></div>
+    <p class="sub">Personal spending by category, ranked by recorded amount. Plan comparisons use this month's frozen fixed/flexible budget; only the previous recorded funding month is used for changes.</p>
+    ${drivers.over.length ? `<p class="mr-driver-alert">${drivers.over.length} categor${drivers.over.length === 1 ? "y is" : "ies are"} above its individual plan. A combined budget total may hide these overruns.</p>` : ""}
+    ${drivers.hasPrevious && moverRows ? `<div class="mr-movers"><div class="metric-label">Largest category changes</div>${moverRows}</div>` : ""}
+    ${!drivers.hasPrevious ? '<p class="sub">Category changes will appear once another funding month is recorded.</p>' : ""}
+    <div class="mr-driver-rows">${driverRows || '<div class="empty compact-empty">No personal category expenses or spending plan yet.</div>'}</div>
+    ${drivers.unassignedCurrent !== null && Math.abs(drivers.unassignedCurrent) > 0.5
+      ? `<p class="sub">Note: ${driverAmount(Math.abs(drivers.unassignedCurrent))} of the saved personal spending total is not represented in the available category breakdown. The total above remains authoritative.</p>`
+      : ""}
+    <p class="sub">Category breakdown excludes physical transfers, virtual allocations and unsettled reimbursable Business Trip expenses. View activity opens a read-only category/month filter; the Activity screen's existing edit controls remain governed by their own rules.</p>
+  </div>`;
   const actions = review.attention.map((a) => {
     const target = a.destination === "close" ? "month-close" : "review-nav";
     const attr = a.destination === "close" ? "" : ` data-tab="${a.destination}"`;
@@ -3339,6 +3391,7 @@ function monthlyReviewView(periodId) {
       <div class="mr-line"><span>Other personal spending</span><strong>${privateMoney(review.spending.outsideTracked)}</strong></div>
       <p class="sub">Personal expenses do not include physical transfers or virtual allocations. The category-plan comparison excludes spending outside the tracked fixed and flexible categories.</p>
     </div>
+    ${driverSection}
     <div class="mr-section"><h4>Wealth funding and fixed bills</h4>
       <div class="mr-line"><span>Planned core wealth funding</span><strong>${privateMoney(review.savings.planned)}</strong></div>
       <div class="mr-line"><span>Completed core wealth funding</span><strong>${privateMoney(review.savings.completed)}</strong></div>
@@ -5684,6 +5737,21 @@ function bind() {
           if (a === "confirm-reconciliation") return confirmAccountReconciliation();
           if (a === "confirm-transfer") return completeTransfer(b.dataset.id);
           if (a === "monthly-review") modal = { type: "monthly-review", periodId: currentPeriod()?.id };
+          if (a === "review-driver") {
+            const periodId = b.dataset.period;
+            const categoryId = b.dataset.category;
+            if (!state.periods.some((p) => p.id === periodId) || !categoryId) return;
+            spendingDrilldown = { periodId, categoryId };
+            activityFilter = "expense";
+            activitySearch = "";
+            tab = "transactions";
+            modal = null;
+            return render();
+          }
+          if (a === "clear-review-driver") {
+            spendingDrilldown = null;
+            return render();
+          }
           if (a === "review-nav") {
             const destination = b.dataset.tab;
             if (!["budget", "transactions", "wealth"].includes(destination)) return;

@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -23,7 +23,7 @@ jobs:
         run: npm run check
 
   browser-acceptance:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - name: Check out repository

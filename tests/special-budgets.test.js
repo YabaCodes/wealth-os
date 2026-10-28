@@ -317,7 +317,7 @@ test("payment-source composition reconciles all valued trip spend without double
   assert.deepEqual(totals, {esun_card:27500,ctbc:3000,cash:1500,other:700});
   assert.equal(x.total,32700);
   assert.equal(x.cardKnownTwd,27500);
-  assert.equal(x.rows.reduce((sum,r)=>sum+r.percentage,0),100);
+  assert.ok(Math.abs(x.rows.reduce((sum,r)=>sum+r.percentage,0)-100)<1e-8);
   assert.equal(x.pendingHolds,0);
   assert.equal(x.unvalued,0);
   assert.equal(x.cardFundingMarked,false);

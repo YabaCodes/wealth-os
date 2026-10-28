@@ -180,6 +180,16 @@ For v1.20.3, checks covered version/data model, Wealth balances/reconciliation, 
 - Respect selected open/closed month and its persisted historical actuals, show honest empty/unavailable states, and preserve privacy, dark mode, offline behavior and no-write accounting.
 - Validate pure model outputs and real desktop/mobile UI navigation, proper focus, period retention and IndexedDB immutability. Data Model 190 / IndexedDB schema 3 unchanged.
 
+## v1.23.3 — Business Trip Payment Sources and Credit-Card Funding
+
+**Status: in review; depends on v1.23.2 merge and physical iPhone acceptance.**
+
+- A payment-source composition bar and amounts for E.SUN Credit Card, CTBC Operating, Cash, Other and legacy Trip Wallet on each Business Trip.
+- A read-only **CTBC → E.SUN** card-funding planning amount based on recorded trip card-paid costs, distinct from the full credit-card statement balance and any manually funded partial transfers.
+- Pending refundable holds shown separately from counted trip costs; retained deposit amounts counted only after resolution, and missing NTD conversions clearly disclosed.
+- Preserve the existing settled project's manual card-clearing confirmation; never claim bank payment is verified.
+- Pure deterministic tests and desktop/mobile Playwright synthetic trip tests. No transfers, category reclassification or account postings; Data Model 190, IndexedDB schema 3.
+
 ### Later candidates (not committed)
 
 - Extended browser scenarios and failure/retry coverage, with synthetic data.

@@ -59,6 +59,7 @@ import {
 } from "./activity.js";
 import {
   businessTripCategoryRules,
+  businessTripPaymentSourcesFor,
   parseCustomCategoryRules,
   projectBudgetSummary,
   projectCategoryBreakdown,
@@ -110,7 +111,7 @@ let modalDirty = false;
 let homeWeekStart = null,
   homeDay = null;
 let reachedGoals = null; // goals at target after the last load (null until the first load)
-const APP_VERSION = "1.23.2";
+const APP_VERSION = "1.23.3";
 const THEME_KEY = "wealthOSTheme";
 // Theme: 'system' follows the phone's light/dark setting. A copy is kept in localStorage so
 // index.html can apply it before the first paint (IndexedDB is too slow for that).
@@ -2638,6 +2639,48 @@ function projectDetailView(projectId) {
     settlementBlock = `<div class="section-title"><h2>Reimbursement</h2><span class="sub">Settle when company payment arrives</span></div><section class="card"><div class="project-settlement-layout"><div class="project-settlement-copy"><strong>${blocked ? "Resolve items before settlement" : "Ready for settlement"}</strong><div class="sub">${p.type === "business_trip" ? `Expected reimbursement ${money(summary.expectedReimbursement)} · exact ${money(summary.exact)} + allowance ${money(summary.allowance)}` : `Known project cost ${money(known)}`} · E.SUN card ${money(card)}</div></div><button class="btn project-settlement-cta" data-action="settle-project" data-id="${p.id}" ${!expenses.length || blocked ? "disabled" : ""}>Settle Reimbursement</button></div>${missing.length ? `<div class="sub warn" style="margin-top:8px">${missing.length} expense${missing.length === 1 ? " needs" : "s need"} an exact NTD amount.</div>` : ""}${pendingDeposits.length ? `<div class="sub warn" style="margin-top:8px">${pendingDeposits.length} refundable deposit${pendingDeposits.length === 1 ? " is" : "s are"} still pending. Resolve the refund status first.</div>` : ""}</section>`;
   }
 
+  const paymentSources = p.type === "business_trip"
+    ? businessTripPaymentSourcesFor(expenses, settlement) : null;
+  const sourceBlock = paymentSources ? (() => {
+    const sources = paymentSources.rows;
+    const segments = sources.filter((x) => x.amount > 0)
+      .map((x) => `<span class="trip-payment-segment trip-payment-${esc(x.id)}" style="width:${x.percentage.toFixed(4)}%" aria-hidden="true"></span>`).join("");
+    const rows = sources.map((x) => `<div class="trip-payment-row" data-payment-source="${esc(x.id)}">
+      <span class="trip-payment-source-name"><i class="trip-payment-dot trip-payment-${esc(x.id)}" aria-hidden="true"></i>${esc(x.name)}</span>
+      <strong>${privateMoney(x.amount)}</strong>
+      <span class="trip-payment-share">${x.percentage.toFixed(1)}%</span>
+      ${x.unknownTwdCount ? `<span class="trip-payment-unknown">${x.unknownTwdCount} amount${x.unknownTwdCount === 1 ? "" : "s"} pending NTD conversion</span>` : ""}
+    </div>`).join("");
+    const reimbursementAccount = settlement?.reimbursementAccountId || p.reimbursementAccountId;
+    const viaCtbc = reimbursementAccount === "ctbc";
+    const card = paymentSources.cardKnownTwd;
+    const fundingLabel = paymentSources.cardFundingMarked
+      ? "Card funding previously marked complete in Wealth OS"
+      : "E.SUN card costs to set aside for funding";
+    const fundingText = paymentSources.cardFundingMarked
+      ? "The settled trip is marked card-funded in Wealth OS. That is a manual confirmation, not verification of the E.SUN card bill or bank transfer."
+      : viaCtbc
+        ? "CTBC → E.SUN planning amount based on recorded card-paid trip costs. Compare with posted card transactions and any previous/partial repayments before transferring."
+        : "Card funding estimate only. The trip reimbursement destination is not confirmed as CTBC; verify which account should fund E.SUN before transferring.";
+    return `<div class="section-title"><h2>Payment sources</h2><span class="sub">How trip expenses were paid</span></div>
+      <section class="card trip-payment-card" id="trip-payment-sources">
+        <div class="split trip-payment-heading"><div><div class="metric-label">Recorded trip costs by payment source</div>
+          <strong class="trip-payment-total">${privateMoney(paymentSources.total)}</strong></div>
+          <span class="tag">Expenses only</span></div>
+        ${segments ? `<div class="trip-payment-bar" role="img" aria-label="Breakdown of recorded trip expense payment sources">${segments}</div>`
+          : '<div class="sub" style="margin-top:12px">No valued trip expenses recorded yet.</div>'}
+        <div class="trip-payment-list">${rows}</div>
+        <div class="trip-payment-funding">
+          <div class="metric-label">${fundingLabel}</div>
+          <strong class="trip-payment-card-target">${privateMoney(card)}</strong>
+          <p class="sub">${fundingText}</p>
+          ${paymentSources.unvalued ? `<p class="trip-payment-warning">${paymentSources.unvalued} expense${paymentSources.unvalued === 1 ? " still needs" : "s still need"} an exact NTD value. Totals and card funding estimates are incomplete.</p>` : ""}
+          ${paymentSources.pendingHolds ? `<p class="trip-payment-warning">${paymentSources.pendingHolds} unresolved refundable hold${paymentSources.pendingHolds === 1 ? "" : "s"}: ${privateMoney(paymentSources.pendingHoldTwd)} in known NTD holds, shown separately and excluded from trip expense totals. Verify whether any authorization posted to the card before calculating actual payment due.</p>` : ""}
+          <p class="sub">This is trip-related card spending, not the card's full statement balance or proof of reimbursement. It does not subtract partial funding already transferred. No bank transfer or card payment is created here.</p>
+        </div>
+      </section>`;
+  })() : "";
+
   const walletBlock = p.fundingMode === "trip_wallet"
     ? `<div class="section-title"><h2>Trip Wallet</h2><span class="sub">Virtual reserve from operating cash</span></div><section class="card">${row("Allocated", money(summary.walletAllocated))}${row("Counted spend", money(summary.totalSpend))}${row("Budget balance", money(summary.walletRemaining))}${summary.walletOverspend > 0 ? `<div class="notice warn" style="margin-top:10px">Over the Trip Wallet allocation by ${money(summary.walletOverspend)}.</div>` : ""}</section>`
     : "";
@@ -2656,6 +2699,7 @@ function projectDetailView(projectId) {
     ${nonTripSummary}
     ${projectExactTrackerBlock(p, expenses, summary)}
     ${projectFlexibleTrackerBlock(p, expenses, summary)}
+    ${sourceBlock}
     ${walletBlock}
     ${summary.depositsPending ? `<div class="section-title"><h2>Refundable deposits</h2><span class="tag warn-tag">${summary.depositsPending} pending</span></div><section class="card"><strong>${money(summary.depositsPendingTwd)} currently held</strong><div class="sub">Excluded from spending and expected reimbursement until the refund outcome is resolved.</div></section>` : ""}
 

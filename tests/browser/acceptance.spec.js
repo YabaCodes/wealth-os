@@ -8,7 +8,7 @@ import {
 test("navigation, Settings release identity and actual expense form persist through reload", async ({ page }) => {
   await seedSyntheticBrowser(page);
   await page.locator('[data-action="settings"]').first().click();
-  await expect(page.locator('[role="dialog"]')).toContainText("Wealth OS v1.23.2");
+  await expect(page.locator('[role="dialog"]')).toContainText("Wealth OS v1.23.3");
   await expect(page.locator('[role="dialog"]')).toContainText("Data model 190");
   await page.locator('[data-action="close-modal"]').click();
 
@@ -680,4 +680,82 @@ test("Quick-insights empty state and dark/private iPhone layout keep shortcut us
   await page.locator('#home-spending-insights [data-action="spending-drivers"]').click();
   await expect(page.locator("#mr-spending-drivers")).toBeFocused();
   await expect(page.locator("html")).toHaveAttribute("data-theme","dark");
+});
+
+test("Business Trip payment-source mix explains CTBC-to-E.SUN funding, excludes refundable holds and never writes", async ({ page }) => {
+  await seedSyntheticBrowser(page, {trip: {...testTrip(), reimbursementAccountId:"ctbc"}, expenses:[trainExpense(), pendingDeposit()]});
+  await page.evaluate(async () => {
+    const db=await import("/js/db.js");
+    for (const x of [
+      {id:"trip-hotel",categoryId:"hotel_rental",category:"Hotel Rental",reimbursementType:"exact",
+        recordType:"expense",paymentMethod:"esun_card",twdAmount:6500},
+      {id:"trip-food",categoryId:"food",category:"Food",reimbursementType:"flexible",
+        recordType:"expense",paymentMethod:"cash",twdAmount:1200},
+      {id:"trip-petrol",categoryId:"gas_refill",category:"Gas Refill",reimbursementType:"exact",
+        recordType:"expense",paymentMethod:"ctbc",twdAmount:900},
+      {id:"trip-other",categoryId:"others",category:"Others",reimbursementType:"flexible",
+        recordType:"expense",paymentMethod:"other",twdAmount:200},
+      {id:"trip-unconverted",categoryId:"hotel_rental",category:"Hotel Rental",reimbursementType:"exact",
+        recordType:"expense",paymentMethod:"esun_card",twdAmount:null},
+    ]) await db.put("projectExpenses",{...x,projectId:"synthetic-trip",currency:"EUR",
+      originalAmount:25,date:"2026-10-20"});
+  });
+  await page.reload();
+  const before=await page.evaluate(async()=> (await import("/js/db.js")).exportData());
+  await page.locator('nav [data-tab="transactions"]').click();
+  await page.locator('[data-action="open-projects"]').first().click();
+  await page.locator('[role="dialog"] [data-action="open-project"][data-id="synthetic-trip"]').click();
+  const sources=page.locator("#trip-payment-sources");
+  await expect(sources).toBeVisible();
+  await expect(sources).toContainText("NT$12,300");
+  await expect(sources.locator('[data-payment-source="esun_card"]')).toContainText("NT$10,000");
+  await expect(sources.locator('[data-payment-source="cash"]')).toContainText("NT$1,200");
+  await expect(sources.locator('[data-payment-source="ctbc"]')).toContainText("NT$900");
+  await expect(sources.locator('[data-payment-source="other"]')).toContainText("NT$200");
+  await expect(sources.locator(".trip-payment-card-target")).toContainText("NT$10,000");
+  await expect(sources).toContainText("CTBC → E.SUN");
+  await expect(sources).toContainText("NT$7,000");
+  await expect(sources).toContainText("1 expense still needs an exact NTD value");
+  await expect(sources.locator(".trip-payment-segment")).toHaveCount(4);
+  await expect(sources).not.toContainText("NT$19,300");
+  const after=await page.evaluate(async()=> (await import("/js/db.js")).exportData());
+  expect(after.data).toEqual(before.data);
+  await page.locator('[data-action="close-modal"]').click();
+  await page.locator('[data-action="settings"]').first().click();
+  await page.locator('[role="dialog"] [data-action="set-theme"][data-theme="dark"]').click();
+  await page.locator('[role="dialog"] [data-action="close-modal"]').first().click();
+  await page.locator('[data-action="open-projects"]').first().click();
+  await page.locator('[role="dialog"] [data-action="open-project"][data-id="synthetic-trip"]').click();
+  await expect(page.locator("#trip-payment-sources")).toBeVisible();
+  const dims=await page.evaluate(()=>{
+    const r=document.querySelector("#trip-payment-sources").getBoundingClientRect();
+    return {right:r.right,screen:document.documentElement.clientWidth};
+  });
+  expect(dims.right).toBeLessThanOrEqual(dims.screen+1);
+  await page.locator('[data-action="close-modal"]').click();
+  await page.locator('[data-action="privacy-toggle"]').click();
+  await page.locator('[data-action="open-projects"]').first().click();
+  await page.locator('[role="dialog"] [data-action="open-project"][data-id="synthetic-trip"]').click();
+  await expect(page.locator("#trip-payment-sources")).toContainText("••••");
+  await expect(page.locator("#trip-payment-sources")).not.toContainText("NT$10,000");
+});
+
+test("Settled Business Trip sources reflect manual card funding status, not a verified statement payment", async ({page})=>{
+  await seedSyntheticBrowser(page,{trip:testTrip(),expenses:[trainExpense()]});
+  await page.evaluate(async()=>{
+    const db=await import("/js/db.js");
+    await db.put("projectSettlements",{
+      id:"synthetic-sources-settlement",projectId:"synthetic-trip",status:"settled",
+      reimbursementTwd:48000,differenceTwd:44500,totalProjectCostTwd:3500,
+      cardPaidTwd:3500,cardClearingConfirmed:true,reimbursementAccountId:"ctbc"
+    });
+  });
+  await page.reload();
+  await page.locator('nav [data-tab="transactions"]').click();
+  await page.locator('[data-action="open-projects"]').first().click();
+  await page.locator('[role="dialog"] [data-action="open-project"][data-id="synthetic-trip"]').click();
+  await expect(page.locator("#trip-payment-sources")).toContainText("Card funding previously marked complete");
+  await expect(page.locator("#trip-payment-sources")).toContainText("manual confirmation, not verification");
+  await expect(page.locator("#trip-payment-sources .trip-payment-card-target")).toContainText("NT$3,500");
+  await expect(page.locator('[data-action="confirm-project-card-clearing"]')).toHaveCount(0);
 });

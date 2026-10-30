@@ -13,6 +13,7 @@ import {
   parseCustomCategoryRules,
   effectiveTwd,
   unresolvedDeposits,
+  businessTripPaymentSourcesFor,
 } from "../js/special-budgets.js";
 
 test("business trip allowance merges departure and return into one allowance day", () => {
@@ -299,4 +300,69 @@ test("editing Special Budget entries retains the saved category instead of reset
   assert.equal(preferredProjectEntryCategoryId(rules, { category: "Shopping" }), "shopping");
   assert.equal(preferredProjectEntryCategoryId(rules, { categoryId: "obsolete_custom_category" }), "obsolete_custom_category");
   assert.equal(preferredProjectEntryCategoryId(rules, { category: "Not Found" }), rules[0].id);
+});
+
+test("payment-source composition reconciles all valued trip spend without double counting", () => {
+  const entries = [
+    { id:"hotel", paymentMethod:"esun_card", recordType:"expense", twdAmount:25000 },
+    { id:"meal", paymentMethod:"esun_card", recordType:"expense", twdAmount:2500 },
+    { id:"petrol", paymentMethod:"ctbc", recordType:"expense", twdAmount:3000 },
+    { id:"cash", paymentMethod:"cash", recordType:"expense", twdAmount:1500 },
+    { id:"misc", paymentMethod:"other", recordType:"expense", twdAmount:500 },
+    { id:"unknown-method", paymentMethod:null, recordType:"expense", twdAmount:200 },
+    { id:"deleted", paymentMethod:"ctbc", twdAmount:20000, deletedAt:"2026-10-18" },
+  ];
+  const x=businessTripPaymentSourcesFor(entries);
+  const totals=Object.fromEntries(x.rows.map(r=>[r.id,r.amount]));
+  assert.deepEqual(totals, {esun_card:27500,ctbc:3000,cash:1500,other:700});
+  assert.equal(x.total,32700);
+  assert.equal(x.cardKnownTwd,27500);
+  assert.ok(Math.abs(x.rows.reduce((sum,r)=>sum+r.percentage,0)-100)<1e-8);
+  assert.equal(x.pendingHolds,0);
+  assert.equal(x.unvalued,0);
+  assert.equal(x.cardFundingMarked,false);
+});
+
+test("unresolved refundable deposits are authorizations, not expenses or card funding", () => {
+  const x=businessTripPaymentSourcesFor([
+    {paymentMethod:"esun_card",recordType:"expense",twdAmount:5000},
+    {paymentMethod:"esun_card",recordType:"refundable_deposit",depositStatus:"pending",twdAmount:8000},
+    {paymentMethod:"ctbc",recordType:"refundable_deposit",depositStatus:"pending",twdAmount:0},
+    {paymentMethod:"esun_card",recordType:"refundable_deposit",depositStatus:"refunded",twdAmount:9000},
+    {paymentMethod:"esun_card",recordType:"refundable_deposit",depositStatus:"partial",retainedTwd:1200,twdAmount:4000},
+    {paymentMethod:"cash",recordType:"refundable_deposit",depositStatus:"retained",retainedTwd:500,twdAmount:500},
+  ]);
+  assert.equal(x.cardKnownTwd,6200);
+  assert.equal(x.total,6700);
+  assert.equal(x.pendingHolds,2);
+  assert.equal(x.pendingHoldTwd,8000);
+  assert.equal(x.rows.find(r=>r.id==="esun_card").pendingHoldTwd,8000);
+  assert.equal(x.unvalued,0);
+});
+
+test("missing NTD card entries stay visible as incomplete and do not pretend to be exact", () => {
+  const x=businessTripPaymentSourcesFor([
+    {paymentMethod:"esun_card",recordType:"expense",twdAmount:2500},
+    {paymentMethod:"esun_card",recordType:"expense",twdAmount:null},
+    {paymentMethod:"cash",recordType:"expense",twdAmount:0},
+    {paymentMethod:"ctbc",recordType:"expense",twdAmount:1700},
+  ]);
+  assert.equal(x.cardKnownTwd,2500);
+  assert.equal(x.unvalued,2);
+  assert.equal(x.rows.find(r=>r.id==="esun_card").unknownTwdCount,1);
+  assert.equal(x.rows.find(r=>r.id==="cash").unknownTwdCount,1);
+  assert.equal(x.total,4200);
+});
+
+test("after settlement card source uses frozen card tally and manually marked status, without mutating rows", () => {
+  const entries=[{id:"one",paymentMethod:"esun_card",recordType:"expense",twdAmount:4000}];
+  const frozen=structuredClone(entries);
+  const x=businessTripPaymentSourcesFor(entries,{
+    cardPaidTwd:3900,cardClearingConfirmed:true,
+  });
+  assert.equal(x.cardKnownTwd,3900);
+  assert.equal(x.cardFundingMarked,true);
+  assert.equal(x.rows.find(r=>r.id==="esun_card").amount,4000);
+  assert.deepEqual(entries,frozen);
+  assert.equal(businessTripPaymentSourcesFor().total,0);
 });

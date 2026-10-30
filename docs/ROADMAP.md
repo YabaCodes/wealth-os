@@ -163,13 +163,32 @@ For v1.20.3, checks covered version/data model, Wealth balances/reconciliation, 
 
 ## v1.23.1 — Monthly Spending Drivers
 
-**Status: implementation under review; physical iPhone acceptance pending.**
+**Status: completed, PR #29 merged and six physical iPhone acceptance checks PASS (2026-10-20).**
 
 - Extend the accepted Monthly Financial Review with ranked **personal expense** drivers by category and exact category plan overages, plus largest category spending changes against the previous **recorded** funding month.
 - Use current and historical category actuals from existing period snapshot semantics. When old closed months contain a spending total but no complete category breakdown, explicitly suppress misleading per-category deltas.
 - Category drill-down leads to the existing Activity screen filtered to exact category and funding month, with clear/reset control; no new write paths.
 - Exclude physical transfers, purpose allocations and unsettled Business Trips from personal spending; respect existing privacy, dark mode and mobile layout.
 - Verify immutability, accurate amounts, prior-month snapshots, drill-down navigation and release version with Node and Chromium desktop/mobile tests. Keep model 190 / IndexedDB schema 3.
+
+## v1.23.2 — Monthly Review Quick Insights
+
+**Status: implementation under review; physical iPhone acceptance pending.**
+
+- Add a compact **Home spending preview** for the top two flexible/unplanned personal expense categories for the currently selected funding month, excluding fixed obligations from the preview only.
+- Add a one-tap **See spending drivers** shortcut on Home and **Spending Drivers** shortcut on Budget; opening the existing Monthly Financial Review should position/focus the Spending drivers section, while ordinary Monthly Financial Review access remains at its top.
+- Respect selected open/closed month and its persisted historical actuals, show honest empty/unavailable states, and preserve privacy, dark mode, offline behavior and no-write accounting.
+- Validate pure model outputs and real desktop/mobile UI navigation, proper focus, period retention and IndexedDB immutability. Data Model 190 / IndexedDB schema 3 unchanged.
+
+## v1.23.3 — Business Trip Payment Sources and Credit-Card Funding
+
+**Status: in review; depends on v1.23.2 merge and physical iPhone acceptance.**
+
+- A payment-source composition bar and amounts for E.SUN Credit Card, CTBC Operating, Cash, Other and legacy Trip Wallet on each Business Trip.
+- A read-only **CTBC → E.SUN** card-funding planning amount based on recorded trip card-paid costs, distinct from the full credit-card statement balance and any manually funded partial transfers.
+- Pending refundable holds shown separately from counted trip costs; retained deposit amounts counted only after resolution, and missing NTD conversions clearly disclosed.
+- Preserve the existing settled project's manual card-clearing confirmation; never claim bank payment is verified.
+- Pure deterministic tests and desktop/mobile Playwright synthetic trip tests. No transfers, category reclassification or account postings; Data Model 190, IndexedDB schema 3.
 
 ### Later candidates (not committed)
 

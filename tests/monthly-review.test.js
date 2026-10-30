@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { monthlyChangeFor, monthlyFinancialReviewFor, spendingDriversFor } from "../js/monthly-review.js";
+import { monthlyChangeFor, monthlyFinancialReviewFor, spendingDriversFor, spendingQuickInsightsFor } from "../js/monthly-review.js";
 
 const plan = {
   salary: 80000, immediateWealth: 18000,
@@ -205,4 +205,56 @@ test("closed-month historical actuals are preferred as passed; renamed and missi
   assert.equal(d.rows.find(x=>x.id==="missingPastCategory").name,"missingPastCategory");
   assert.equal(d.rows.find(x=>x.id==="missingPastCategory").change,-200);
   assert.equal(d.unassignedCurrent, 0);
+});
+
+test("Home quick insights highlights two highest flexible/unplanned categories, not fixed rent", () => {
+  const fixture = driverFixture();
+  const x = spendingQuickInsightsFor({
+    actuals: fixture.currentActuals,
+    planLines: fixture.planLines,
+    categories: fixture.categories,
+    personalTotal: fixture.currentTotal,
+  });
+  assert.equal(x.status, "ready");
+  assert.deepEqual(x.top.map((r) => r.id), ["food", "unplanned"]);
+  assert.deepEqual(x.top.map((r) => r.spent), [11000,2700]);
+  assert.equal(x.overBudgetCount, 1);
+  assert.equal(x.top[0].overBudget, true);
+  assert.equal(x.top[1].budget, null);
+});
+
+test("quick insights stays empty with only fixed bills; distinguishes unavailable category history", () => {
+  const fixedOnly = spendingQuickInsightsFor({
+    actuals:{rent:23000},
+    planLines:[{id:"rent",ruleType:"fixed",budgetAmount:23000}],
+    personalTotal:23000,
+  });
+  assert.equal(fixedOnly.status,"empty");
+  assert.equal(fixedOnly.top.length,0);
+  const missingBreakdown = spendingQuickInsightsFor({
+    actuals:{}, planLines:[], personalTotal:1200,
+  });
+  assert.equal(missingBreakdown.status,"unavailable");
+  assert.equal(missingBreakdown.top.length,0);
+  assert.equal(missingBreakdown.amountUncategorized,1200);
+  const none = spendingQuickInsightsFor();
+  assert.equal(none.status,"empty");
+  assert.deepEqual(none.top,[]);
+});
+
+test("quick insights respects category and period plan snapshots without mutating inputs", () => {
+  const fixture = driverFixture();
+  const input = {
+    actuals: fixture.currentActuals,
+    categories: fixture.categories,
+    planLines: fixture.planLines,
+    personalTotal: fixture.currentTotal,
+    maxItems:1,
+  };
+  const original = structuredClone(input);
+  const one=spendingQuickInsightsFor(input),two=spendingQuickInsightsFor(input);
+  assert.equal(one.top.length,1);
+  assert.equal(one.top[0].id,"food");
+  assert.deepEqual(one,two);
+  assert.deepEqual(input,original);
 });

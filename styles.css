@@ -4658,3 +4658,11 @@ html[data-theme="dark"] .trip-payment-trip_wallet { background:#ec94ac; }
   .trip-payment-row { grid-template-columns:minmax(0,1fr) auto 46px; gap:5px; }
   .trip-payment-funding { padding:11px; }
 }
+
+/* v1.23.4: restricted Tithe cash and actual payments remain clearly distinct. */
+.giving-card .giving-stats { margin-bottom: 12px; }
+.giving-card .giving-figure { font-size: clamp(1.12rem, 3.8vw, 1.4rem); display:block; margin-top: 5px; overflow-wrap:anywhere; }
+.giving-card .giving-latest { margin-bottom: 12px; }
+.giving-card .giving-cta { width: 100%; margin-top: 12px; }
+.giving-card .sub, .giving-impact .sub { line-height: 1.5; }
+.giving-live-preview { margin-top: 12px; }

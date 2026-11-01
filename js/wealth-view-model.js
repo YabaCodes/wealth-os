@@ -67,8 +67,10 @@ export function goalPaceTextFor({
   return `At current pace: ${dateAfterMonthsFor(months, referenceDate)} · ~${money(pace)}/mo`;
 }
 
-export function wealthAccountLabels({ ct, cash, es, specialBudgetReserve }) {
-  const operatingAvailable = Number(ct.actual || 0) - specialBudgetReserve;
+export function wealthAccountLabels({ ct, cash, es, specialBudgetReserve = 0, electricityReserve = 0 }) {
+  // Cash explicitly earmarked for other purposes is not free operating cash.
+  // Upcoming ordinary bills/caps remain commitments, not account debits.
+  const operatingAvailable = Number(ct.actual || 0) - specialBudgetReserve - electricityReserve;
   const ctStatus = !ct.verified ? "Not checked" : Math.abs(ct.difference) < 0.5 ? "Reconciled" : "Ledger mismatch";
   const ctStatusClass = !ct.verified ? "" : Math.abs(ct.difference) < 0.5 ? " good-tag" : " warn-tag";
   const cashStatus = cash.actual < -0.5 ? "Negative balance" : cash.verified ? "Counted" : "Tracked";

@@ -8,7 +8,7 @@ import {
 test("navigation, Settings release identity and actual expense form persist through reload", async ({ page }) => {
   await seedSyntheticBrowser(page);
   await page.locator('[data-action="settings"]').first().click();
-  await expect(page.locator('[role="dialog"]')).toContainText("Wealth OS v1.23.3");
+  await expect(page.locator('[role="dialog"]')).toContainText("Wealth OS v1.23.4");
   await expect(page.locator('[role="dialog"]')).toContainText("Data model 190");
   await page.locator('[data-action="close-modal"]').click();
 
@@ -758,4 +758,61 @@ test("Settled Business Trip sources reflect manual card funding status, not a ve
   await expect(page.locator("#trip-payment-sources")).toContainText("manual confirmation, not verification");
   await expect(page.locator("#trip-payment-sources .trip-payment-card-target")).toContainText("NT$3,500");
   await expect(page.locator('[data-action="confirm-project-card-clearing"]')).toHaveCount(0);
+});
+
+test("church giving reduces E.SUN and reserved Tithe exactly once without changing personal spending", async ({ page }) => {
+  await seedSyntheticBrowser(page);
+  await page.evaluate(async () => {
+    const db = await import("/js/db.js");
+    const b = await db.getOne("buckets", "tithe");
+    const a = await db.getOne("accounts", "esun");
+    await db.put("buckets", { ...b, openingBalance: 1000 });
+    await db.put("accounts", { ...a, openingBalance: 1000 });
+  });
+  await page.reload();
+  await page.locator('[data-tab="wealth"]').click();
+  await expect(page.locator("#church-giving")).toContainText("NT$1,000");
+  await page.locator('#church-giving [data-action="give-to-church"]').click();
+  await page.locator('#church-giving-form input[name="amount"]').fill("400");
+  await expect(page.locator("#giving-preview")).toContainText("Tithe NT$600");
+  await page.locator("#church-giving-form button.btn").last().click();
+  await expect.poll(async () => (await readBrowserStore(page, "expenses")).length).toBe(1);
+  const gifts = await readBrowserStore(page, "expenses");
+  expect(gifts[0]).toMatchObject({
+    amount: 400, accountId: "esun", fundingBucketId: "tithe",
+    givingType: "church_tithe", nonPersonal: true, categoryId: "tithe-cat",
+  });
+  const snapshot = await page.evaluate(async () => {
+    const db = await import("/js/db.js");
+    return { accounts: await db.accountBalances(), buckets: await db.bucketBalances() };
+  });
+  expect(snapshot.accounts.esun).toBe(600);
+  expect(snapshot.buckets.tithe).toBe(600);
+  await page.locator('[data-tab="home"]').click();
+  await expect(page.locator(".month-stats")).toContainText("NT$0");
+  await page.reload();
+  await page.locator('[data-tab="wealth"]').click();
+  await expect(page.locator("#church-giving")).toContainText("NT$600");
+  await page.locator('#church-giving [data-action="give-to-church"]').click();
+  await page.locator('#church-giving-form input[name="amount"]').fill("700");
+  await page.locator("#church-giving-form button.btn").last().click();
+  await expect.poll(async () => (await readBrowserStore(page, "expenses")).length).toBe(1);
+});
+
+test("CTBC unreserved clarity deducts both virtual electricity and active trip wallet", async ({ page }) => {
+  const trip = { ...testTrip(), fundingMode: "trip_wallet", tripWalletAllocatedTwd: 200 };
+  await seedSyntheticBrowser(page, { trip });
+  await page.evaluate(async () => {
+    const db = await import("/js/db.js");
+    const b = await db.getOne("buckets", "electricity");
+    const a = await db.getOne("accounts", "ctbc");
+    await db.put("buckets", { ...b, openingBalance: 300 });
+    await db.put("accounts", { ...a, openingBalance: 1500 });
+  });
+  await page.reload();
+  await page.locator('[data-tab="wealth"]').click();
+  const section = page.locator(".account-detail-card").first();
+  await expect(section).toContainText("Unreserved CTBC cash");
+  await expect(section).toContainText("NT$1,000");
+  await expect(section).toContainText("Upcoming bills and flexible budgets are not deducted");
 });

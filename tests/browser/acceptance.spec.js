@@ -321,14 +321,27 @@ test("Target-date Goals planner computes month-end requirements, flags budget ga
   await page.locator('[data-goal-scenario-mode="date"]').click();
   await expect(page.locator("#goal-scenario-deadline")).toBeVisible();
   await expect(page.locator("#goal-scenario-extra")).toBeHidden();
-  await page.locator("#goal-scenario-deadline").fill("2027-03-31");
+  // Keep this time-dependent planner test valid as calendar months advance.
+  // 5 future month-ends require NT$57,600/mo (above NT$50k plan);
+  // 6 future month-ends require NT$48k/mo (within the plan).
+  const deadline = await page.evaluate(() => {
+    const now = new Date();
+    const fmt = (d) => [d.getFullYear(), String(d.getMonth() + 1).padStart(2, "0"), String(d.getDate()).padStart(2, "0")].join("-");
+    const endAfter = (n) => fmt(new Date(now.getFullYear(), now.getMonth() + n + 1, 0, 12));
+    return {
+      five: endAfter(5),
+      six: endAfter(6),
+      beforeFirstPayday: fmt(new Date(now.getFullYear(), now.getMonth() + 1, 1, 12)),
+    };
+  });
+  await page.locator("#goal-scenario-deadline").fill(deadline.five);
   await expect(page.locator("#goal-scenario-result")).toContainText("Required each month");
   await expect(page.locator(".goal-scenario-highlight")).toContainText("NT$");
   await expect(page.locator(".goal-target-feasibility")).toContainText("Above current planned wealth funding");
   await expect(page.locator("#goal-scenario-result")).toContainText("5");
-  await page.locator("#goal-scenario-deadline").fill("2027-04-30");
+  await page.locator("#goal-scenario-deadline").fill(deadline.six);
   await expect(page.locator(".goal-target-feasibility")).toContainText("Within planned wealth funding");
-  await page.locator("#goal-scenario-deadline").fill("2026-11-01");
+  await page.locator("#goal-scenario-deadline").fill(deadline.beforeFirstPayday);
   await expect(page.locator("#goal-scenario-result")).toContainText("There are no full future month-end contributions");
   await page.locator("#goal-scenario-select").selectOption("goal-home-trip");
   await expect(page.locator("#goal-scenario-result")).toContainText("waiting for Emergency Fund");

@@ -95,7 +95,7 @@ export function groupActivityByDay(list) {
     key,
     items,
     spent: items
-      .filter((x) => x._kind === "expense")
+      .filter((x) => x._kind === "expense" && !x.nonPersonal)
       .reduce((sum, x) => sum + Math.abs(Number(x._amount || 0)), 0),
     earned: items
       .filter((x) => x._kind === "income")

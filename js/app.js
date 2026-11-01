@@ -59,6 +59,7 @@ import {
 } from "./activity.js";
 import {
   businessTripCategoryRules,
+  businessTripPaymentSourcesFor,
   parseCustomCategoryRules,
   projectBudgetSummary,
   projectCategoryBreakdown,
@@ -88,7 +89,7 @@ import {
   goalsPortfolioFor,
 } from "./wealth-view-model.js";
 import { assessMonthClose, closeMonthAtomic, reopenMonthAtomic } from "./month-close.js";
-import { monthlyFinancialReviewFor, spendingDriversFor } from "./monthly-review.js";
+import { monthlyFinancialReviewFor, spendingDriversFor, spendingQuickInsightsFor } from "./monthly-review.js";
 import {
   latestReconciliationFor,
   accountSnapshotFor,
@@ -110,7 +111,7 @@ let modalDirty = false;
 let homeWeekStart = null,
   homeDay = null;
 let reachedGoals = null; // goals at target after the last load (null until the first load)
-const APP_VERSION = "1.23.1";
+const APP_VERSION = "1.23.3";
 const THEME_KEY = "wealthOSTheme";
 // Theme: 'system' follows the phone's light/dark setting. A copy is kept in localStorage so
 // index.html can apply it before the first paint (IndexedDB is too slow for that).
@@ -1695,6 +1696,17 @@ function shell(content) {
   root.querySelector(".modal")?.addEventListener("input", () => (modalDirty = true));
   lastShell = { tab, period: selectedPeriodId, modal: !!modal };
   if (modalOpening && motionAllowed()) root.querySelector(".modal-backdrop")?.classList.add("modal-enter");
+  if (modalOpening && modal?.type === "monthly-review" && modal.focus === "drivers") {
+    // Scroll the existing review SHEET, not the underlying Home/Budget page.
+    // Keep a real focus target for iPhone VoiceOver and keyboard navigation.
+    const sheet = root.querySelector(".modal");
+    const target = root.querySelector("#mr-spending-drivers");
+    if (sheet && target) {
+      sheet.scrollTop = Math.max(0, sheet.scrollTop + target.getBoundingClientRect().top -
+        sheet.getBoundingClientRect().top - 12);
+      target.focus({ preventScroll: true });
+    }
+  }
   animateBars(root, before, entering);
   if (pendingHighlight) {
     root.querySelector(`[data-entry="${pendingHighlight}"]`)?.classList.add("entry-just-saved");
@@ -1837,6 +1849,40 @@ function homeDayList(p, day) {
     )
     .join("")}${spent ? `<div class="home-day-total"><span>Spent this day</span><strong>${money(spent)}</strong></div>` : ""}`;
 }
+// v1.23.2 — compact preview of controllable flexible/unplanned personal spending.
+// Uses the selected month's frozen category actuals, including closed snapshots.
+function homeSpendingPreview(period, plan) {
+  const record = periodRecord(period.id);
+  const preview = spendingQuickInsightsFor({
+    actuals: record?.actuals ?? expenseTotals(period.id),
+    planLines: plan.lines || [],
+    categories: state.categories,
+    personalTotal: record?.expenses ?? totalExpenses(period.id),
+    maxItems: 2,
+  });
+  const rows = preview.top.map((r) => `<div class="home-driver-row">
+    <span><strong>${esc(r.name)}</strong>${r.overBudget ? '<small class="home-driver-over">Above category plan</small>' : ""}</span>
+    <strong class="home-driver-amount">${privateMoney(r.spent)}</strong>
+  </div>`).join("");
+  const empty = preview.status === "unavailable"
+    ? "The selected month's saved spending total has no category breakdown available."
+    : "No flexible or unplanned personal category spending recorded for this month.";
+  const qualifier = preview.overBudgetCount
+    ? `${preview.overBudgetCount} flexible categor${preview.overBudgetCount === 1 ? "y is" : "ies are"} above its budget`
+    : "Fixed bills are excluded from this quick preview";
+  return `<section class="card home-spending-insights" id="home-spending-insights" data-insights-period="${esc(period.id)}">
+    <div class="home-insights-title">
+      <div><div class="metric-label">Quick insights · ${esc(monthLabel(period.id))}</div><h2>Spending drivers</h2></div>
+      <span class="tag">Personal</span>
+    </div>
+    ${rows ? `<div class="home-drivers">${rows}</div>` : `<p class="sub home-insights-empty">${empty}</p>`}
+    <div class="home-insights-footer">
+      ${rows ? `<span class="sub">${qualifier}</span>` : '<span class="sub">Category view available in Monthly Review</span>'}
+      <button class="btn secondary small" type="button" data-action="spending-drivers" data-period="${esc(period.id)}">See spending drivers</button>
+    </div>
+  </section>`;
+}
+
 function homeView() {
   const p = currentPeriod();
   const active = activeGoal(state.goals, state.bucketBalances);
@@ -1948,6 +1994,7 @@ function homeView() {
     <div class="next-step-row"><span class="next-ic" aria-hidden="true">${icon(nextIcon)}</span><div class="next-copy"><span class="metric-label">Next step</span><strong>${actionText}</strong><span class="sub">${actionSub}</span></div>${actionMetric ? `<strong class="next-amount">${privateValue(actionMetric)}</strong>` : ""}</div>
     ${action ? `<div class="next-step-actions">${action}</div>` : ""}
   </section>
+  ${homeSpendingPreview(p, plan)}
   ${
     homeDay
       ? `<div class="section-title"><h2>${esc(dayHeading(homeDay))}</h2><button class="text-btn see-all" data-action="home-day" data-day="">Show latest</button></div>`
@@ -2110,7 +2157,7 @@ function budgetView() {
     : "";
 
   return `<div class="period-row with-menu">${periodSelector(true)}<button type="button" class="period-step period-menu" data-action="month-actions" data-id="${p.id}" aria-label="More for ${monthLabel(p.id)}">⋯</button></div>
-  <div class="mr-budget-entry"><button class="btn secondary small" type="button" data-action="monthly-review">Monthly Financial Review</button><span class="sub">Spending, wealth funding, close readiness and trends</span></div>
+  <div class="mr-budget-entry" id="budget-review-shortcuts"><button class="btn secondary small" type="button" data-action="monthly-review">Monthly Financial Review</button><button class="btn ghost small" type="button" data-action="spending-drivers" data-period="${esc(p.id)}">Spending Drivers</button><span class="sub">Quick access for ${esc(monthLabel(p.id))}</span></div>
   ${lock}
   <section class="card ring-card">
     <div class="ring-head"><h2>Flexible spending</h2><span class="tag">${dayPill}</span></div>
@@ -2592,6 +2639,48 @@ function projectDetailView(projectId) {
     settlementBlock = `<div class="section-title"><h2>Reimbursement</h2><span class="sub">Settle when company payment arrives</span></div><section class="card"><div class="project-settlement-layout"><div class="project-settlement-copy"><strong>${blocked ? "Resolve items before settlement" : "Ready for settlement"}</strong><div class="sub">${p.type === "business_trip" ? `Expected reimbursement ${money(summary.expectedReimbursement)} · exact ${money(summary.exact)} + allowance ${money(summary.allowance)}` : `Known project cost ${money(known)}`} · E.SUN card ${money(card)}</div></div><button class="btn project-settlement-cta" data-action="settle-project" data-id="${p.id}" ${!expenses.length || blocked ? "disabled" : ""}>Settle Reimbursement</button></div>${missing.length ? `<div class="sub warn" style="margin-top:8px">${missing.length} expense${missing.length === 1 ? " needs" : "s need"} an exact NTD amount.</div>` : ""}${pendingDeposits.length ? `<div class="sub warn" style="margin-top:8px">${pendingDeposits.length} refundable deposit${pendingDeposits.length === 1 ? " is" : "s are"} still pending. Resolve the refund status first.</div>` : ""}</section>`;
   }
 
+  const paymentSources = p.type === "business_trip"
+    ? businessTripPaymentSourcesFor(expenses, settlement) : null;
+  const sourceBlock = paymentSources ? (() => {
+    const sources = paymentSources.rows;
+    const segments = sources.filter((x) => x.amount > 0)
+      .map((x) => `<span class="trip-payment-segment trip-payment-${esc(x.id)}" style="width:${x.percentage.toFixed(4)}%" aria-hidden="true"></span>`).join("");
+    const rows = sources.map((x) => `<div class="trip-payment-row" data-payment-source="${esc(x.id)}">
+      <span class="trip-payment-source-name"><i class="trip-payment-dot trip-payment-${esc(x.id)}" aria-hidden="true"></i>${esc(x.name)}</span>
+      <strong>${privateMoney(x.amount)}</strong>
+      <span class="trip-payment-share">${x.percentage.toFixed(1)}%</span>
+      ${x.unknownTwdCount ? `<span class="trip-payment-unknown">${x.unknownTwdCount} amount${x.unknownTwdCount === 1 ? "" : "s"} pending NTD conversion</span>` : ""}
+    </div>`).join("");
+    const reimbursementAccount = settlement?.reimbursementAccountId || p.reimbursementAccountId;
+    const viaCtbc = reimbursementAccount === "ctbc";
+    const card = paymentSources.cardKnownTwd;
+    const fundingLabel = paymentSources.cardFundingMarked
+      ? "Card funding previously marked complete in Wealth OS"
+      : "E.SUN card costs to set aside for funding";
+    const fundingText = paymentSources.cardFundingMarked
+      ? "The settled trip is marked card-funded in Wealth OS. That is a manual confirmation, not verification of the E.SUN card bill or bank transfer."
+      : viaCtbc
+        ? "CTBC → E.SUN planning amount based on recorded card-paid trip costs. Compare with posted card transactions and any previous/partial repayments before transferring."
+        : "Card funding estimate only. The trip reimbursement destination is not confirmed as CTBC; verify which account should fund E.SUN before transferring.";
+    return `<div class="section-title"><h2>Payment sources</h2><span class="sub">How trip expenses were paid</span></div>
+      <section class="card trip-payment-card" id="trip-payment-sources">
+        <div class="split trip-payment-heading"><div><div class="metric-label">Recorded trip costs by payment source</div>
+          <strong class="trip-payment-total">${privateMoney(paymentSources.total)}</strong></div>
+          <span class="tag">Expenses only</span></div>
+        ${segments ? `<div class="trip-payment-bar" role="img" aria-label="Breakdown of recorded trip expense payment sources">${segments}</div>`
+          : '<div class="sub" style="margin-top:12px">No valued trip expenses recorded yet.</div>'}
+        <div class="trip-payment-list">${rows}</div>
+        <div class="trip-payment-funding">
+          <div class="metric-label">${fundingLabel}</div>
+          <strong class="trip-payment-card-target">${privateMoney(card)}</strong>
+          <p class="sub">${fundingText}</p>
+          ${paymentSources.unvalued ? `<p class="trip-payment-warning">${paymentSources.unvalued} expense${paymentSources.unvalued === 1 ? " still needs" : "s still need"} an exact NTD value. Totals and card funding estimates are incomplete.</p>` : ""}
+          ${paymentSources.pendingHolds ? `<p class="trip-payment-warning">${paymentSources.pendingHolds} unresolved refundable hold${paymentSources.pendingHolds === 1 ? "" : "s"}: ${privateMoney(paymentSources.pendingHoldTwd)} in known NTD holds, shown separately and excluded from trip expense totals. Verify whether any authorization posted to the card before calculating actual payment due.</p>` : ""}
+          <p class="sub">This is trip-related card spending, not the card's full statement balance or proof of reimbursement. It does not subtract partial funding already transferred. No bank transfer or card payment is created here.</p>
+        </div>
+      </section>`;
+  })() : "";
+
   const walletBlock = p.fundingMode === "trip_wallet"
     ? `<div class="section-title"><h2>Trip Wallet</h2><span class="sub">Virtual reserve from operating cash</span></div><section class="card">${row("Allocated", money(summary.walletAllocated))}${row("Counted spend", money(summary.totalSpend))}${row("Budget balance", money(summary.walletRemaining))}${summary.walletOverspend > 0 ? `<div class="notice warn" style="margin-top:10px">Over the Trip Wallet allocation by ${money(summary.walletOverspend)}.</div>` : ""}</section>`
     : "";
@@ -2610,6 +2699,7 @@ function projectDetailView(projectId) {
     ${nonTripSummary}
     ${projectExactTrackerBlock(p, expenses, summary)}
     ${projectFlexibleTrackerBlock(p, expenses, summary)}
+    ${sourceBlock}
     ${walletBlock}
     ${summary.depositsPending ? `<div class="section-title"><h2>Refundable deposits</h2><span class="tag warn-tag">${summary.depositsPending} pending</span></div><section class="card"><strong>${money(summary.depositsPendingTwd)} currently held</strong><div class="sub">Excluded from spending and expected reimbursement until the refund outcome is resolved.</div></section>` : ""}
 
@@ -3354,13 +3444,15 @@ function monthlyReviewView(periodId) {
     <div><strong>${esc(r.name)}</strong><span class="${r.change > 0 ? "mr-danger" : "mr-positive"}">${r.change > 0 ? "+" : "−"}${driverAmount(Math.abs(r.change))} vs ${esc(monthLabel(previous.id))}</span></div>
     ${driverLink(r,"Inspect")}
   </div>`).join("");
-  const driverSection = `<div class="mr-section mr-drivers" id="mr-spending-drivers">
+  const driverSection = `<div class="mr-section mr-drivers" id="mr-spending-drivers" tabindex="-1">
     <div class="mr-driver-title"><h4>Spending drivers</h4><span class="tag">${drivers.categoriesCount} categories spent</span></div>
     <p class="sub">Personal spending by category, ranked by recorded amount. Plan comparisons use this month's frozen fixed/flexible budget; only the previous recorded funding month is used for changes.</p>
     ${drivers.over.length ? `<p class="mr-driver-alert">${drivers.over.length} categor${drivers.over.length === 1 ? "y is" : "ies are"} above its individual plan. A combined budget total may hide these overruns.</p>` : ""}
     ${drivers.hasPrevious && moverRows ? `<div class="mr-movers"><div class="metric-label">Largest category changes</div>${moverRows}</div>` : ""}
     ${!drivers.hasPrevious ? `<p class="sub">${previous ? `The earlier recorded month (${esc(monthLabel(previous.id))}) does not have a complete category breakdown, so category-level changes cannot be calculated reliably.` : "Category changes will appear once another funding month is recorded."}</p>` : ""}
-    <div class="mr-driver-rows">${driverRows || '<div class="empty compact-empty">No personal category expenses or spending plan yet.</div>'}</div>
+    <div class="mr-driver-rows">${driverRows || (drivers.unassignedCurrent !== null && drivers.unassignedCurrent > 0.5
+      ? '<div class="empty compact-empty">Category breakdown unavailable for this funding month.</div>'
+      : '<div class="empty compact-empty">No personal category expenses or spending plan yet.</div>')}</div>
     ${drivers.unassignedCurrent !== null && Math.abs(drivers.unassignedCurrent) > 0.5
       ? `<p class="sub">Note: ${driverAmount(Math.abs(drivers.unassignedCurrent))} of the saved personal spending total is not represented in the available category breakdown. The total above remains authoritative.</p>`
       : ""}
@@ -5737,6 +5829,11 @@ function bind() {
           if (a === "confirm-reconciliation") return confirmAccountReconciliation();
           if (a === "confirm-transfer") return completeTransfer(b.dataset.id);
           if (a === "monthly-review") modal = { type: "monthly-review", periodId: currentPeriod()?.id };
+          if (a === "spending-drivers") {
+            const requestedPeriod = b.dataset.period || currentPeriod()?.id;
+            if (!state.periods.some((p) => p.id === requestedPeriod)) return;
+            modal = { type: "monthly-review", periodId: requestedPeriod, focus: "drivers" };
+          }
           if (a === "review-driver") {
             const periodId = b.dataset.period;
             const categoryId = b.dataset.category;

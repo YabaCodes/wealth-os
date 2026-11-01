@@ -354,3 +354,63 @@ export function parseCustomCategoryRules({ exact = "", flexible = "", tracking =
   add(tracking, "tracking");
   return out;
 }
+
+/**
+ * Payment SOURCE view of the final counted Special Budget spending.
+ * The exposure is distinct from reimbursement entitlement and bank/card debt.
+ * Pending refundable card holds are NOT posted spending and are shown separately.
+ * Partial deposits contribute only their recorded retained NTD amount.
+ */
+export function businessTripPaymentSourcesFor(expenses = [], settlement = null) {
+  const methods = [
+    { id: "esun_card", name: "E.SUN Credit Card" },
+    { id: "ctbc", name: "CTBC Operating" },
+    { id: "cash", name: "Cash" },
+    { id: "other", name: "Other" },
+    { id: "trip_wallet", name: "Trip Wallet" },
+  ];
+  const rows = methods.map((method) => ({
+    ...method, amount: 0, count: 0, unknownTwdCount: 0,
+    pendingHoldTwd: 0, pendingHoldCount: 0, percentage: 0,
+  }));
+  const byMethod = new Map(rows.map((x) => [x.id, x]));
+  let unvalued = 0, pendingHolds = 0, pendingHoldTwd = 0;
+  for (const entry of expenses || []) {
+    if (!entry || entry.deletedAt) continue;
+    const row = byMethod.get(entry.paymentMethod) || byMethod.get("other");
+    if (isRefundableDeposit(entry) && !depositResolved(entry)) {
+      pendingHolds++;
+      row.pendingHoldCount++;
+      const value = Number(entry.twdAmount);
+      if (Number.isFinite(value) && value > 0) {
+        row.pendingHoldTwd += value;
+        pendingHoldTwd += value;
+      }
+      continue;
+    }
+    if (isRefundableDeposit(entry) && entry.depositStatus === "refunded") continue;
+    if (missingTwd(entry)) {
+      row.unknownTwdCount++;
+      unvalued++;
+      continue;
+    }
+    const amount = effectiveTwd(entry);
+    if (amount <= 0) continue;
+    row.amount += amount;
+    row.count++;
+  }
+  const total = rows.reduce((sum, x) => sum + x.amount, 0);
+  for (const row of rows) row.percentage = total > 0 ? row.amount / total * 100 : 0;
+  // The settlement freezes what was counted on the E.SUN card at the time
+  // it was finalized. A manual "funded" mark is not bank confirmation.
+  const card = Number.isFinite(Number(settlement?.cardPaidTwd))
+    ? Math.max(0, Number(settlement.cardPaidTwd))
+    : byMethod.get("esun_card").amount;
+  return {
+    rows: rows.filter((x) => x.id !== "trip_wallet" ||
+      x.amount > 0 || x.unknownTwdCount > 0 || x.pendingHoldCount > 0),
+    total, unvalued, pendingHolds, pendingHoldTwd,
+    cardKnownTwd: card,
+    cardFundingMarked: !!settlement?.cardClearingConfirmed,
+  };
+}

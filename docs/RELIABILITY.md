@@ -57,4 +57,8 @@ The Node test suite covers pure accounting calculations, Special Budget / Busine
 
 **v1.23.1 adds read-only Spending Drivers** from the existing personal expense category actuals and frozen period budget, with exact category/month Activity drill-down and a one-click reset. Pure-model and Chromium regression tests ensure no transfers or unsettled business-trip entries are misclassified, old closed periods missing category-level detail do not generate misleading comparison values, the controls don't write IndexedDB, and privacy/dark modes work.
 
+**v1.23.2 adds read-only Home Quick Insights and direct Spending Drivers deep links.** Pure tests verify the top flexible expense categories and empty/unavailable histories. Desktop/mobile browser tests cover one-tap focus within the existing modal, selected-period preservation across closed months, responsive dark/privacy states and unchanged IndexedDB exports. No financial posting or migration code changed.
+
+**v1.23.3 adds a read-only Business Trip payment-source composition** that sums existing project-expense payment methods via the unchanged effective-TWD rules. Pending refundable holds and missing conversion amounts are surfaced separately; existing settlement card-funding markers are displayed as manual, not bank verified. Pure-model and desktop/mobile Playwright tests verify exposure math, no financial record mutation, privacy masking and mobile Dark mode.
+
 **Remaining gaps:** exhaustive UI/controller flows, older historical migrations, and real iPhone Safari/WebKit behavior. Neither simulated IndexedDB nor Chromium mobile emulation proves device storage durability; physical iPhone acceptance remains required.

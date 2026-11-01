@@ -153,3 +153,36 @@ export function spendingDriversFor({
       safe(previousTotal) - rows.reduce((sum,r) => sum + safe(r.previous),0),
   };
 }
+
+/**
+ * Compact Home insight, sourced only from the same personal-category totals and
+ * frozen period plan as Spending Drivers. Excludes fixed obligations to surface
+ * controllable flexible/unplanned spending rather than always ranking rent #1.
+ * No history, posting, database or UI dependencies.
+ */
+export function spendingQuickInsightsFor({
+  actuals = {}, planLines = [], categories = [], personalTotal = 0,
+  maxItems = 2,
+} = {}) {
+  const detail = spendingDriversFor({
+    currentActuals: actuals, previousActuals: null,
+    planLines, categories, currentTotal: personalTotal,
+  });
+  const fixed = new Set([
+    ...planLines.filter((r) => r?.ruleType === "fixed").map((r) => String(r.id)),
+    ...categories.filter((r) => r?.ruleType === "fixed").map((r) => String(r.id)),
+  ]);
+  const variable = detail.rows.filter((r) => !fixed.has(r.id) && r.spent > 0.5);
+  const top = variable.slice(0, Math.max(0, Math.min(5, Math.floor(safe(maxItems)))));
+  const overBudgetCount = variable.filter((r) => r.overBudget).length;
+  const amountUncategorized = detail.unassignedCurrent;
+  const hasSpending = safe(personalTotal) > 0.5;
+  return {
+    top: top.map(({ id, name, spent, budget, overBudget, variance }) =>
+      ({ id, name, spent, budget, overBudget, variance })),
+    overBudgetCount,
+    status: top.length ? "ready" : hasSpending && detail.rows.every((r) => r.spent <= 0.5)
+      ? "unavailable" : "empty",
+    amountUncategorized,
+  };
+}

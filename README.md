@@ -1,4 +1,31 @@
-# Wealth OS — v1.23.1
+# Wealth OS — v1.23.3
+
+## v1.23.3 — Business Trip payment sources and E.SUN card-funding guide
+
+- Each **Business Trip → Payment sources** now has a compact composition bar showing **E.SUN Credit Card, CTBC Operating, Cash and Other**, with recorded NTD amounts and percentages. Legacy Trip Wallet entries, when present, are shown separately from physical cash.
+- Uses each existing recorded expense's **paymentMethod** and the existing `effectiveTwd()` calculation, ensuring consistency with exact/flexible reimbursements and settlement calculations. All amounts are read-only; no ledger reclassification or physical-bank movement is created.
+- **Pending refundable deposits** are identified separately as temporary holds, excluded from final trip costs and the E.SUN card funding estimate. Refunded deposits count as zero; partially retained/retained deposits count only the retained amount. Missing NTD conversions are highlighted rather than assumed to be zero-cost.
+- A card-funding section shows recorded **trip-specific E.SUN credit-card costs** and, if the reimbursement destination is CTBC, presents them as a **CTBC → E.SUN planning amount**. It clearly requires checking actual posted card transactions, refunds, the credit-card statement, and any partial transfers already made. This is **not** a true card statement balance and **does not** initiate or automatically record any transfer.
+- For settled trips, uses the settlement's saved `cardPaidTwd` when present and explains that the existing card-funding confirmation is manually marked, **not verified** bank settlement. Existing settlement and post-settlement card-funding workflow is preserved.
+- Accessible, privacy-masked NTD values and responsive Light/Dark source chart. All funds, categories, Business Trip entries and data stores remain unchanged.
+- Unit and Playwright desktop/mobile browser tests verify mixed payment sources, pending/refunded/partially retained holds, missing conversions, CTBC guidance, confirmed funding labels, display privacy and financial data immutability.
+- **Financial Data Model 190** and **IndexedDB schema 3** unchanged. App identity and PWA cache version updated to **v1.23.3**.
+
+**Dependency:** v1.23.2 (Quick Insights) is a separate open PR. This revision is stacked on v1.23.2 and must be merged only after v1.23.2 passes its manual merge/iPhone acceptance process.
+
+
+
+## v1.23.2 — Monthly Review Quick Insights
+
+- **Home → Spending drivers:** shows a compact two-category personal spending preview for the selected funding month, highlighting the largest **flexible and unplanned expense categories**, not recurring fixed obligations like rent. Displays a truthful empty state when flexible spending is absent, or an unavailable-data explanation when old totals have no category breakdown.
+- **See spending drivers:** opens the existing **Monthly Financial Review** and immediately scrolls/focuses the real **Spending drivers** section inside the modal (accessible keyboard/VoiceOver focus target). No duplicate screen or extra bottom tab.
+- **Budget → Spending Drivers:** visible direct shortcut adjacent to the existing Monthly Financial Review action, retaining the selected funding period including historically closed months. The ordinary Monthly Financial Review button continues opening at the top as before.
+- Reuses the accepted read-only `spendingDriversFor()` calculation and selected-month `periodRecord().actuals`, which prefers immutable closed-month snapshots, plus that period's plan. Personal expense categories never include bank transfers, virtual allocations, or unsettled reimbursable Business Trip spend.
+- All currency values use the existing app privacy-masking helper. Preview cards and shortcut buttons are responsive in light/dark modes and narrow iPhone widths.
+- Pure-model regression tests and desktop/mobile real-browser acceptance verify preview ranking, no-spend/unknown-history states, direct section focus, selected-month preservation, closed history, privacy, no IndexedDB writes, and theme compatibility.
+- **Financial data model remains 190; IndexedDB schema remains 3.** No accounting, transactions, routing, reconciliation, month-close, migration, or data-store changes. Version and service-worker cache advance to **v1.23.2**.
+
+
 
 ## v1.23.1 — Monthly Spending Drivers
 

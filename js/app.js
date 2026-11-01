@@ -1926,7 +1926,7 @@ function weekStripHTML(p, fp) {
 function homeDayList(p, day) {
   const items = activityRecords().filter((x) => x.budgetPeriodId === p.id && String(x._date || "").slice(0, 10) === day);
   if (!items.length) return `<div class="empty compact-empty"><strong>Nothing recorded on this day.</strong><span>Tap + to add an entry.</span></div>`;
-  const spent = items.filter((x) => x._kind === "expense").reduce((n, x) => n + Math.abs(Number(x._amount || 0)), 0);
+  const spent = items.filter((x) => x._kind === "expense" && !x.nonPersonal).reduce((n, x) => n + Math.abs(Number(x._amount || 0)), 0);
   return `${items
     .map(
       (x) =>
@@ -2421,7 +2421,7 @@ function txLine(x) {
   const fund = x._kind === "expense" && x.fundingBucketId ? bucket(x.fundingBucketId)?.name : "";
   const kindNote =
     x._kind === "transfer" ? (isPurposeOnlyTransfer(x) ? "Virtual only · no bank impact" : "Bank transfer") : "";
-  const meta = (x._kind === "transfer" ? [kindNote] : [x._account, fund ? `from ${fund}` : ""]).filter(Boolean).join(" · ");
+  const meta = (x._kind === "transfer" ? [kindNote] : [x._account, fund ? `from ${fund}` : "", x.givingType === "church_tithe" ? "Outside personal spending" : ""]).filter(Boolean).join(" · ");
   const plannedTransfer = x._kind === "transfer" && x.status === "planned";
   const { canEdit, canDelete, canComplete, canRoute, canRepeat } = txActions(x);
   const hasActions = canEdit || canDelete || canComplete || canRoute || canRepeat;

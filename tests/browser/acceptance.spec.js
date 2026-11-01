@@ -789,7 +789,7 @@ test("church giving reduces E.SUN and reserved Tithe exactly once without changi
   expect(snapshot.accounts.esun).toBe(600);
   expect(snapshot.buckets.tithe).toBe(600);
   await page.locator('[data-tab="home"]').click();
-  await expect(page.locator(".month-stats")).toContainText("NT$0");
+  await expect(page.locator(".month-stats > div").nth(1)).toContainText("NT$0");
   await page.reload();
   await page.locator('[data-tab="wealth"]').click();
   await expect(page.locator("#church-giving")).toContainText("NT$600");

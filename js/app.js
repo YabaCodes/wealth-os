@@ -1595,8 +1595,8 @@ function churchGivingForm(x = null) {
   return `<div class="notice"><strong>Record an actual payment, not an allocation.</strong>
     Only save after the money has been sent to church. Wealth OS does not initiate a bank transfer.</div>
     <section class="card giving-impact" style="margin-top:12px">
-      ${row("Tithe available before this ${x ? "edited " : ""}payment", privateMoney(available))}
-      ${row("Tracked E.SUN before this ${x ? "edited " : ""}payment", privateMoney(bank))}
+      ${row(`Tithe available before this ${x ? "edited " : ""}payment`, privateMoney(available))}
+      ${row(`Tracked E.SUN before this ${x ? "edited " : ""}payment`, privateMoney(bank))}
       ${row("Maximum supported payment", privateMoney(max))}
     </section>
     <form id="church-giving-form">
@@ -1618,7 +1618,7 @@ async function saveChurchGiving(form) {
   assertPeriodEditable(periodId);
   const amount = Number(fd.get("amount")), date = String(fd.get("date") || "");
   if (!Number.isSafeInteger(amount) || amount < 1) throw new Error("Enter a positive whole-NTD amount.");
-  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(date) || Number.isNaN(Date.parse(date)))
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(date)))
     throw new Error("Choose a valid payment date.");
   const previous = old ? Number(old.amount || 0) : 0;
   const room = Number(state.bucketBalances.tithe || 0) + previous;

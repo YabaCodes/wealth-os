@@ -111,7 +111,7 @@ let modalDirty = false;
 let homeWeekStart = null,
   homeDay = null;
 let reachedGoals = null; // goals at target after the last load (null until the first load)
-const APP_VERSION = "1.23.3";
+const APP_VERSION = "1.23.4";
 const THEME_KEY = "wealthOSTheme";
 // Theme: 'system' follows the phone's light/dark setting. A copy is kept in localStorage so
 // index.html can apply it before the first paint (IndexedDB is too slow for that).
@@ -719,7 +719,7 @@ function planFor(periodId) {
   return buildBudgetPlan({ income: salary, categories: state.categories, settings: state.settings });
 }
 function expenseTotals(periodId) {
-  return aggregateExpenses(state.expenses, periodId);
+  return aggregateExpenses(state.expenses.filter((e) => !e.nonPersonal), periodId);
 }
 function completedCoreWealth(periodId) {
   const completed = state.transfers.filter(
@@ -794,7 +794,7 @@ function projectStatusTag(p) {
 }
 function totalExpenses(periodId) {
   return state.expenses
-    .filter((e) => e.budgetPeriodId === periodId && !e.deletedAt)
+    .filter((e) => e.budgetPeriodId === periodId && !e.deletedAt && !e.nonPersonal)
     .reduce((s, e) => s + Number(e.amount), 0);
 }
 function entryPeriodId() {
@@ -1002,7 +1002,7 @@ function yearSummary(year) {
     .filter((x) => !x.deletedAt && x.incomeType === "regular_income" && String(x.dateReceived || "").startsWith(prefix))
     .reduce((s, x) => s + Number(x.amount || 0), 0);
   const expenses = state.expenses
-    .filter((x) => !x.deletedAt && String(x.date || "").startsWith(prefix))
+    .filter((x) => !x.deletedAt && !x.nonPersonal && String(x.date || "").startsWith(prefix))
     .reduce((s, x) => s + Number(x.amount || 0), 0);
   const tithe = titheContributedInYear(year);
   const emergency = completedContributionToBucketInYear("emergency", year);
@@ -1171,6 +1171,7 @@ const CATEGORY_VISUALS = {
   "travel-expense": ["plane", "sky"],
   "equipment-purchase": ["camera", "slate"],
   "project-shortfall": ["project", "slate"],
+  "tithe-cat": ["heart", "pink"],
 };
 const CATEGORY_KEYWORDS = [
   [/icloud|apple one|netflix|spotify|youtube|disney|prime video|google one|chatgpt|claude|subscription|streaming/i, "repeat", "indigo"],
@@ -1557,6 +1558,90 @@ function completedTithe(periodId) {
 function expectedTithe(periodId) {
   return Math.round((periodEligibleIncome(periodId) * Number(state.settings.tithePercent || 10)) / 100);
 }
+// Giving is a real E.SUN outflow from the restricted Tithe bucket, not a new
+// allocation or personal budget expense. The original tithe contributions stay in history.
+function churchGivingRecords() {
+  return state.expenses.filter((e) => !e.deletedAt && e.givingType === "church_tithe");
+}
+function churchGivenInYear(year) {
+  return churchGivingRecords().filter((e) => String(e.date || "").startsWith(String(year)))
+    .reduce((sum, e) => sum + Number(e.amount || 0), 0);
+}
+function churchGivingView() {
+  const remaining = Number(state.bucketBalances.tithe || 0);
+  const year = today().slice(0, 4);
+  const given = churchGivenInYear(year);
+  const latest = [...churchGivingRecords()].sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")))[0];
+  return `<div class="section-title"><h2>Tithe & church giving</h2><span class="sub">Reserved separately from your wealth</span></div>
+  <section class="card giving-card" id="church-giving">
+    <div class="grid g2 giving-stats">
+      <div><div class="metric-label">Available to give</div><strong class="giving-figure">${privateMoney(remaining)}</strong><div class="sub">E.SUN Tithe purpose bucket</div></div>
+      <div><div class="metric-label">Given in ${year}</div><strong class="giving-figure">${privateMoney(given)}</strong><div class="sub">Actual payments to church</div></div>
+    </div>
+    ${latest ? `<div class="sub giving-latest">Last recorded gift ${esc(dayLabel(latest.date))} · ${privateMoney(latest.amount)}</div>` : ""}
+    <p class="sub">Allocating Tithe moves money into E.SUN and reserves its purpose. Giving to church is a separate real payment: both the E.SUN bank balance and Tithe bucket decrease by the same amount. Tithe is excluded from Core Wealth and Financial Net Worth.</p>
+    <button class="btn secondary giving-cta" type="button" data-action="give-to-church" ${entryPeriodId() ? "" : "disabled"}>Record Church Giving</button>
+    ${entryPeriodId() ? "" : '<p class="sub">Create an open funding month before recording a payment.</p>'}
+  </section>`;
+}
+function churchGivingForm(x = null) {
+  const periodId = x?.budgetPeriodId || entryPeriodId();
+  if (!periodId) return '<div class="notice">Create or reopen a funding month before recording church giving.</div>';
+  if (isClosedPeriod(periodId)) return `<div class="notice">${esc(monthLabel(periodId))} is closed. Reopen it before editing this gift.</div>`;
+  const correction = x ? Number(x.amount || 0) : 0;
+  const available = Number(state.bucketBalances.tithe || 0) + correction;
+  const bank = Number(esunSnapshot().actual || 0) + correction;
+  const max = Math.max(0, Math.min(available, bank));
+  return `<div class="notice"><strong>Record an actual payment, not an allocation.</strong>
+    Only save after the money has been sent to church. Wealth OS does not initiate a bank transfer.</div>
+    <section class="card giving-impact" style="margin-top:12px">
+      ${row("Tithe available before this ${x ? "edited " : ""}payment", privateMoney(available))}
+      ${row("Tracked E.SUN before this ${x ? "edited " : ""}payment", privateMoney(bank))}
+      ${row("Maximum supported payment", privateMoney(max))}
+    </section>
+    <form id="church-giving-form">
+      <input type="hidden" name="id" value="${esc(x?.id || "")}">
+      <div class="field" style="margin-top:14px"><label>Amount given (NTD)</label><input type="number" name="amount" inputmode="numeric" min="1" max="${Math.floor(max)}" step="1" value="${x ? Number(x.amount || 0) : ""}" required></div>
+      <div class="field"><label>Payment date</label><input type="date" name="date" value="${esc(x?.date || today())}" required></div>
+      <div class="field"><label>Church or note (optional)</label><input name="description" maxlength="140" value="${esc(x?.description || "")}" placeholder="Sunday tithe, church donation…"></div>
+      <div class="notice giving-live-preview" id="giving-preview" role="status">The payment will reduce E.SUN cash and its Tithe reserve equally. Personal budget spending stays unchanged.</div>
+      <button class="btn" style="width:100%;margin-top:12px" ${max < 1 ? "disabled" : ""}>${x ? "Save Giving Correction" : "Record Payment Completed"}</button>
+    </form>`;
+}
+async function saveChurchGiving(form) {
+  const fd = new FormData(form);
+  const id = String(fd.get("id") || "");
+  const old = id ? state.expenses.find((e) => e.id === id && !e.deletedAt) : null;
+  if (id && (!old || old.givingType !== "church_tithe")) throw new Error("Church giving entry no longer exists.");
+  const periodId = old?.budgetPeriodId || entryPeriodId();
+  if (!periodId) throw new Error("Create an open funding month first.");
+  assertPeriodEditable(periodId);
+  const amount = Number(fd.get("amount")), date = String(fd.get("date") || "");
+  if (!Number.isSafeInteger(amount) || amount < 1) throw new Error("Enter a positive whole-NTD amount.");
+  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(date) || Number.isNaN(Date.parse(date)))
+    throw new Error("Choose a valid payment date.");
+  const previous = old ? Number(old.amount || 0) : 0;
+  const room = Number(state.bucketBalances.tithe || 0) + previous;
+  const bank = Number(esunSnapshot().actual || 0) + previous;
+  if (amount > room + 0.5)
+    throw new Error(`The available Tithe balance is only ${money(Math.max(0, room))}. No negative Tithe balance is allowed.`);
+  if (amount > bank + 0.5)
+    throw new Error(`Tracked E.SUN cash is only ${money(Math.max(0, bank))}. Reconcile the account before recording this payment.`);
+  const stamp = new Date().toISOString();
+  const entry = {
+    ...(old || {}), id: old?.id || uid("exp"), date,
+    budgetPeriodId: periodId, amount, accountId: "esun",
+    fundingBucketId: "tithe", categoryId: "tithe-cat", givingType: "church_tithe",
+    nonPersonal: true, description: String(fd.get("description") || "").trim(),
+    createdAt: old?.createdAt || stamp, updatedAt: stamp,
+  };
+  await put("expenses", entry);
+  pendingHighlight = `expense:${entry.id}`;
+  modal = null;
+  await load();
+  toast(`Church giving recorded · ${money(amount)}`, "good");
+}
+
 function paydayRequirements(periodId) {
   const p = state.periods.find((x) => x.id === periodId);
   if (!p) return { groups: [], totalOutstanding: 0, items: [] };
@@ -2327,7 +2412,7 @@ function txActions(x) {
     !x.routingHandled &&
     !routingTransfersForIncome(x.id).length &&
     !isClosedPeriod(x.budgetPeriodId);
-  const canRepeat = x._kind === "expense" && !!entryPeriodId();
+  const canRepeat = x._kind === "expense" && x.givingType !== "church_tithe" && !!entryPeriodId();
   return { canEdit, canDelete, canComplete, canRoute, canRepeat };
 }
 function txLine(x) {
@@ -2964,7 +3049,8 @@ function goalsView() {
 function wealthView() {
   const fx = state.settings.usdTwdRate;
   const ct = accountSnapshot("ctbc"),
-    specialBudgetReserve = activeSpecialBudgetReserve();
+    specialBudgetReserve = activeSpecialBudgetReserve(),
+    electricityReserve = Math.max(0, Number(state.bucketBalances.electricity || 0));
   const es = esunSnapshot();
   const cash = accountSnapshot("cash");
   const {
@@ -2973,7 +3059,7 @@ function wealthView() {
     cashStatus, cashStatusClass,
     esStatus, esStatusClass,
     allocationText,
-  } = wealthAccountLabels({ ct, cash, es, specialBudgetReserve });
+  } = wealthAccountLabels({ ct, cash, es, specialBudgetReserve, electricityReserve });
   return `<div class="privacy-all-money"><div class="sub page-sub">Physical accounts and virtual purpose ledgers</div>
   <div class="grid g2" style="margin-top:14px"><section class="card"><div class="metric-label">Core Wealth</div><div class="metric">${money(state.wealth.coreWealth)}</div><div class="sub">Long-term capital only</div></section><section class="card"><div class="metric-label">Financial Net Worth</div><div class="metric">${money(state.wealth.financialNetWorth)}</div><div class="sub">Tithe excluded · includes cash on hand</div></section></div>
 
@@ -2989,7 +3075,8 @@ function wealthView() {
   <section class="card account-detail-card">
     <div class="account-balance-head"><div><div class="metric-label">Tracked current balance</div><div class="metric">${money(ct.actual)}</div>${ct.verified ? `<div class="sub">Last checked ${esc(ct.reconciliation.date || "")}${ct.isEstimated ? " · updated by recorded activity" : ""}</div>` : `<div class="sub">Using ledger balance until you confirm it</div>`}</div></div>
     <div class="reconcile-grid two-col"><div><span class="sub">Ledger expected</span><strong>${money(ct.expected)}</strong></div><div><span class="sub">Bank vs ledger</span><strong class="${Math.abs(ct.difference) < 0.5 ? "good" : ct.difference < 0 ? "bad" : "warn"}">${ct.difference > 0 ? "+" : ""}${money(ct.difference)}</strong></div></div>
-    ${specialBudgetReserve > 0 ? `<div class="row"><div><strong>Special Budget reserve</strong><div class="sub">Virtual Trip Wallet money reserved from operating cash</div></div><strong class="amount">${money(specialBudgetReserve)}</strong></div><div class="row"><div><strong>Available operating cash</strong><div class="sub">Tracked CTBC balance minus active Special Budget reserves</div></div><strong class="amount">${money(operatingAvailable)}</strong></div>` : ""}
+    ${specialBudgetReserve > 0 ? `<div class="row"><div><strong>Special Budget reserve</strong><div class="sub">Virtual Trip Wallet amount earmarked in CTBC</div></div><strong class="amount">${money(specialBudgetReserve)}</strong></div>` : ""}
+    <div class="row"><div><strong>Unreserved CTBC cash</strong><div class="sub">Tracked balance minus Trip Wallet and Electricity Reserve. Upcoming bills and flexible budgets are not deducted.</div></div><strong class="amount ${operatingAvailable < -0.5 ? "bad" : ""}">${money(operatingAvailable)}</strong></div>
     <div class="row"><div><strong>Electricity Reserve</strong><div class="sub">Virtual reserve held inside CTBC · no bank transfer required</div></div><strong class="amount">${money(state.bucketBalances.electricity || 0)}</strong></div>
     ${accountActions(`<button class="btn secondary" data-action="account-reconcile" data-id="ctbc">Update Balance</button>`, "ctbc")}
   </section>
@@ -3008,6 +3095,7 @@ function wealthView() {
     ${!es.allocationOk ? `<div class="allocation-callout"><div><strong>${es.unassigned > 0 ? `${money(es.unassigned)} needs a purpose` : `Allocations exceed the bank balance by ${money(Math.abs(es.unassigned))}`}</strong><div class="sub">Assign or reduce virtual buckets explicitly. Wealth OS will never guess.</div></div><button class="btn" data-action="esun-allocate">${es.unassigned > 0 ? "Assign Money" : "Reduce Allocation"}</button></div>` : ""}
     ${accountActions(`<button class="btn secondary" data-action="account-reconcile" data-id="esun">Update Balance</button>`, "esun")}
   </section>
+  ${churchGivingView()}
   <div class="section-title"><h2>E.SUN virtual composition</h2><span class="sub">Purpose ledger</span></div><section class="card">${state.buckets
     .filter((b) => b.accountId === "esun")
     .map((b) => row(b.name, money(state.bucketBalances[b.id] || 0)))
@@ -3157,7 +3245,8 @@ function forecastView() {
   <div class="grid g2 annual-grid">
     ${insightKpi("Income", annual.income, "All recorded income", true)}
     ${insightKpi("Expenses", annual.expenses, "Actual spending")}
-    ${insightKpi("Tithe contributed", annual.tithe, "Net Tithe additions · purpose reallocations excluded", true)}
+    ${insightKpi("Tithe allocated", annual.tithe, "Reserved from income · not necessarily given", true)}
+    ${insightKpi("Given to church", churchGivenInYear(year), "Actual payments from E.SUN Tithe", true)}
     ${insightKpi("Emergency added", annual.emergency, "Completed Emergency contributions", true)}
     ${insightKpi("Invested", annual.investments, "Transfers into IBKR", true)}
     ${insightKpi("Net-worth change", annual.netWorthChange === null ? "—" : signedMoney(annual.netWorthChange), annual.netWorthChange === null ? "Need 2 recorded snapshots" : "From first to latest recorded snapshot", true)}
@@ -3221,6 +3310,7 @@ function renderModal() {
         modal.periodId || null,
       ),
     );
+  if (modal.type === "church-giving") return modalWrap(modal.id ? "Edit Church Giving" : "Give to Church", churchGivingForm(modal.id ? state.expenses.find((x) => x.id === modal.id) : null));
   if (modal.type === "income")
     return modalWrap(
       modal.id ? "Edit Income" : "Add Income",
@@ -3244,7 +3334,7 @@ function renderModal() {
         : kind === "transfer"
           ? manualTransferForm(null)
           : expenseForm(null, null, modal.periodId || entryPeriodId());
-    const extra = `<div class="entry-extras"><button type="button" class="text-btn" data-action="cash-withdraw">Withdraw cash</button><button type="button" class="text-btn" data-action="open-projects">Special budgets</button></div>`;
+    const extra = `<div class="entry-extras"><button type="button" class="text-btn" data-action="cash-withdraw">Withdraw cash</button><button type="button" class="text-btn" data-action="open-projects">Special budgets</button><button type="button" class="text-btn" data-action="give-to-church">Give to church</button></div>`;
     return modalWrap("New entry", kinds + body + extra);
   }
   if (modal.type === "income-routing") return modalWrap("Route Supplemental Income", incomeRoutingView(modal.incomeId));
@@ -5760,6 +5850,7 @@ function bind() {
             modal = { type: "paycheck" };
           }
           if (a === "add-expense") modal = { type: "expense", periodId: entryPeriodId() };
+          if (a === "give-to-church") modal = { type: "church-giving" };
           if (a === "new-entry") modal = { type: "new-entry", kind: "expense", periodId: entryPeriodId() };
           if (a === "entry-kind" && modal?.type === "new-entry") modal = { ...modal, kind: b.dataset.kind };
           if (a === "add-income") modal = { type: "income" };
@@ -5953,7 +6044,10 @@ function bind() {
             }
           }
           if (a === "edit-transaction") {
-            if (b.dataset.kind === "expense") modal = { type: "expense", id: b.dataset.id };
+            if (b.dataset.kind === "expense") {
+              const e = state.expenses.find((x) => x.id === b.dataset.id);
+              modal = e?.givingType === "church_tithe" ? { type: "church-giving", id: b.dataset.id } : { type: "expense", id: b.dataset.id };
+            }
             if (b.dataset.kind === "income") modal = { type: "income", id: b.dataset.id };
             if (b.dataset.kind === "transfer") modal = { type: "manual-transfer", id: b.dataset.id };
           }
@@ -6021,6 +6115,19 @@ function bind() {
           if (hint) hint.textContent = r.dataset.hint || "";
         }),
     );
+  }
+  const cgf = document.querySelector("#church-giving-form");
+  if (cgf) {
+    cgf.onsubmit = (event) => { event.preventDefault(); saveChurchGiving(cgf).catch(showError); };
+    const field = cgf.querySelector('input[name="amount"]'), preview = cgf.querySelector("#giving-preview");
+    if (field && preview) field.oninput = () => {
+      const amt = Number(field.value || 0);
+      const gift = modal?.id ? state.expenses.find((e) => e.id === modal.id) : null;
+      const correction = Number(gift?.amount || 0);
+      const titheBefore = Number(state.bucketBalances.tithe || 0) + correction;
+      const esunBefore = Number(esunSnapshot().actual || 0) + correction;
+      preview.textContent = `After payment: Tithe ${money(titheBefore - amt)} · E.SUN ${money(esunBefore - amt)}. Personal budget spending unchanged.`;
+    };
   }
   const inf = document.querySelector("#income-form");
   if (inf) {

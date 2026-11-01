@@ -1,4 +1,16 @@
-# Wealth OS — v1.23.3
+# Wealth OS — v1.23.4
+
+## v1.23.4 — Church giving, reserved cash clarity and annual reporting
+
+- Adds a dedicated **Record Church Giving** flow in Wealth → Tithe & church giving and the global Add menu. It records a payment that the user actually made, never initiates a bank transfer.
+- One payment lowers both **E.SUN physical cash** and the **restricted Tithe bucket**, with an immediate before/after preview. Payments are capped to the available Tithe and tracked E.SUN cash; editing and deletion respect existing closed-month safeguards.
+- Distinguishes **Tithe allocated** from income versus **Given to church** (actual outflows) in the annual overview; preserves previously recorded tithe contributions.
+- Church giving is excluded from ordinary **personal spending**, flexible caps, spending drivers and month-end sweep, but remains visible in Activity and E.SUN account audit.
+- **CTBC unreserved cash** now subtracts both active Trip Wallet amounts and the Electricity Reserve, and explicitly warns that future bills and flexible spending commitments are not deducted.
+- Uses existing IndexedDB stores and financial model version 190. No historical records or savings balances are rewritten by the release. App metadata and offline cache move together to v1.23.4.
+- Browser checks cover payment ledger effects, spending isolation, persistence, overpayment prevention, and CTBC reserve interpretation.
+
+**Dependency:** This is a stacked draft review based on the open v1.23.2 / v1.23.3 parent branch (PR #30). Merge the parent first, then retarget this PR to main. CI and physical iPhone testing are required prior to acceptance; no automatic merge.
 
 ## v1.23.3 — Business Trip payment sources and E.SUN card-funding guide
 

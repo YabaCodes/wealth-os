@@ -30,7 +30,7 @@ export function buildActivityRecords({
         _kind: "expense",
         _date: x.date,
         _amount: -Number(x.amount),
-        _title: categoryNames.get(x.categoryId) || "Expense",
+        _title: x.givingType === "church_tithe" ? "Church giving" : (categoryNames.get(x.categoryId) || "Expense"),
         _account: accountName(x.accountId),
         _detail: ["Physical expense", x.description || ""].filter(Boolean).join(" · "),
       })),
@@ -95,7 +95,7 @@ export function groupActivityByDay(list) {
     key,
     items,
     spent: items
-      .filter((x) => x._kind === "expense")
+      .filter((x) => x._kind === "expense" && !x.nonPersonal)
       .reduce((sum, x) => sum + Math.abs(Number(x._amount || 0)), 0),
     earned: items
       .filter((x) => x._kind === "income")

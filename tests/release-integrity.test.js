@@ -12,6 +12,7 @@ test("release identity is consistent across runtime, defaults, README and servic
   const defaults = read("js/defaults.js");
   const readme = read("README.md");
   const sw = read("sw.js");
+  const packageVersion = JSON.parse(read("package.json")).version;
 
   const appVersion = app.match(/const APP_VERSION = "([^"]+)"/)?.[1];
   const modelVersion = Number(app.match(/const DATA_MODEL_VERSION = (\d+)/)?.[1]);
@@ -22,6 +23,7 @@ test("release identity is consistent across runtime, defaults, README and servic
 
   assert.ok(appVersion, "APP_VERSION must be present");
   assert.equal(defaultVersion, appVersion);
+  assert.equal(packageVersion, appVersion);
   assert.equal(readmeVersion, appVersion);
   assert.equal(cacheVersion, appVersion);
   assert.equal(defaultModel, modelVersion);

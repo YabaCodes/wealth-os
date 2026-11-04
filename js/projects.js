@@ -16,24 +16,24 @@ export function projectExpensesFor(projectExpenses, projectId) {
     );
 }
 
-export function projectKnownTwd(projectExpenses, projectId) {
-  return projectExpensesFor(projectExpenses, projectId).reduce((sum, x) => sum + effectiveTwd(x), 0);
+export function projectKnownTwd(projectExpenses, projectId, project = null) {
+  return projectExpensesFor(projectExpenses, projectId).reduce((sum, x) => sum + effectiveTwd(x, project), 0);
 }
 
-export function projectMissingTwd(projectExpenses, projectId) {
-  return projectExpensesFor(projectExpenses, projectId).filter((x) => missingTwd(x));
+export function projectMissingTwd(projectExpenses, projectId, project = null) {
+  return projectExpensesFor(projectExpenses, projectId).filter((x) => missingTwd(x, project));
 }
 
-export function projectPaymentTwd(projectExpenses, projectId, method) {
+export function projectPaymentTwd(projectExpenses, projectId, method, project = null) {
   return projectExpensesFor(projectExpenses, projectId)
     .filter((x) => x.paymentMethod === method)
-    .reduce((sum, x) => sum + effectiveTwd(x), 0);
+    .reduce((sum, x) => sum + effectiveTwd(x, project), 0);
 }
 
-export function projectOriginalTotals(projectExpenses, projectId) {
+export function projectOriginalTotals(projectExpenses, projectId, project = null) {
   const out = {};
   for (const x of projectExpensesFor(projectExpenses, projectId)) {
-    if (isRefundableDeposit(x) && effectiveTwd(x) <= 0) continue;
+    if (isRefundableDeposit(x) && effectiveTwd(x, project) <= 0) continue;
     const currency = x.currency || "TWD";
     const amount = isRefundableDeposit(x) && x.depositStatus !== "refunded"
       ? Number(x.retainedOriginalAmount || 0)

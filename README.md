@@ -1,4 +1,15 @@
-# Wealth OS — v1.23.4
+# Wealth OS — v1.23.4.1
+
+## v1.23.4.1 — Business Trip cash rate and bank-confirmed NTD capture
+
+- Each Business Trip can save **one cash conversion rate** in `Edit Budget`: NTD per 1 unit of the trip currency (for example, EUR). Rate is optional until cash expenses need NTD valuation; cash amounts entered directly in TWD are valued at face value.
+- **Cash** payment entries need only their original currency amount. The trip-wide rate is applied dynamically to estimate NTD in the exact/flexible trackers, Payment Sources, and settlement calculations. Estimates are clearly marked as estimates, never bank-confirmed figures; editing the trip rate updates projections without rewriting original cash transactions.
+- **E.SUN Credit Card / CTBC Operating** entries preserve manually entered, bank-confirmed **exact NTD charges**. For foreign-currency card/debit expenses the amount is required; the app never applies the cash rate to these payment sources.
+- Existing historical cash entries with a previously saved NTD amount retain that recorded amount unless explicitly edited to use the trip-wide rate; no migration or backfill.
+- If a trip cash rate is absent, non-TWD cash expenses remain valid in original currency, clearly marked as missing NTD valuation, and settlement remains blocked until a rate is saved; there are no fabricated zero costs. Cash entries in a currency other than the trip currency require a deliberate correction.
+- Cash refundable deposits keep their original-currency retained amount and use the same trip-rate estimate if they are partially/fully retained. Pending holds and refunded deposits remain excluded from expense totals.
+- **Data Model 190, IndexedDB schema 3 unchanged.** No bank transactions, accounting transfers, or personal budget entries are automatically created by this feature.
+
 
 ## v1.23.4 — Church giving, reserved cash clarity and annual reporting
 

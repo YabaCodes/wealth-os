@@ -59,6 +59,8 @@ import {
 } from "./activity.js";
 import {
   businessTripCategoryRules,
+  usesTripCashRate,
+  effectiveTwd,
   businessTripPaymentSourcesFor,
   parseCustomCategoryRules,
   projectBudgetSummary,
@@ -111,7 +113,7 @@ let modalDirty = false;
 let homeWeekStart = null,
   homeDay = null;
 let reachedGoals = null; // goals at target after the last load (null until the first load)
-const APP_VERSION = "1.23.4";
+const APP_VERSION = "1.23.4.1";
 const THEME_KEY = "wealthOSTheme";
 // Theme: 'system' follows the phone's light/dark setting. A copy is kept in localStorage so
 // index.html can apply it before the first paint (IndexedDB is too slow for that).
@@ -771,16 +773,16 @@ function projectSettlement(projectId) {
   return state.projectSettlements.find((x) => x.projectId === projectId && !x.deletedAt) || null;
 }
 function projectKnownTwd(projectId) {
-  return projectKnownTwdFromRows(state.projectExpenses, projectId);
+  return projectKnownTwdFromRows(state.projectExpenses, projectId, project(projectId));
 }
 function projectMissingTwd(projectId) {
-  return projectMissingTwdFromRows(state.projectExpenses, projectId);
+  return projectMissingTwdFromRows(state.projectExpenses, projectId, project(projectId));
 }
 function projectPaymentTwd(projectId, method) {
-  return projectPaymentTwdFromRows(state.projectExpenses, projectId, method);
+  return projectPaymentTwdFromRows(state.projectExpenses, projectId, method, project(projectId));
 }
 function projectOriginalTotals(projectId) {
-  return projectOriginalTotalsFromRows(state.projectExpenses, projectId);
+  return projectOriginalTotalsFromRows(state.projectExpenses, projectId, project(projectId));
 }
 function activeSpecialBudgetReserve() {
   return state.projects
@@ -2468,6 +2470,12 @@ function projectPaymentLabel(method) {
   return "Other";
 }
 
+function cashRateLabel(rate) {
+  const n = Number(rate);
+  return Number.isFinite(n) && n > 0
+    ? `NT$${n.toLocaleString("en-US", { maximumFractionDigits: 6 })}`
+    : "Not set";
+}
 function projectPaymentOptions(selected = "") {
   return [
     ["esun_card", "E.SUN Credit Card"],
@@ -2538,6 +2546,7 @@ function projectFormView(p = null, forcedType = null, converting = false) {
       <div class="form-grid"><div class="field"><label>Departure date</label><input name="startDate" type="date" value="${p?.startDate || today()}" required></div><div class="field"><label>Return date</label><input name="endDate" type="date" value="${p?.endDate || ""}" required></div></div>
       <div class="field"><label>Daily allowance (NTD)</label><input name="dailyAllowanceTwd" type="number" min="0" step="1" value="${p?.dailyAllowanceTwd ?? ""}" required><div class="sub">Departure and return together count as one allowance day. The full allowance is paid regardless of flexible spending.</div></div>
       <div class="form-grid"><div class="field"><label>Default trip currency</label><select name="defaultCurrency"><option value="">Select currency</option>${PROJECT_CURRENCIES.map((cur) => `<option value="${cur}" ${cur === (p?.defaultCurrency || "") ? "selected" : ""}>${cur}</option>`).join("")}</select></div><div class="field"><label>Main payment method</label><select name="mainPaymentMethod"><option value="">Select method</option>${projectPaymentOptions(p?.mainPaymentMethod || "")}</select></div></div>
+      <div class="field"><label>Cash exchange rate — NTD per 1 ${esc(p?.defaultCurrency || "trip currency")}</label><input name="cashFxRateTwd" inputmode="decimal" type="number" min="0.000001" step="any" value="${p?.cashFxRateTwd ?? ""}" placeholder="e.g. 36.50 (optional until you use cash)"><div class="sub">One estimated conversion rate for this entire Business Trip. Cash entries use their original currency amounts; E.SUN credit-card and CTBC debit payments always use your exact manually entered bank NTD charge. Changing this rate recalculates cash estimates, not bank charges.</div></div>
       <div class="field"><label>Reimbursement received into</label><select name="reimbursementAccountId"><option value="">Select account</option>${projectReimbursementAccountOptions(p?.reimbursementAccountId || "")}</select></div>
       <div class="field"><label>Trip funding</label><select name="fundingMode"><option value="reimbursement" ${fundingMode === "reimbursement" ? "selected" : ""}>Reimbursement only — no Trip Wallet</option><option value="trip_wallet" ${fundingMode === "trip_wallet" ? "selected" : ""}>Reserve operating cash in a Trip Wallet</option></select></div>
       <div class="field"><label>Trip Wallet allocation (NTD)</label><input name="tripWalletAllocatedTwd" type="number" min="0" step="1" value="${wallet || ""}" placeholder="Required only when Trip Wallet is selected"><div class="sub">A Trip Wallet is a virtual reserve from operating cash; it does not create a fake bank transfer.</div></div>
@@ -2569,12 +2578,17 @@ function projectExpenseFormView(projectId, x = null) {
   const rules = projectCategoryRules(p);
   const selectedCategoryId = preferredProjectEntryCategoryId(rules, x);
   const recordType = x?.recordType || "expense";
+  const isTripCash = p.type === "business_trip" && (x?.paymentMethod || p.mainPaymentMethod) === "cash";
+  const cashRateText = Number(p.cashFxRateTwd) > 0
+    ? `Estimated using 1 ${esc(p.defaultCurrency)} = ${cashRateLabel(p.cashFxRateTwd)} (edit the trip to change this rate).`
+    : "Set one cash exchange rate in Edit Budget to include cash costs in NTD totals and settlement.";
   return `<form id="project-expense-form" data-project="${p.id}">
     <input type="hidden" name="id" value="${x?.id || ""}">
     <div class="notice"><strong>${esc(p.title)}</strong><br>This entry remains isolated from your normal monthly budget until settlement.</div>
     ${p.type === "business_trip" ? `<div class="field" style="margin-top:14px"><label>Entry type</label><select name="recordType"><option value="expense" ${recordType === "expense" ? "selected" : ""}>Expense</option><option value="refundable_deposit" ${recordType === "refundable_deposit" ? "selected" : ""}>Refundable deposit / card hold</option></select><div class="sub">Deposits do not count as spending unless some amount is ultimately retained.</div></div>` : '<input type="hidden" name="recordType" value="expense">'}
     <div class="form-grid" style="margin-top:14px"><div class="field"><label>Original amount</label><input name="originalAmount" type="number" min="0" step="0.01" value="${x?.originalAmount ?? ""}" required></div><div class="field"><label>Currency</label><select name="currency">${PROJECT_CURRENCIES.map((cur2) => `<option value="${cur2}" ${cur2 === cur ? "selected" : ""}>${cur2}</option>`).join("")}</select></div></div>
-    <div class="field"><label>Exact NTD amount</label><input name="twdAmount" type="number" min="0" step="1" value="${x?.twdAmount ?? ""}" placeholder="Exact amount shown in your card/bank app"><div class="sub">This exact NTD value is used for reimbursement and trip totals. If the entry itself is TWD, Wealth OS uses the original amount when this is blank.</div></div>
+    <div class="field" id="project-ntd-field" ${isTripCash ? "hidden" : ""}><label>Exact NTD amount from bank notification</label><input name="twdAmount" type="number" min="0" step="1" value="${x?.twdAmount ?? ""}" placeholder="Manually enter your exact card/debit charge"><div class="sub">For E.SUN Credit Card and CTBC Operating, enter the exact bank amount. For TWD entries, the original NTD amount is used automatically.</div></div>
+    <div class="notice" id="project-cash-rate-note" ${isTripCash ? "" : "hidden"}><strong>Cash payment — no exact NTD entry needed.</strong><br>Enter the amount in ${esc(p.defaultCurrency || "trip currency")}. ${cashRateText} Cash conversion remains an estimate, not a bank-confirmed amount.</div>
     <div class="form-grid"><div class="field"><label>Category</label><select name="categoryId">${rules.map((rule) => `<option value="${rule.id}" ${rule.id === selectedCategoryId ? "selected" : ""}>${esc(rule.name)} · ${rule.treatment === "exact" ? "Exact" : rule.treatment === "flexible" ? "Flexible" : "Tracking"}</option>`).join("")}</select></div><div class="field"><label>Payment method</label><select name="paymentMethod">${projectPaymentOptions(x?.paymentMethod || p.mainPaymentMethod || "esun_card")}</select></div></div>
     <div class="field"><label>Date</label><input name="date" type="date" value="${x?.date || today()}" required></div>
     <div class="field"><label>Description (optional)</label><input name="description" value="${esc(x?.description || "")}"></div>
@@ -2592,7 +2606,10 @@ function depositStatusLabel(x) {
 
 function projectExpenseLine(x, p) {
   const isDeposit = isRefundableDeposit(x);
-  const twd = Number(x.twdAmount) > 0 ? money(x.twdAmount) : '<span class="warn">NTD pending</span>';
+  const counted = effectiveTwd(x, p);
+  const estimated = usesTripCashRate(x, p) && (!isDeposit || depositResolved(x));
+  const twd = counted > 0 ? `${estimated ? "≈" : ""}${money(counted)}${estimated ? " (cash estimate)" : ""}` :
+    (isDeposit && !depositResolved(x) ? "Pending hold" : '<span class="warn">NTD valuation pending</span>');
   const rule = categoryRuleFor(p, x);
   const treatment = x.reimbursementType || rule?.treatment || "tracking";
   const treatmentLabel = treatment === "exact" ? "Exact reimbursement" : treatment === "flexible" ? "Flexible allowance" : "Tracking";
@@ -2651,7 +2668,7 @@ function projectExactTrackerBlock(p, expenses, summary) {
   return '<div class="section-title"><h2>Exact reimbursement</h2><span class="sub">' + money(summary.exact) +
     ' expected back</span></div><section class="card special-budget-tracker">' +
     '<div class="special-budget-tracker-head"><div><div class="metric-label">Exact reimbursable spent</div><div class="metric">' +
-    money(summary.exact) + '</div><div class="sub">Company reimburses the exact NTD amount recorded for each confirmed expense.</div></div>' +
+    money(summary.exact) + '</div><div class="sub">Card/debit expenses use exact bank NTD amounts. Cash expenses use the trip-wide estimated exchange rate; actual reimbursement may differ.</div></div>' +
     '<div class="budget-numbers"><strong>' + money(summary.exact) +
     '</strong><span>expected exact reimbursement</span></div></div>' +
     (rows.length ? projectCompositionChart(rows, null, "Exact reimbursement category composition") :
@@ -2725,15 +2742,16 @@ function projectDetailView(projectId) {
   }
 
   const paymentSources = p.type === "business_trip"
-    ? businessTripPaymentSourcesFor(expenses, settlement) : null;
+    ? businessTripPaymentSourcesFor(expenses, settlement, p) : null;
   const sourceBlock = paymentSources ? (() => {
     const sources = paymentSources.rows;
     const segments = sources.filter((x) => x.amount > 0)
       .map((x) => `<span class="trip-payment-segment trip-payment-${esc(x.id)}" style="width:${x.percentage.toFixed(4)}%" aria-hidden="true"></span>`).join("");
     const rows = sources.map((x) => `<div class="trip-payment-row" data-payment-source="${esc(x.id)}">
       <span class="trip-payment-source-name"><i class="trip-payment-dot trip-payment-${esc(x.id)}" aria-hidden="true"></i>${esc(x.name)}</span>
-      <strong>${privateMoney(x.amount)}</strong>
+      <strong>${x.estimatedCount ? "≈" : ""}${privateMoney(x.amount)}</strong>
       <span class="trip-payment-share">${x.percentage.toFixed(1)}%</span>
+      ${x.estimatedCount ? `<span class="trip-payment-unknown">${x.estimatedCount} cash amount${x.estimatedCount === 1 ? "" : "s"} converted at the trip-wide estimated rate</span>` : ""}
       ${x.unknownTwdCount ? `<span class="trip-payment-unknown">${x.unknownTwdCount} amount${x.unknownTwdCount === 1 ? "" : "s"} pending NTD conversion</span>` : ""}
     </div>`).join("");
     const reimbursementAccount = settlement?.reimbursementAccountId || p.reimbursementAccountId;
@@ -2749,17 +2767,18 @@ function projectDetailView(projectId) {
         : "Card funding estimate only. The trip reimbursement destination is not confirmed as CTBC; verify which account should fund E.SUN before transferring.";
     return `<div class="section-title"><h2>Payment sources</h2><span class="sub">How trip expenses were paid</span></div>
       <section class="card trip-payment-card" id="trip-payment-sources">
-        <div class="split trip-payment-heading"><div><div class="metric-label">Recorded trip costs by payment source</div>
+        <div class="split trip-payment-heading"><div><div class="metric-label">Recorded trip costs by payment source${paymentSources.estimatedCashCount ? " (includes cash estimates)" : ""}</div>
           <strong class="trip-payment-total">${privateMoney(paymentSources.total)}</strong></div>
           <span class="tag">Expenses only</span></div>
         ${segments ? `<div class="trip-payment-bar" role="img" aria-label="Breakdown of recorded trip expense payment sources">${segments}</div>`
           : '<div class="sub" style="margin-top:12px">No valued trip expenses recorded yet.</div>'}
         <div class="trip-payment-list">${rows}</div>
+        <p class="sub">${Number(p.cashFxRateTwd) > 0 ? `Cash rate: 1 ${esc(p.defaultCurrency)} ≈ ${cashRateLabel(p.cashFxRateTwd)} · estimated NTD for foreign-currency cash spending.` : "No trip-wide cash rate saved. Foreign-currency cash expenses cannot be included in NTD totals until the rate is entered."} Card and CTBC amounts are manually recorded exact bank charges, never converted at the cash rate.</p>
         <div class="trip-payment-funding">
           <div class="metric-label">${fundingLabel}</div>
           <strong class="trip-payment-card-target">${privateMoney(card)}</strong>
           <p class="sub">${fundingText}</p>
-          ${paymentSources.unvalued ? `<p class="trip-payment-warning">${paymentSources.unvalued} expense${paymentSources.unvalued === 1 ? " still needs" : "s still need"} an exact NTD value. Totals and card funding estimates are incomplete.</p>` : ""}
+          ${paymentSources.unvalued ? `<p class="trip-payment-warning">${paymentSources.unvalued} expense${paymentSources.unvalued === 1 ? " still needs" : "s still need"} an NTD valuation (exact bank amount or trip cash rate). Totals may be incomplete.</p>` : ""}
           ${paymentSources.pendingHolds ? `<p class="trip-payment-warning">${paymentSources.pendingHolds} unresolved refundable hold${paymentSources.pendingHolds === 1 ? "" : "s"}: ${privateMoney(paymentSources.pendingHoldTwd)} in known NTD holds, shown separately and excluded from trip expense totals. Verify whether any authorization posted to the card before calculating actual payment due.</p>` : ""}
           <p class="sub">This is trip-related card spending, not the card's full statement balance or proof of reimbursement. It does not subtract partial funding already transferred. No bank transfer or card payment is created here.</p>
         </div>
@@ -2798,10 +2817,13 @@ function projectDepositResolveView(projectId, expenseId) {
   if (!p || !x || !isRefundableDeposit(x)) return '<div class="empty">Deposit not found.</div>';
   const rules = projectCategoryRules(p);
   const selected = x.categoryId || "car_rental";
+  const cashRateDeposit = p.type === "business_trip" && x.paymentMethod === "cash" && (x.cashRateMode === "trip" || usesTripCashRate(x, p));
   return `<form id="project-deposit-form" data-project="${projectId}" data-id="${expenseId}">
     <div class="notice"><strong>${esc(x.description || x.category || "Refundable deposit")}</strong><br>Original hold: ${esc(formatOriginal(x.originalAmount, x.currency))} · ${Number(x.twdAmount) > 0 ? money(x.twdAmount) : "NTD pending"}.</div>
     <div class="field" style="margin-top:14px"><label>Refund outcome</label><select name="depositStatus"><option value="pending" ${!depositResolved(x) ? "selected" : ""}>Still pending</option><option value="refunded" ${x.depositStatus === "refunded" ? "selected" : ""}>Fully refunded / authorization released</option><option value="partial" ${x.depositStatus === "partial" ? "selected" : ""}>Partially refunded</option><option value="retained" ${x.depositStatus === "retained" ? "selected" : ""}>Not refunded</option></select></div>
-    <div class="field"><label>Amount retained (NTD)</label><input name="retainedTwd" type="number" min="0" step="1" value="${x.retainedTwd ?? ""}" placeholder="Required for partial or not refunded"></div>
+    ${cashRateDeposit
+      ? `<div class="field"><label>Amount retained (${esc(x.currency)})</label><input name="retainedOriginalAmount" type="number" min="0" max="${Number(x.originalAmount || 0)}" step="0.01" value="${x.retainedOriginalAmount ?? ""}" placeholder="The actual cash amount that was not refunded"><div class="sub">Estimated NTD uses the same Business Trip cash rate; no exact bank charge is needed.</div></div>`
+      : `<div class="field"><label>Amount retained (NTD)</label><input name="retainedTwd" type="number" min="0" step="1" value="${x.retainedTwd ?? ""}" placeholder="Required for partial or not refunded"></div>`}
     <div class="field"><label>If money was retained, classify it as</label><select name="categoryId">${rules.map((rule) => `<option value="${rule.id}" ${rule.id === selected ? "selected" : ""}>${esc(rule.name)} · ${rule.treatment === "exact" ? "Exact" : rule.treatment === "flexible" ? "Flexible" : "Tracking"}</option>`).join("")}</select></div>
     <button class="btn" style="width:100%">Save Deposit Status</button>
   </form>`;
@@ -4934,7 +4956,9 @@ async function saveProject(form) {
       dailyAllowanceTwd = Number(fd.get("dailyAllowanceTwd")),
       defaultCurrency = String(fd.get("defaultCurrency") || ""),
       mainPaymentMethod = String(fd.get("mainPaymentMethod") || ""),
-      reimbursementAccountId = String(fd.get("reimbursementAccountId") || "");
+      reimbursementAccountId = String(fd.get("reimbursementAccountId") || ""),
+      rawCashRate = String(fd.get("cashFxRateTwd") || "").trim(),
+      cashFxRateTwd = rawCashRate === "" ? null : Number(rawCashRate);
     if (!destination) throw new Error("Enter the trip destination.");
     if (!purpose) throw new Error("Enter the business purpose.");
     if (!startDate || !endDate) throw new Error("Enter both departure and return dates.");
@@ -4943,6 +4967,10 @@ async function saveProject(form) {
     if (!defaultCurrency) throw new Error("Select the default trip currency.");
     if (!mainPaymentMethod) throw new Error("Select the main payment method.");
     if (!reimbursementAccountId) throw new Error("Select where reimbursement will be received.");
+    if (rawCashRate && (!Number.isFinite(cashFxRateTwd) || !(cashFxRateTwd > 0)))
+      throw new Error("Enter a valid positive cash exchange rate in NTD per 1 trip-currency unit.");
+    if (existing && existing.defaultCurrency !== defaultCurrency && state.projectExpenses.some((x) => x.projectId === id && !x.deletedAt && x.paymentMethod === "cash" && x.cashRateMode === "trip"))
+      throw new Error("Cannot change the trip currency while rate-based cash expenses exist. Keep the original trip currency.");
     categoryRules = businessTripCategoryRules();
     Object.assign(obj, {
       destination,
@@ -4953,6 +4981,7 @@ async function saveProject(form) {
       defaultCurrency,
       mainPaymentMethod,
       reimbursementAccountId,
+      cashFxRateTwd,
     });
   } else {
     categoryRules = parseCustomCategoryRules({
@@ -5013,11 +5042,18 @@ async function saveProjectExpense(form) {
   if (!(originalAmount > 0)) throw new Error("Enter an amount greater than zero.");
   if (!rule) throw new Error("Select an expense category.");
 
-  let raw = String(fd.get("twdAmount") ?? "").trim(),
-    twdAmount = raw === "" ? null : Number(raw);
-  if (currency === "TWD" && (twdAmount === null || !Number.isFinite(twdAmount))) twdAmount = originalAmount;
+  const paymentMethod = String(fd.get("paymentMethod") || p.mainPaymentMethod || "esun_card");
+  const cash = p.type === "business_trip" && paymentMethod === "cash";
+  const bank = p.type === "business_trip" && ["esun_card", "ctbc"].includes(paymentMethod);
+  const raw = cash ? "" : String(fd.get("twdAmount") ?? "").trim();
+  let twdAmount = raw === "" ? null : Number(raw);
+  if (!cash && currency === "TWD" && twdAmount === null) twdAmount = originalAmount;
   if (twdAmount !== null && (!(twdAmount > 0) || !Number.isFinite(twdAmount)))
-    throw new Error("Enter a valid exact NTD amount or leave it blank while traveling.");
+    throw new Error("Enter a positive NTD amount or leave it blank where allowed.");
+  if (cash && currency !== "TWD" && currency !== p.defaultCurrency)
+    throw new Error(`Cash expenses must use the trip currency (${p.defaultCurrency}), or TWD. The one trip rate cannot convert other currencies.`);
+  if (bank && recordType === "expense" && !(twdAmount > 0))
+    throw new Error("Enter the exact NTD charge shown by your bank for E.SUN credit-card or CTBC debit payments.");
 
   const id = fd.get("id") || uid("pexp"),
     old = state.projectExpenses.find((x) => x.id === id),
@@ -5036,7 +5072,8 @@ async function saveProjectExpense(form) {
     originalAmount,
     currency,
     twdAmount,
-    paymentMethod: fd.get("paymentMethod") || p.mainPaymentMethod || "esun_card",
+    cashRateMode: cash ? "trip" : null,
+    paymentMethod,
     createdAt: old?.createdAt || stamp,
     updatedAt: stamp,
   };
@@ -5072,18 +5109,31 @@ async function saveProjectDeposit(form) {
   let retainedTwd = null,
     retainedOriginalAmount = null;
   if (["partial", "retained"].includes(status)) {
-    retainedTwd = Number(fd.get("retainedTwd"));
-    if (!(retainedTwd > 0) || !Number.isFinite(retainedTwd))
-      throw new Error("Enter the NTD amount that was retained.");
-    if (Number(x.twdAmount) > 0 && retainedTwd > Number(x.twdAmount) + 0.5)
-      throw new Error("The retained amount cannot exceed the original deposit hold.");
+    const rateBasedCash = p.type === "business_trip" && x.paymentMethod === "cash" && (x.cashRateMode === "trip" || usesTripCashRate(x, p));
+    if (rateBasedCash) {
+      retainedOriginalAmount = Number(fd.get("retainedOriginalAmount"));
+      if (!(retainedOriginalAmount > 0) || !Number.isFinite(retainedOriginalAmount) ||
+        retainedOriginalAmount > Number(x.originalAmount || 0) + 0.005)
+        throw new Error("Enter a retained amount in the original cash currency, up to the original deposit.");
+      if (x.currency !== "TWD" && x.currency !== p.defaultCurrency)
+        throw new Error("Cash deposit currency must match the trip currency to use its exchange rate.");
+      // No exact bank charge exists for a cash hold. The project rate supplies a
+      // derived NTD value without touching an actual card or account record.
+      retainedTwd = null;
+    } else {
+      retainedTwd = Number(fd.get("retainedTwd"));
+      if (!(retainedTwd > 0) || !Number.isFinite(retainedTwd))
+        throw new Error("Enter the NTD amount that was retained.");
+      if (Number(x.twdAmount) > 0 && retainedTwd > Number(x.twdAmount) + 0.5)
+        throw new Error("The retained amount cannot exceed the original deposit hold.");
+      retainedOriginalAmount =
+        Number(x.twdAmount) > 0
+          ? Number(x.originalAmount || 0) * (retainedTwd / Number(x.twdAmount))
+          : x.currency === "TWD"
+            ? retainedTwd
+            : null;
+    }
     if (!rule) throw new Error("Choose how the retained amount should be classified.");
-    retainedOriginalAmount =
-      Number(x.twdAmount) > 0
-        ? Number(x.originalAmount || 0) * (retainedTwd / Number(x.twdAmount))
-        : x.currency === "TWD"
-          ? retainedTwd
-          : null;
   }
   await put("projectExpenses", {
     ...x,
@@ -5130,7 +5180,7 @@ async function saveProjectSettlement(form) {
     throw new Error(`${pendingDeposits.length} refundable deposit${pendingDeposits.length === 1 ? " is" : "s are"} still unresolved.`);
   if (missing.length)
     throw new Error(
-      `${missing.length} project expense${missing.length === 1 ? " still needs" : "s still need"} an exact NTD amount.`,
+      `${missing.length} project expense${missing.length === 1 ? " still needs" : "s still need"} an NTD valuation (bank charge or cash rate).`,
     );
 
   const total = Math.round(projectKnownTwd(projectId)),
@@ -6173,11 +6223,31 @@ function bind() {
       saveProject(prf).catch(showError);
     };
   const pef = document.querySelector("#project-expense-form");
-  if (pef)
+  if (pef) {
     pef.onsubmit = (e) => {
       e.preventDefault();
       saveProjectExpense(pef).catch(showError);
     };
+    const method = pef.querySelector('[name="paymentMethod"]');
+    const recordType = pef.querySelector('[name="recordType"]');
+    const currency = pef.querySelector('[name="currency"]');
+    const amount = pef.querySelector('[name="twdAmount"]');
+    const exactField = pef.querySelector("#project-ntd-field");
+    const cashNote = pef.querySelector("#project-cash-rate-note");
+    const trip = project(pef.dataset.project);
+    const updatePaymentField = () => {
+      const cash = trip?.type === "business_trip" && method?.value === "cash";
+      const bank = trip?.type === "business_trip" && ["esun_card", "ctbc"].includes(method?.value);
+      if (exactField) exactField.hidden = !!cash;
+      if (cashNote) cashNote.hidden = !cash;
+      if (amount) {
+        amount.disabled = !!cash;
+        amount.required = !!bank && recordType?.value !== "refundable_deposit" && currency?.value !== "TWD";
+      }
+    };
+    [method, recordType, currency].forEach((x) => { if (x) x.addEventListener("change", updatePaymentField); });
+    updatePaymentField();
+  }
   const pdf = document.querySelector("#project-deposit-form");
   if (pdf)
     pdf.onsubmit = (e) => {

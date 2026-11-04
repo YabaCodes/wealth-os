@@ -887,6 +887,6 @@ test("Business Trip cash without a rate never invents NTD and settlement stays g
   await expect.poll(async () => (await readBrowserStore(page, "projectExpenses")).length).toBe(1);
   await expect(page.locator("#trip-payment-sources")).toContainText("No trip-wide cash rate saved");
   await expect(page.locator("#trip-payment-sources")).toContainText("NTD valuation");
-  await page.locator('[data-action="settle-project"]').click();
-  await expect(page.locator('[role="dialog"]')).toContainText("exact NTD amount");
+  await expect(page.locator('[data-action="settle-project"]')).toBeDisabled();
+  await expect(page.locator("#trip-payment-sources")).toContainText("an NTD valuation");
 });

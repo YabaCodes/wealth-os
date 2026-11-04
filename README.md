@@ -10,7 +10,7 @@
 - Uses existing IndexedDB stores and financial model version 190. No historical records or savings balances are rewritten by the release. App metadata and offline cache move together to v1.23.4.
 - Browser checks cover payment ledger effects, spending isolation, persistence, overpayment prevention, and CTBC reserve interpretation.
 
-**Dependency:** This is a stacked draft review based on the open v1.23.2 / v1.23.3 parent branch (PR #30). Merge the parent first, then retarget this PR to main. CI and physical iPhone testing are required prior to acceptance; no automatic merge.
+**Release status:** v1.23.4 promoted to `main` by PR #33 on 2026-11-01; six physical iPhone acceptance checks reported **PASS** by the user on 2026-11-04. See [release acceptance record](docs/RELEASE_ACCEPTANCE_v1.23.4.md).
 
 ## v1.23.3 — Business Trip payment sources and E.SUN card-funding guide
 
@@ -23,7 +23,7 @@
 - Unit and Playwright desktop/mobile browser tests verify mixed payment sources, pending/refunded/partially retained holds, missing conversions, CTBC guidance, confirmed funding labels, display privacy and financial data immutability.
 - **Financial Data Model 190** and **IndexedDB schema 3** unchanged. App identity and PWA cache version updated to **v1.23.3**.
 
-**Dependency:** v1.23.2 (Quick Insights) is a separate open PR. This revision is stacked on v1.23.2 and must be merged only after v1.23.2 passes its manual merge/iPhone acceptance process.
+**Release status:** v1.23.3 was incorporated into PR #30 and promoted to `main` on 2026-11-01. Its user-facing Business Trip checks were included in the combined v1.23.4 physical iPhone acceptance.
 
 
 

@@ -173,7 +173,7 @@ For v1.20.3, checks covered version/data model, Wealth balances/reconciliation, 
 
 ## v1.23.2 — Monthly Review Quick Insights
 
-**Status: implementation under review; physical iPhone acceptance pending.**
+**Status: released in PR #30 (merged to main 2026-11-01); included in the user's combined v1.23.4 six-check physical iPhone acceptance (PASS, 2026-11-04).**
 
 - Add a compact **Home spending preview** for the top two flexible/unplanned personal expense categories for the currently selected funding month, excluding fixed obligations from the preview only.
 - Add a one-tap **See spending drivers** shortcut on Home and **Spending Drivers** shortcut on Budget; opening the existing Monthly Financial Review should position/focus the Spending drivers section, while ordinary Monthly Financial Review access remains at its top.
@@ -182,13 +182,38 @@ For v1.20.3, checks covered version/data model, Wealth balances/reconciliation, 
 
 ## v1.23.3 — Business Trip Payment Sources and Credit-Card Funding
 
-**Status: in review; depends on v1.23.2 merge and physical iPhone acceptance.**
+**Status: released through PR #31 (stacked) and PR #30 (merged to main 2026-11-01); included in the user's combined v1.23.4 six-check physical iPhone acceptance (PASS, 2026-11-04).**
 
 - A payment-source composition bar and amounts for E.SUN Credit Card, CTBC Operating, Cash, Other and legacy Trip Wallet on each Business Trip.
 - A read-only **CTBC → E.SUN** card-funding planning amount based on recorded trip card-paid costs, distinct from the full credit-card statement balance and any manually funded partial transfers.
 - Pending refundable holds shown separately from counted trip costs; retained deposit amounts counted only after resolution, and missing NTD conversions clearly disclosed.
 - Preserve the existing settled project's manual card-clearing confirmation; never claim bank payment is verified.
 - Pure deterministic tests and desktop/mobile Playwright synthetic trip tests. No transfers, category reclassification or account postings; Data Model 190, IndexedDB schema 3.
+
+## v1.23.4 — Church Giving & Cash Clarity
+
+**Status: released to main through PR #33 (2026-11-01); six physical iPhone acceptance checks PASS, confirmed by user 2026-11-04.**
+
+- Distinguish income-to-Tithe allocations from actual payments to church. A recorded E.SUN church payment reduces the physical E.SUN account and virtual Tithe bucket equally.
+- Keep church giving outside ordinary personal budget consumption while showing the actual payment in Activity and annual giving totals. Prevent overpayment beyond tracked E.SUN cash or Tithe balance; retain existing locked-month safety.
+- Present CTBC unreserved cash after the Electricity Reserve and active Trip Wallet reserve; label it carefully as **not** guaranteed spendable after pending fixed bills and personal flexible spending.
+- Preserve previously completed v1.23.2 Quick Insights and v1.23.3 Business Trip payment-source composition and E.SUN card-funding guidance.
+- No financial model or IndexedDB upgrade: Data Model 190 / schema 3.
+- Acceptance evidence: user's explicit all-six iPhone PASS declaration, documented in [v1.23.4 acceptance record](RELEASE_ACCEPTANCE_v1.23.4.md). Automated tests passed separately; personal device validation is user-attested, not remotely inspected.
+
+## Proposed v1.23.5 — Unified Cash & Allocation Overview
+
+**Status: recommended next milestone; not implemented or approved for merge.**
+
+**Goal:** remove manual mental reconciliation across CTBC Operating and E.SUN without merging bank accounts or changing allocations. One read-only cash picture with drill-down to the existing Wealth/account screens.
+
+- **Physical balance layer:** show tracked CTBC, E.SUN and Cash Wallet balances separately, plus the sum of those **physical cash holdings**. Never add virtual buckets on top of the underlying bank cash or mix investment assets into the cash total.
+- **Purpose layer:** for each bank, show a 100% composition bar for known allocations/reserves (E.SUN Tithe, Emergency, saved goals/sinking funds; CTBC Electricity and active Trip Wallet), plus genuinely unassigned/unreserved remainder. Explicitly display overallocated or unassigned differences instead of forcing the bar to 100%.
+- **Usability layer:** label CTBC available *before future spending obligations* separately from planned monthly spend. Do not call an amount “free to spend” unless future fixed/flexible obligations and available bank cash have been reconciled without double counting. Keep outstanding E.SUN card costs/Business Trip funding guidance as a separate liability/planning context—not a hidden debit or proof of bank repayment.
+- Reuse the existing shared reconciliation projections, funding period and privacy rules. Always show whether bank figures are verified or ledger-estimated; missing checks must not masquerade as confirmed bank balances.
+- Offer compact mobile overview with accessible legends, currency amounts, and a route to the relevant existing account details. Maintain readable Dark/Light modes and privacy masking.
+- **Safety:** read-only projections; no new transfer, posting, automatic fund movement, data migration, IndexedDB schema change, or adjustment of closed-month snapshots.
+- **Release gate:** deterministic tests for physical-vs-purpose reconciliation, missing/overallocated buckets, unverified bank figures, and card-funding non-duplication, plus desktop/mobile browser checks and six physical iPhone acceptance checks after manual PR merge.
 
 ### Later candidates (not committed)
 

@@ -115,27 +115,54 @@ export function depositResolved(expense) {
   return ["refunded", "partial", "retained"].includes(expense.depositStatus);
 }
 
-export function effectiveTwd(expense) {
+// v1.23.4.1: a single saved rate (NTD per one unit of the trip's default currency)
+// converts cash costs for reporting. It is never a bank-confirmed card charge.
+// Legacy cash entries with an explicit NTD amount remain unchanged until edited.
+export function usesTripCashRate(expense, project = null) {
+  if (!expense || expense.deletedAt || project?.type !== "business_trip" || expense.paymentMethod !== "cash")
+    return false;
+  if (expense.currency === "TWD") return false; // already expressed in NTD
+  const stored = Number(expense.twdAmount);
+  return expense.cashRateMode === "trip" || !(Number.isFinite(stored) && stored > 0);
+}
+
+export function tripCashEstimateTwd(amount, currency, project) {
+  const value = Number(amount);
+  if (!(value > 0) || !Number.isFinite(value)) return 0;
+  if (currency === "TWD") return Math.round(value);
+  if (!project || currency !== project.defaultCurrency) return 0;
+  const rate = Number(project.cashFxRateTwd);
+  if (!(rate > 0) || !Number.isFinite(rate)) return 0;
+  return Math.round(value * rate);
+}
+
+export function effectiveTwd(expense, project = null) {
   if (!expense || expense.deletedAt) return 0;
   if (!isRefundableDeposit(expense)) {
+    if (expense.paymentMethod === "cash" && project?.type === "business_trip") {
+      if (expense.currency === "TWD") return Math.round(Number(expense.originalAmount || 0));
+      if (usesTripCashRate(expense, project))
+        return tripCashEstimateTwd(expense.originalAmount, expense.currency, project);
+    }
     const n = Number(expense.twdAmount);
     return Number.isFinite(n) && n > 0 ? n : 0;
   }
   if (!depositResolved(expense) || expense.depositStatus === "refunded") return 0;
+  if (expense.paymentMethod === "cash" && project?.type === "business_trip") {
+    if (expense.currency === "TWD" && Number(expense.retainedOriginalAmount) > 0)
+      return Math.round(Number(expense.retainedOriginalAmount));
+    if (usesTripCashRate(expense, project) && Number(expense.retainedOriginalAmount) > 0)
+      return tripCashEstimateTwd(expense.retainedOriginalAmount, expense.currency, project);
+  }
   const n = Number(expense.retainedTwd);
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
-export function missingTwd(expense) {
+export function missingTwd(expense, project = null) {
   if (!expense || expense.deletedAt) return false;
-  if (isRefundableDeposit(expense)) {
-    if (!depositResolved(expense)) return false;
-    if (expense.depositStatus === "refunded") return false;
-    const n = Number(expense.retainedTwd);
-    return !(Number.isFinite(n) && n > 0);
-  }
-  const n = Number(expense.twdAmount);
-  return !(Number.isFinite(n) && n > 0);
+  if (isRefundableDeposit(expense) && (!depositResolved(expense) || expense.depositStatus === "refunded"))
+    return false;
+  return !(effectiveTwd(expense, project) > 0);
 }
 
 export function unresolvedDeposits(expenses) {
@@ -165,7 +192,7 @@ export function projectCategoryBreakdown(project, expenses, treatment) {
       amount: 0,
       count: 0,
     };
-    current.amount += effectiveTwd(expense);
+    current.amount += effectiveTwd(expense, project);
     current.count += 1;
     totals.set(id, current);
   }
@@ -223,7 +250,7 @@ export function projectBudgetSummary(project, expenses, currentDate) {
       if (Number.isFinite(hold) && hold > 0) depositsPendingTwd += hold;
       continue;
     }
-    const amount = effectiveTwd(x);
+    const amount = effectiveTwd(x, project);
     const rule = categoryRuleFor(project, x);
     const treatment = x.reimbursementType || rule?.treatment || "tracking";
     if (treatment === "exact") exact += amount;
@@ -361,7 +388,7 @@ export function parseCustomCategoryRules({ exact = "", flexible = "", tracking =
  * Pending refundable card holds are NOT posted spending and are shown separately.
  * Partial deposits contribute only their recorded retained NTD amount.
  */
-export function businessTripPaymentSourcesFor(expenses = [], settlement = null) {
+export function businessTripPaymentSourcesFor(expenses = [], settlement = null, project = null) {
   const methods = [
     { id: "esun_card", name: "E.SUN Credit Card" },
     { id: "ctbc", name: "CTBC Operating" },
@@ -370,7 +397,7 @@ export function businessTripPaymentSourcesFor(expenses = [], settlement = null) 
     { id: "trip_wallet", name: "Trip Wallet" },
   ];
   const rows = methods.map((method) => ({
-    ...method, amount: 0, count: 0, unknownTwdCount: 0,
+    ...method, amount: 0, count: 0, unknownTwdCount: 0, estimatedTwd: 0, estimatedCount: 0,
     pendingHoldTwd: 0, pendingHoldCount: 0, percentage: 0,
   }));
   const byMethod = new Map(rows.map((x) => [x.id, x]));
@@ -389,15 +416,19 @@ export function businessTripPaymentSourcesFor(expenses = [], settlement = null) 
       continue;
     }
     if (isRefundableDeposit(entry) && entry.depositStatus === "refunded") continue;
-    if (missingTwd(entry)) {
+    if (missingTwd(entry, project)) {
       row.unknownTwdCount++;
       unvalued++;
       continue;
     }
-    const amount = effectiveTwd(entry);
+    const amount = effectiveTwd(entry, project);
     if (amount <= 0) continue;
     row.amount += amount;
     row.count++;
+    if (usesTripCashRate(entry, project)) {
+      row.estimatedTwd += amount;
+      row.estimatedCount++;
+    }
   }
   const total = rows.reduce((sum, x) => sum + x.amount, 0);
   for (const row of rows) row.percentage = total > 0 ? row.amount / total * 100 : 0;
@@ -410,6 +441,8 @@ export function businessTripPaymentSourcesFor(expenses = [], settlement = null) 
     rows: rows.filter((x) => x.id !== "trip_wallet" ||
       x.amount > 0 || x.unknownTwdCount > 0 || x.pendingHoldCount > 0),
     total, unvalued, pendingHolds, pendingHoldTwd,
+    estimatedCashTwd: byMethod.get("cash").estimatedTwd,
+    estimatedCashCount: byMethod.get("cash").estimatedCount,
     cardKnownTwd: card,
     cardFundingMarked: !!settlement?.cardClearingConfirmed,
   };

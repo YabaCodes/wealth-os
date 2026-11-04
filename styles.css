@@ -4666,3 +4666,6 @@ html[data-theme="dark"] .trip-payment-trip_wallet { background:#ec94ac; }
 .giving-card .giving-cta { width: 100%; margin-top: 12px; }
 .giving-card .sub, .giving-impact .sub { line-height: 1.5; }
 .giving-live-preview { margin-top: 12px; }
+
+/* v1.23.4.1: payment-method-aware Business Trip form fields. */
+#project-ntd-field[hidden], #project-cash-rate-note[hidden] { display: none !important; }

@@ -8,7 +8,7 @@ import {
 test("navigation, Settings release identity and actual expense form persist through reload", async ({ page }) => {
   await seedSyntheticBrowser(page);
   await page.locator('[data-action="settings"]').first().click();
-  await expect(page.locator('[role="dialog"]')).toContainText("Wealth OS v1.23.4");
+  await expect(page.locator('[role="dialog"]')).toContainText("Wealth OS v1.23.4.1");
   await expect(page.locator('[role="dialog"]')).toContainText("Data model 190");
   await page.locator('[data-action="close-modal"]').click();
 
@@ -828,4 +828,65 @@ test("CTBC unreserved clarity deducts both virtual electricity and active trip w
   await expect(section).toContainText("Unreserved CTBC cash");
   await expect(section).toContainText("NT$1,000");
   await expect(section).toContainText("Upcoming bills and flexible budgets are not deducted");
+});
+
+test("Business Trip cash uses one trip rate while E.SUN and CTBC use entered bank NTD charges", async ({ page }) => {
+  await seedSyntheticBrowser(page, { trip: { ...testTrip(), cashFxRateTwd: 36.4 } });
+  await page.locator('nav [data-tab="transactions"]').click();
+  await page.locator('[data-action="open-projects"]').first().click();
+  await page.locator('[role="dialog"] [data-action="open-project"][data-id="synthetic-trip"]').click();
+
+  await page.locator('[data-action="add-project-expense"]').click();
+  const f = page.locator("#project-expense-form");
+  await f.locator('[name="originalAmount"]').fill("10");
+  await f.locator('[name="paymentMethod"]').selectOption("cash");
+  await expect(f.locator("#project-ntd-field")).toBeHidden();
+  await expect(f.locator("#project-cash-rate-note")).toContainText("no exact NTD entry needed");
+  await f.locator('button.btn').last().click();
+  await expect.poll(async () => (await readBrowserStore(page, "projectExpenses")).length).toBe(1);
+  const cash = (await readBrowserStore(page, "projectExpenses"))[0];
+  expect(cash).toMatchObject({ paymentMethod: "cash", originalAmount: 10, currency: "EUR", twdAmount: null, cashRateMode: "trip" });
+  await expect(page.locator('[data-payment-source="cash"]')).toContainText("NT$364");
+  await expect(page.locator('[data-payment-source="cash"]')).toContainText("converted at the trip-wide estimated rate");
+
+  await page.locator('[data-action="add-project-expense"]').click();
+  await f.locator('[name="paymentMethod"]').selectOption("esun_card");
+  await f.locator('[name="originalAmount"]').fill("20");
+  await expect(f.locator("#project-ntd-field")).toBeVisible();
+  await expect(f.locator('[name="twdAmount"]')).toHaveAttribute("required", "");
+  await f.locator('[name="twdAmount"]').fill("750");
+  await f.locator('button.btn').last().click();
+  await expect.poll(async () => (await readBrowserStore(page, "projectExpenses")).length).toBe(2);
+  await expect(page.locator('[data-payment-source="esun_card"]')).toContainText("NT$750");
+  await expect(page.locator(".trip-payment-total")).toContainText("NT$1,114");
+  await expect(page.locator(".trip-payment-card-target")).toContainText("NT$750");
+
+  await page.locator('[data-action="edit-project"][data-id="synthetic-trip"]').click();
+  const budget = page.locator("#project-form");
+  await expect(budget.locator('[name="cashFxRateTwd"]')).toHaveValue("36.4");
+  await budget.locator('[name="cashFxRateTwd"]').fill("37");
+  await budget.locator('button.btn').last().click();
+  await expect(page.locator('[data-payment-source="cash"]')).toContainText("NT$370");
+  await expect(page.locator('[data-payment-source="esun_card"]')).toContainText("NT$750");
+  await expect(page.locator(".trip-payment-total")).toContainText("NT$1,120");
+  const unchanged = (await readBrowserStore(page, "projectExpenses"));
+  expect(unchanged.find((x) => x.paymentMethod === "cash").twdAmount).toBeNull();
+  expect(unchanged.find((x) => x.paymentMethod === "esun_card").twdAmount).toBe(750);
+});
+
+test("Business Trip cash without a rate never invents NTD and settlement stays gated", async ({ page }) => {
+  await seedSyntheticBrowser(page, { trip: testTrip() });
+  await page.locator('nav [data-tab="transactions"]').click();
+  await page.locator('[data-action="open-projects"]').first().click();
+  await page.locator('[role="dialog"] [data-action="open-project"][data-id="synthetic-trip"]').click();
+  await page.locator('[data-action="add-project-expense"]').click();
+  const f = page.locator("#project-expense-form");
+  await f.locator('[name="paymentMethod"]').selectOption("cash");
+  await f.locator('[name="originalAmount"]').fill("12");
+  await f.locator('button.btn').last().click();
+  await expect.poll(async () => (await readBrowserStore(page, "projectExpenses")).length).toBe(1);
+  await expect(page.locator("#trip-payment-sources")).toContainText("No trip-wide cash rate saved");
+  await expect(page.locator("#trip-payment-sources")).toContainText("NTD valuation");
+  await page.locator('[data-action="settle-project"]').click();
+  await expect(page.locator('[role="dialog"]')).toContainText("exact NTD amount");
 });

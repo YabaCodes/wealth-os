@@ -728,7 +728,7 @@ test("Business Trip payment-source mix explains CTBC-to-E.SUN funding, excludes 
   await expect(sources.locator(".trip-payment-card-target")).toContainText("NT$10,000");
   await expect(sources).toContainText("CTBC → E.SUN");
   await expect(sources).toContainText("NT$7,000");
-  await expect(sources).toContainText("1 expense still needs an exact NTD value");
+  await expect(sources).toContainText("1 expense still needs an NTD valuation");
   await expect(sources.locator(".trip-payment-segment")).toHaveCount(4);
   await expect(sources).not.toContainText("NT$19,300");
   const after=await page.evaluate(async()=> (await import("/js/db.js")).exportData());

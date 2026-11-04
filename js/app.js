@@ -2470,6 +2470,12 @@ function projectPaymentLabel(method) {
   return "Other";
 }
 
+function cashRateLabel(rate) {
+  const n = Number(rate);
+  return Number.isFinite(n) && n > 0
+    ? `NT$${n.toLocaleString("en-US", { maximumFractionDigits: 6 })}`
+    : "Not set";
+}
 function projectPaymentOptions(selected = "") {
   return [
     ["esun_card", "E.SUN Credit Card"],
@@ -2574,7 +2580,7 @@ function projectExpenseFormView(projectId, x = null) {
   const recordType = x?.recordType || "expense";
   const isTripCash = p.type === "business_trip" && (x?.paymentMethod || p.mainPaymentMethod) === "cash";
   const cashRateText = Number(p.cashFxRateTwd) > 0
-    ? `Estimated using 1 ${esc(p.defaultCurrency)} = ${money(p.cashFxRateTwd)} (edit the trip to change this rate).`
+    ? `Estimated using 1 ${esc(p.defaultCurrency)} = ${cashRateLabel(p.cashFxRateTwd)} (edit the trip to change this rate).`
     : "Set one cash exchange rate in Edit Budget to include cash costs in NTD totals and settlement.";
   return `<form id="project-expense-form" data-project="${p.id}">
     <input type="hidden" name="id" value="${x?.id || ""}">
@@ -2767,7 +2773,7 @@ function projectDetailView(projectId) {
         ${segments ? `<div class="trip-payment-bar" role="img" aria-label="Breakdown of recorded trip expense payment sources">${segments}</div>`
           : '<div class="sub" style="margin-top:12px">No valued trip expenses recorded yet.</div>'}
         <div class="trip-payment-list">${rows}</div>
-        <p class="sub">${Number(p.cashFxRateTwd) > 0 ? `Cash rate: 1 ${esc(p.defaultCurrency)} ≈ ${money(p.cashFxRateTwd)} · estimated NTD for foreign-currency cash spending.` : "No trip-wide cash rate saved. Foreign-currency cash expenses cannot be included in NTD totals until the rate is entered."} Card and CTBC amounts are manually recorded exact bank charges, never converted at the cash rate.</p>
+        <p class="sub">${Number(p.cashFxRateTwd) > 0 ? `Cash rate: 1 ${esc(p.defaultCurrency)} ≈ ${cashRateLabel(p.cashFxRateTwd)} · estimated NTD for foreign-currency cash spending.` : "No trip-wide cash rate saved. Foreign-currency cash expenses cannot be included in NTD totals until the rate is entered."} Card and CTBC amounts are manually recorded exact bank charges, never converted at the cash rate.</p>
         <div class="trip-payment-funding">
           <div class="metric-label">${fundingLabel}</div>
           <strong class="trip-payment-card-target">${privateMoney(card)}</strong>
@@ -2811,10 +2817,13 @@ function projectDepositResolveView(projectId, expenseId) {
   if (!p || !x || !isRefundableDeposit(x)) return '<div class="empty">Deposit not found.</div>';
   const rules = projectCategoryRules(p);
   const selected = x.categoryId || "car_rental";
+  const cashRateDeposit = p.type === "business_trip" && x.paymentMethod === "cash" && (x.cashRateMode === "trip" || usesTripCashRate(x, p));
   return `<form id="project-deposit-form" data-project="${projectId}" data-id="${expenseId}">
     <div class="notice"><strong>${esc(x.description || x.category || "Refundable deposit")}</strong><br>Original hold: ${esc(formatOriginal(x.originalAmount, x.currency))} · ${Number(x.twdAmount) > 0 ? money(x.twdAmount) : "NTD pending"}.</div>
     <div class="field" style="margin-top:14px"><label>Refund outcome</label><select name="depositStatus"><option value="pending" ${!depositResolved(x) ? "selected" : ""}>Still pending</option><option value="refunded" ${x.depositStatus === "refunded" ? "selected" : ""}>Fully refunded / authorization released</option><option value="partial" ${x.depositStatus === "partial" ? "selected" : ""}>Partially refunded</option><option value="retained" ${x.depositStatus === "retained" ? "selected" : ""}>Not refunded</option></select></div>
-    <div class="field"><label>Amount retained (NTD)</label><input name="retainedTwd" type="number" min="0" step="1" value="${x.retainedTwd ?? ""}" placeholder="Required for partial or not refunded"></div>
+    ${cashRateDeposit
+      ? `<div class="field"><label>Amount retained (${esc(x.currency)})</label><input name="retainedOriginalAmount" type="number" min="0" max="${Number(x.originalAmount || 0)}" step="0.01" value="${x.retainedOriginalAmount ?? ""}" placeholder="The actual cash amount that was not refunded"><div class="sub">Estimated NTD uses the same Business Trip cash rate; no exact bank charge is needed.</div></div>`
+      : `<div class="field"><label>Amount retained (NTD)</label><input name="retainedTwd" type="number" min="0" step="1" value="${x.retainedTwd ?? ""}" placeholder="Required for partial or not refunded"></div>`}
     <div class="field"><label>If money was retained, classify it as</label><select name="categoryId">${rules.map((rule) => `<option value="${rule.id}" ${rule.id === selected ? "selected" : ""}>${esc(rule.name)} · ${rule.treatment === "exact" ? "Exact" : rule.treatment === "flexible" ? "Flexible" : "Tracking"}</option>`).join("")}</select></div>
     <button class="btn" style="width:100%">Save Deposit Status</button>
   </form>`;
@@ -5100,18 +5109,31 @@ async function saveProjectDeposit(form) {
   let retainedTwd = null,
     retainedOriginalAmount = null;
   if (["partial", "retained"].includes(status)) {
-    retainedTwd = Number(fd.get("retainedTwd"));
-    if (!(retainedTwd > 0) || !Number.isFinite(retainedTwd))
-      throw new Error("Enter the NTD amount that was retained.");
-    if (Number(x.twdAmount) > 0 && retainedTwd > Number(x.twdAmount) + 0.5)
-      throw new Error("The retained amount cannot exceed the original deposit hold.");
+    const rateBasedCash = p.type === "business_trip" && x.paymentMethod === "cash" && (x.cashRateMode === "trip" || usesTripCashRate(x, p));
+    if (rateBasedCash) {
+      retainedOriginalAmount = Number(fd.get("retainedOriginalAmount"));
+      if (!(retainedOriginalAmount > 0) || !Number.isFinite(retainedOriginalAmount) ||
+        retainedOriginalAmount > Number(x.originalAmount || 0) + 0.005)
+        throw new Error("Enter a retained amount in the original cash currency, up to the original deposit.");
+      if (x.currency !== "TWD" && x.currency !== p.defaultCurrency)
+        throw new Error("Cash deposit currency must match the trip currency to use its exchange rate.");
+      // No exact bank charge exists for a cash hold. The project rate supplies a
+      // derived NTD value without touching an actual card or account record.
+      retainedTwd = null;
+    } else {
+      retainedTwd = Number(fd.get("retainedTwd"));
+      if (!(retainedTwd > 0) || !Number.isFinite(retainedTwd))
+        throw new Error("Enter the NTD amount that was retained.");
+      if (Number(x.twdAmount) > 0 && retainedTwd > Number(x.twdAmount) + 0.5)
+        throw new Error("The retained amount cannot exceed the original deposit hold.");
+      retainedOriginalAmount =
+        Number(x.twdAmount) > 0
+          ? Number(x.originalAmount || 0) * (retainedTwd / Number(x.twdAmount))
+          : x.currency === "TWD"
+            ? retainedTwd
+            : null;
+    }
     if (!rule) throw new Error("Choose how the retained amount should be classified.");
-    retainedOriginalAmount =
-      Number(x.twdAmount) > 0
-        ? Number(x.originalAmount || 0) * (retainedTwd / Number(x.twdAmount))
-        : x.currency === "TWD"
-          ? retainedTwd
-          : null;
   }
   await put("projectExpenses", {
     ...x,
